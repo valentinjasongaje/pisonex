@@ -3,36 +3,47 @@ Imports System.Windows.Forms
 Namespace Services
 
     ''' <summary>
-    ''' Controls the lock screen. LockPC shows a full-screen blocking overlay.
-    ''' UnlockPC closes it and restores normal desktop access.
+    ''' Controls the lock screen.
+    ''' The LockForm is created once on the UI thread and reused —
+    ''' no SynchronizationContext needed.
     ''' </summary>
     Public Class LockManager
-        Private _lockForm As Forms.LockForm
-        Private ReadOnly _syncContext As Threading.SynchronizationContext
+
+        Private ReadOnly _lockForm As Forms.LockForm
 
         Public Sub New()
-            ' Capture the UI thread's sync context so we can marshal calls safely
-            _syncContext = Threading.SynchronizationContext.Current
+            ' Must be called from the UI thread (STAThread in Program.vb)
+            _lockForm = New Forms.LockForm()
         End Sub
 
+        ''' <summary>Returns the underlying form so Program.vb can pass it to Application.Run.</summary>
+        Public ReadOnly Property LockForm As Forms.LockForm
+            Get
+                Return _lockForm
+            End Get
+        End Property
+
         Public Sub LockPC()
-            _syncContext.Post(Sub(state)
-                If _lockForm Is Nothing OrElse _lockForm.IsDisposed Then
-                    _lockForm = New Forms.LockForm()
-                End If
-                If Not _lockForm.Visible Then
-                    _lockForm.Show()
-                End If
-            End Sub, Nothing)
+            If _lockForm.InvokeRequired Then
+                _lockForm.Invoke(Sub() LockPC())
+                Return
+            End If
+            If Not _lockForm.Visible Then
+                _lockForm.Show()
+            End If
+            _lockForm.BringToFront()
         End Sub
 
         Public Sub UnlockPC()
-            _syncContext.Post(Sub(state)
-                If _lockForm IsNot Nothing AndAlso Not _lockForm.IsDisposed Then
-                    _lockForm.Hide()
-                End If
-            End Sub, Nothing)
+            If _lockForm.InvokeRequired Then
+                _lockForm.Invoke(Sub() UnlockPC())
+                Return
+            End If
+            If _lockForm.Visible Then
+                _lockForm.Hide()
+            End If
         End Sub
+
     End Class
 
 End Namespace

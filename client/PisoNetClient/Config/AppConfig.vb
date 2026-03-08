@@ -7,7 +7,7 @@ Namespace Config
         Public ReadOnly Property ServerUrl As String
             Get
                 Dim val = ReadReg("ServerUrl")
-                Return If(String.IsNullOrWhiteSpace(val), "http://192.168.1.10:8000", val)
+                Return If(String.IsNullOrWhiteSpace(val), "http://192.168.1.21:8000", val)
             End Get
         End Property
 

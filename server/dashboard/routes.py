@@ -1,18 +1,100 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request, Depends, Form
+from typing import Optional
+
+from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
+from jose import JWTError, jwt
+import bcrypt
 
-from database import get_db, SessionLocal
-from models import CoinTransaction, SystemLog, CoinRate
+from database import get_db
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate
+from schemas import AdminAddTimeRequest
 from services.session_service import SessionService
 from config import settings
 
 router = APIRouter(prefix="/dashboard")
 templates = Jinja2Templates(directory="dashboard/templates")
 
+_ALGORITHM = "HS256"
+_COOKIE_NAME = "pisonet_session"
+
+
+# ── Session cookie helpers ────────────────────────────────────────────────────
+
+def _validate_session(pisonet_session: str = Cookie(default=None)) -> Optional[str]:
+    """Returns the admin username from the session cookie, or None if invalid/absent."""
+    if not pisonet_session:
+        return None
+    try:
+        payload = jwt.decode(pisonet_session, settings.SECRET_KEY, algorithms=[_ALGORITHM])
+        username: str = payload.get("sub")
+        return username if username else None
+    except JWTError:
+        return None
+
+
+def _create_session_token(username: str) -> str:
+    payload = {
+        "sub": username,
+        "role": "admin",
+        "exp": datetime.utcnow() + timedelta(hours=settings.TOKEN_EXPIRE_HOURS),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=_ALGORITHM)
+
+
+# ── Login / Logout ────────────────────────────────────────────────────────────
+
+@router.get("/login", response_class=HTMLResponse)
+def login_page(
+    request: Request,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if current_user:
+        return RedirectResponse("/dashboard", status_code=302)
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+
+@router.post("/login")
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    admin = db.query(AdminUser).filter(AdminUser.username == username).first()
+    valid = admin and bcrypt.checkpw(
+        password.encode("utf-8"), admin.password.encode("utf-8")
+    )
+    if not valid:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid username or password"},
+            status_code=401,
+        )
+
+    token = _create_session_token(admin.username)
+    response = RedirectResponse("/dashboard", status_code=302)
+    response.set_cookie(
+        _COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=int(timedelta(hours=settings.TOKEN_EXPIRE_HOURS).total_seconds()),
+    )
+    return response
+
+
+@router.get("/logout")
+def logout():
+    response = RedirectResponse("/dashboard/login", status_code=302)
+    response.delete_cookie(_COOKIE_NAME)
+    return response
+
+
+# ── Shared data helper ────────────────────────────────────────────────────────
 
 def _pc_overview_data(db: Session):
     svc = SessionService(db)
@@ -55,9 +137,17 @@ def _pc_overview_data(db: Session):
     return pc_data, online_count, active_count, int(today_row)
 
 
+# ── Protected page routes ─────────────────────────────────────────────────────
+
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
-def overview(request: Request, db: Session = Depends(get_db)):
+def overview(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
     pcs, online_count, active_count, today_pesos = _pc_overview_data(db)
     return templates.TemplateResponse("overview.html", {
         "request": request,
@@ -69,9 +159,15 @@ def overview(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/partials/pc-grid", response_class=HTMLResponse)
-def pc_grid_partial(request: Request, db: Session = Depends(get_db)):
+def pc_grid_partial(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
     """HTMX partial — returns only the PC grid div for auto-refresh."""
-    pcs, online_count, active_count, today_pesos = _pc_overview_data(db)
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    pcs, _, _, _ = _pc_overview_data(db)
     return templates.TemplateResponse("partials/pc_grid.html", {
         "request": request,
         "pcs": pcs,
@@ -79,7 +175,13 @@ def pc_grid_partial(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/rates", response_class=HTMLResponse)
-def rates_page(request: Request, db: Session = Depends(get_db)):
+def rates_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
     rates = (
         db.query(CoinRate)
         .filter(CoinRate.is_active == True)
@@ -98,7 +200,10 @@ def save_rate(
     pesos: int = Form(...),
     minutes: int = Form(...),
     db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
 ):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
     existing = db.query(CoinRate).filter(
         CoinRate.pesos == pesos, CoinRate.is_active == True
     ).first()
@@ -130,7 +235,10 @@ def transactions_page(
     request: Request,
     days: int = 30,
     db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
 ):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
     since = datetime.utcnow() - timedelta(days=days)
     transactions = (
         db.query(CoinTransaction)
@@ -149,7 +257,13 @@ def transactions_page(
 
 
 @router.get("/logs", response_class=HTMLResponse)
-def logs_page(request: Request, db: Session = Depends(get_db)):
+def logs_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
     logs = (
         db.query(SystemLog)
         .order_by(desc(SystemLog.created_at))
@@ -160,3 +274,49 @@ def logs_page(request: Request, db: Session = Depends(get_db)):
         "request": request,
         "logs": logs,
     })
+
+
+# ── Dashboard action API (cookie-authenticated) ───────────────────────────────
+# These endpoints are called by admin.js — they use the session cookie
+# instead of a JWT Bearer header, so no token management is needed in JS.
+
+@router.post("/api/pc/add-time")
+def dashboard_add_time(
+    body: AdminAddTimeRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Admin manually adds minutes to a PC — called from the dashboard UI."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    svc = SessionService(db)
+    pc = svc.get_pc(body.pc_number)
+    if not pc:
+        raise HTTPException(status_code=404, detail=f"PC {body.pc_number} not found")
+    if body.minutes <= 0:
+        raise HTTPException(status_code=422, detail="Minutes must be greater than 0")
+
+    session = svc.add_time_minutes(body.pc_number, body.minutes)
+    return {
+        "pc_number": body.pc_number,
+        "minutes_added": body.minutes,
+        "total_minutes": session.minutes_granted,
+    }
+
+
+@router.post("/api/pc/{pc_number}/lock")
+def dashboard_lock_pc(
+    pc_number: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Admin remotely locks (ends session on) a PC — called from the dashboard UI."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    svc = SessionService(db)
+    ok = svc.end_session(pc_number)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"PC {pc_number} not found")
+    return {"status": "locked", "pc_number": pc_number}

@@ -31,11 +31,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const pcNumber = form.querySelector('[name="pc_number"]').value;
     const minutes  = form.querySelector('[name="minutes"]').value;
 
-    const res = await fetch('/api/admin/pc/add-time', {
+    const res = await fetch('/dashboard/api/pc/add-time', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pc_number: parseInt(pcNumber), minutes: parseInt(minutes) }),
     });
+
+    if (res.status === 401) {
+      // Session expired — redirect to login
+      window.location.href = '/dashboard/login';
+      return;
+    }
 
     if (res.ok) {
       closeModal();

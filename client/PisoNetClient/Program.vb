@@ -6,7 +6,7 @@ Imports PisoNetClient.Forms
 
 Module Program
 
-    Private _api As ApiService
+    Private _api     As ApiService
     Private _lockMgr As LockManager
     Private _session As SessionManager
     Private _overlay As TimerOverlay
@@ -19,47 +19,55 @@ Module Program
         ' Register for auto-start on Windows boot
         RegisterStartup()
 
-        ' Initialize services
-        _api = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
+        ' ── Create all services on the UI (STA) thread ────────────────
+        ' LockManager creates the LockForm here — must be on UI thread
+        _api     = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
         _lockMgr = New LockManager()
         _session = New SessionManager(_api, _lockMgr)
         _overlay = New TimerOverlay()
 
-        ' Wire up events
-        AddHandler _session.TimeUpdated, AddressOf OnTimeUpdated
-        AddHandler _session.SessionStarted, AddressOf OnSessionStarted
-        AddHandler _session.SessionEnded, AddressOf OnSessionEnded
-        AddHandler _session.ServerConnectionLost, AddressOf OnConnectionLost
+        ' ── Wire up events ────────────────────────────────────────────
+        AddHandler _session.TimeUpdated,           AddressOf OnTimeUpdated
+        AddHandler _session.SessionStarted,        AddressOf OnSessionStarted
+        AddHandler _session.SessionEnded,          AddressOf OnSessionEnded
+        AddHandler _session.ServerConnectionLost,  AddressOf OnConnectionLost
         AddHandler _session.ServerConnectionRestored, AddressOf OnConnectionRestored
 
-        ' Register this PC with the server (fire and forget)
+        ' ── Register PC with server (fire and forget) ─────────────────
         Task.Run(Async Function()
             Await _api.RegisterAsync()
         End Function)
 
-        ' Start polling
+        ' ── Start heartbeat + local countdown ────────────────────────
         _session.Start()
 
-        ' Lock on startup — server will unlock when it responds
+        ' ── Show lock screen and start message loop ───────────────────
+        ' LockForm was created on this thread so Show() is safe here.
+        ' Application.Run() keeps the message loop alive until the
+        ' process exits — it does NOT block on the lock form alone.
         _lockMgr.LockPC()
-
-        ' Keep the app alive (message loop)
         Application.Run()
     End Sub
 
-    ' ── Event handlers ────────────────────────────────────────────────
+    ' ── Event handlers (called from background threads via Invoke) ────
 
     Private Sub OnTimeUpdated(minutes As Integer, seconds As Integer)
         _overlay.UpdateTime(minutes, seconds)
     End Sub
 
     Private Sub OnSessionStarted()
-        If Not _overlay.Visible Then
-            _overlay.Show()
+        If _overlay.InvokeRequired Then
+            _overlay.Invoke(Sub() OnSessionStarted())
+            Return
         End If
+        If Not _overlay.Visible Then _overlay.Show()
     End Sub
 
     Private Sub OnSessionEnded()
+        If _overlay.InvokeRequired Then
+            _overlay.Invoke(Sub() OnSessionEnded())
+            Return
+        End If
         _overlay.Hide()
     End Sub
 
@@ -76,12 +84,11 @@ Module Program
     Private Sub RegisterStartup()
         Try
             Dim key = Registry.CurrentUser.OpenSubKey(
-                "SOFTWARE\Microsoft\Windows\CurrentVersion\Run", True
-            )
+                "SOFTWARE\Microsoft\Windows\CurrentVersion\Run", True)
             Dim exePath = Application.ExecutablePath
             key?.SetValue("PisoNetClient", $"""{exePath}""")
-        Catch ex As Exception
-            ' Non-fatal: app will still work, just won't auto-start
+        Catch
+            ' Non-fatal — app still works, just won't auto-start next boot
         End Try
     End Sub
 

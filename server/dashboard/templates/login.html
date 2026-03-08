@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PisoNet — Admin Login</title>
+  <link rel="stylesheet" href="/static/css/admin.css" />
+</head>
+<body class="login-body">
+
+  <div class="login-card">
+
+    <div class="login-logo">
+      <span class="logo-icon">🖥</span>
+      <span>PisoNet Admin</span>
+    </div>
+
+    {% if error %}
+    <div class="login-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/dashboard/login" class="login-form">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input
+          id="username"
+          type="text"
+          name="username"
+          placeholder="admin"
+          required
+          autofocus
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input
+          id="password"
+          type="password"
+          name="password"
+          placeholder="••••••••"
+          required
+        />
+      </div>
+
+      <button type="submit" class="btn btn-primary login-btn">Sign In</button>
+    </form>
+
+  </div>
+
+</body>
+</html>

@@ -340,3 +340,87 @@ input:focus, select:focus {
 }
 
 .filter-bar { display: flex; gap: 10px; }
+
+/* ── Login page ────────────────────────────────────────────── */
+.login-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 40px 36px;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.login-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: var(--red);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-form input {
+  width: 100%;
+  min-width: unset;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 15px;
+  margin-top: 4px;
+}
+
+/* ── Sidebar logout link ───────────────────────────────────── */
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.logout-link {
+  display: block;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 0;
+  transition: color 0.15s;
+}
+
+.logout-link:hover {
+  color: var(--red);
+}
+
+.version {
+  color: var(--gray);
+  font-size: 12px;
+}
