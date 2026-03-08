@@ -64,11 +64,16 @@ print('Database initialized')
 echo ""
 echo "[6/8] Installing systemd service..."
 
-# Patch the service file with the actual project path
+# Patch the service file with the actual project path AND actual username
+# (newer Raspberry Pi OS uses custom usernames, not always 'pi')
 SERVICE_SRC="$PROJECT_ROOT/deploy/pisonet.service"
 SERVICE_TMP="/tmp/pisonet.service"
 
-sed "s|/home/pi/pisonet|$PROJECT_ROOT|g" "$SERVICE_SRC" > "$SERVICE_TMP"
+CURRENT_USER="$USER"
+echo "Running as user: $CURRENT_USER"
+
+sed "s|/home/pi/pisonet|$PROJECT_ROOT|g; s|User=pi|User=$CURRENT_USER|g; s|Group=pi|Group=$CURRENT_USER|g" \
+    "$SERVICE_SRC" > "$SERVICE_TMP"
 
 sudo cp "$SERVICE_TMP" /etc/systemd/system/pisonet.service
 sudo systemctl daemon-reload
