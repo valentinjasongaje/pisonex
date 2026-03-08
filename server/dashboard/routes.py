@@ -397,6 +397,40 @@ def monitor_page(
     })
 
 
+@router.get("/monitor/status")
+def monitor_status(
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """JSON snapshot of all PC statuses for the monitor page live-update."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    import screenshot_store
+    svc = SessionService(db)
+    pcs = svc.get_all_pcs()
+    timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+
+    result = []
+    for pc in pcs:
+        if pc.last_seen and pc.last_seen < timeout:
+            pc.is_online = False
+        session = svc.get_active_session(pc.pc_number)
+        remaining_sec = svc.remaining_seconds(session)
+        result.append({
+            "pc_number": pc.pc_number,
+            "name": pc.name,
+            "is_online": pc.is_online,
+            "is_locked": pc.is_locked,
+            "remaining_minutes": remaining_sec // 60,
+            "remaining_seconds": remaining_sec % 60,
+            "remaining_total_sec": remaining_sec,
+            "has_screenshot": screenshot_store.get(pc.pc_number) is not None,
+        })
+    db.commit()
+    return result
+
+
 @router.get("/api/pc/{pc_number}/screenshot")
 def serve_screenshot(
     pc_number: int,

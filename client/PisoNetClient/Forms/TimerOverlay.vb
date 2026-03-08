@@ -1,22 +1,34 @@
 Imports System.Drawing
+Imports System.Runtime.InteropServices
 Imports System.Windows.Forms
 
 Namespace Forms
 
     ''' <summary>
     ''' Small floating timer shown in the top-right corner when a session is active.
-    ''' Shows remaining time and server connection status.
+    ''' • Left-click-drag uses native Win32 caption drag (smooth, zero lag).
+    ''' • Right-click shows a context menu to hide or reset position.
     ''' </summary>
     Public Class TimerOverlay
         Inherits Form
 
-        ' Background colour used for the form AND all child controls so
-        ' no "white flash" appears.  Do NOT use Opacity — layered windows
-        ' (WS_EX_LAYERED) skip the normal WM_PAINT cycle and render white.
         Private Shared ReadOnly BgColor As Color = Color.FromArgb(18, 22, 38)
 
         Private _lblTime   As Label
         Private _lblStatus As Label
+
+        ' ── Native drag (zero-lag, handled by Windows DWM) ───────────────────
+        <DllImport("user32.dll", CharSet:=CharSet.Auto)>
+        Private Shared Function ReleaseCapture() As Boolean
+        End Function
+
+        <DllImport("user32.dll", CharSet:=CharSet.Auto)>
+        Private Shared Function SendMessage(hWnd As IntPtr, msg As Integer,
+                                            wParam As IntPtr, lParam As IntPtr) As IntPtr
+        End Function
+
+        Private Const WM_NCLBUTTONDOWN As Integer = &HA1
+        Private Const HTCAPTION        As Integer = 2
 
         Public Sub New()
             InitializeComponent()
@@ -29,22 +41,15 @@ Namespace Forms
             Me.TopMost           = True
             Me.Size              = New Size(164, 58)
             Me.BackColor         = BgColor
-            ' ──────────────────────────────────────────────────────────────
-            ' NOTE: Me.Opacity is intentionally NOT set.
-            ' Setting Opacity causes WinForms to add WS_EX_LAYERED, which
-            ' routes all painting through UpdateLayeredWindow instead of
-            ' WM_PAINT.  Child label BackColor = Transparent then resolves
-            ' to white (system default) rather than the form background.
-            ' ──────────────────────────────────────────────────────────────
             Me.StartPosition     = FormStartPosition.Manual
-            Me.Cursor            = Cursors.SizeAll   ' Shows a move cursor; no spinner
+            Me.Cursor            = Cursors.SizeAll
 
             PositionToCorner()
 
             _lblTime = New Label() With {
                 .Font      = New Font("Segoe UI", 22, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(34, 197, 94),
-                .BackColor = BgColor,               ' Must match form — NOT Transparent
+                .BackColor = BgColor,
                 .Text      = "--:--",
                 .AutoSize  = False,
                 .Size      = New Size(164, 40),
@@ -55,7 +60,7 @@ Namespace Forms
             _lblStatus = New Label() With {
                 .Font      = New Font("Segoe UI", 8),
                 .ForeColor = Color.FromArgb(100, 116, 139),
-                .BackColor = BgColor,               ' Must match form — NOT Transparent
+                .BackColor = BgColor,
                 .Text      = "Connected",
                 .AutoSize  = False,
                 .Size      = New Size(164, 16),
@@ -65,10 +70,10 @@ Namespace Forms
 
             Me.Controls.AddRange({_lblTime, _lblStatus})
 
-            ' Allow clicking anywhere on the overlay to drag it
-            AddHandler Me.MouseDown,         AddressOf StartDrag
-            AddHandler _lblTime.MouseDown,   AddressOf StartDrag
-            AddHandler _lblStatus.MouseDown, AddressOf StartDrag
+            ' Left-click drag on every surface
+            AddHandler Me.MouseDown,         AddressOf OnMouseDown
+            AddHandler _lblTime.MouseDown,   AddressOf OnMouseDown
+            AddHandler _lblStatus.MouseDown, AddressOf OnMouseDown
         End Sub
 
         Private Sub PositionToCorner()
@@ -76,7 +81,7 @@ Namespace Forms
             Me.Location = New Point(wa.Right - Me.Width - 12, wa.Top + 12)
         End Sub
 
-        ' ── Public API ────────────────────────────────────────────────────
+        ' ── Public API ─────────────────────────────────────────────────────────
 
         Public Sub UpdateTime(minutes As Integer, seconds As Integer)
             If Me.InvokeRequired Then
@@ -86,8 +91,8 @@ Namespace Forms
             _lblTime.Text = $"{minutes:D2}:{seconds:D2}"
             _lblTime.ForeColor = If(
                 minutes < 5,
-                Color.FromArgb(239, 68, 68),    ' Red when < 5 min left
-                Color.FromArgb(34, 197, 94))    ' Green otherwise
+                Color.FromArgb(239, 68, 68),
+                Color.FromArgb(34, 197, 94))
         End Sub
 
         Public Sub ShowConnected()
@@ -108,32 +113,41 @@ Namespace Forms
             _lblStatus.ForeColor = Color.FromArgb(245, 158, 11)
         End Sub
 
-        ' ── Drag support ──────────────────────────────────────────────────
+        ' ── Mouse handling ─────────────────────────────────────────────────────
 
-        Private _dragging  As Boolean = False
-        Private _dragStart As Point
-
-        Private Sub StartDrag(sender As Object, e As MouseEventArgs)
+        Private Sub OnMouseDown(sender As Object, e As MouseEventArgs)
             If e.Button = MouseButtons.Left Then
-                _dragging  = True
-                _dragStart = e.Location
-                AddHandler Me.MouseMove, AddressOf OnDrag
-                AddHandler Me.MouseUp,   AddressOf StopDrag
+                ' Let Windows handle the drag natively — no jitter, perfect tracking
+                ReleaseCapture()
+                SendMessage(Me.Handle, WM_NCLBUTTONDOWN, New IntPtr(HTCAPTION), IntPtr.Zero)
+
+            ElseIf e.Button = MouseButtons.Right Then
+                ShowContextMenu()
             End If
         End Sub
 
-        Private Sub OnDrag(sender As Object, e As MouseEventArgs)
-            If _dragging Then
-                Me.Location = New Point(
-                    Me.Left + e.X - _dragStart.X,
-                    Me.Top  + e.Y - _dragStart.Y)
-            End If
-        End Sub
+        Private Sub ShowContextMenu()
+            Dim menu = New ContextMenuStrip() With {
+                .BackColor = Color.FromArgb(26, 30, 46),
+                .ForeColor = Color.White,
+                .Font      = New Font("Segoe UI", 9)
+            }
 
-        Private Sub StopDrag(sender As Object, e As MouseEventArgs)
-            _dragging = False
-            RemoveHandler Me.MouseMove, AddressOf OnDrag
-            RemoveHandler Me.MouseUp,   AddressOf StopDrag
+            Dim itemHide = New ToolStripMenuItem("Hide Timer") With {
+                .ForeColor = Color.FromArgb(220, 228, 240)
+            }
+            AddHandler itemHide.Click, Sub(s, e) Me.Hide()
+
+            Dim itemReset = New ToolStripMenuItem("Reset Position") With {
+                .ForeColor = Color.FromArgb(220, 228, 240)
+            }
+            AddHandler itemReset.Click, Sub(s, e) PositionToCorner()
+
+            menu.Items.Add(itemHide)
+            menu.Items.Add(New ToolStripSeparator())
+            menu.Items.Add(itemReset)
+
+            menu.Show(Me, Me.PointToClient(Control.MousePosition))
         End Sub
 
     End Class

@@ -8,16 +8,13 @@ Namespace Forms
 
     ''' <summary>
     ''' Admin configuration panel — accessible only after entering the correct PIN.
-    ''' Provides: connection settings, lock-screen appearance, Windows restrictions,
-    ''' warning preferences, PIN change, and screen monitoring options.
     ''' </summary>
     Public Class AdminPanel
         Inherits Form
 
-        ' Raised when the admin chooses to exit the application
         Public Event ExitRequested()
 
-        ' ── Controls referenced across methods ────────────────────────────
+        ' ── Controls ──────────────────────────────────────────────────────────
         Private _txtUrl         As TextBox
         Private _nudPcNum       As NumericUpDown
         Private _picColor       As PictureBox
@@ -34,13 +31,16 @@ Namespace Forms
         Private _nudQuality     As NumericUpDown
         Private _txtPin         As TextBox
         Private _txtPin2        As TextBox
+        Private _chkNotifs      As CheckBox
+        Private _chkVoice       As CheckBox
+        Private _nudVolume      As NumericUpDown
         Private _currentBgColor As Color
 
-        ' Layout constants
-        Private Const W   As Integer = 630   ' form width
-        Private Const TW  As Integer = 590   ' tab control width
-        Private Const IW  As Integer = 554   ' inner usable width
-        Private Const LM  As Integer = 14    ' left margin inside tab
+        ' Layout — wider so all labels have room
+        Private Const W   As Integer = 720
+        Private Const TW  As Integer = 680
+        Private Const IW  As Integer = 644
+        Private Const LM  As Integer = 14
 
         Public Sub New()
             _currentBgColor = Color.FromArgb(AppConfig.LockBgArgb)
@@ -50,7 +50,7 @@ Namespace Forms
         Private Sub InitializeComponent()
             Me.Text            = "PisoNet Admin Panel"
             Me.FormBorderStyle = FormBorderStyle.FixedDialog
-            Me.Size            = New Size(W, 590)
+            Me.Size            = New Size(W, 600)
             Me.StartPosition   = FormStartPosition.CenterScreen
             Me.MaximizeBox     = False
             Me.MinimizeBox     = False
@@ -58,10 +58,9 @@ Namespace Forms
             Me.ForeColor       = Color.White
             Me.Font            = New Font("Segoe UI", 9)
 
-            ' ── Tab control ───────────────────────────────────────────────
             Dim tabs = New TabControl() With {
                 .Location   = New Point(14, 14),
-                .Size       = New Size(TW, 468),
+                .Size       = New Size(TW, 480),
                 .Appearance = TabAppearance.Normal,
                 .Font       = New Font("Segoe UI", 9)
             }
@@ -71,11 +70,11 @@ Namespace Forms
             tabs.TabPages.Add(BuildLockScreenTab())
             tabs.TabPages.Add(BuildRestrictionsTab())
             tabs.TabPages.Add(BuildSecurityTab())
+            tabs.TabPages.Add(BuildNotificationsTab())
 
-            ' ── Bottom buttons ────────────────────────────────────────────
-            Dim btnSave  = MakeBtn("Save & Apply",    New Point(14,  498), Color.FromArgb(59, 130, 246))
-            Dim btnExit  = MakeBtn("Exit Application", New Point(172, 498), Color.FromArgb(220, 38, 38))
-            Dim btnClose = MakeBtn("Close",            New Point(468, 498), Color.FromArgb(42, 46, 64))
+            Dim btnSave  = MakeBtn("Save & Apply",     New Point(14,  510), Color.FromArgb(59, 130, 246))
+            Dim btnExit  = MakeBtn("Exit Application", New Point(176, 510), Color.FromArgb(220, 38, 38))
+            Dim btnClose = MakeBtn("Close",            New Point(560, 510), Color.FromArgb(42, 46, 64))
 
             AddHandler btnSave.Click,  AddressOf OnSave
             AddHandler btnExit.Click,  AddressOf OnExitApp
@@ -84,7 +83,7 @@ Namespace Forms
             Me.Controls.AddRange({btnSave, btnExit, btnClose})
         End Sub
 
-        ' ── Tab builders ──────────────────────────────────────────────────
+        ' ── Tab builders ──────────────────────────────────────────────────────
 
         Private Function BuildConnectionTab() As TabPage
             Dim tab = DarkTab("  Connection")
@@ -112,7 +111,6 @@ Namespace Forms
             Dim tab = DarkTab("  Lock Screen")
             Dim y = 18
 
-            ' Background color
             tab.Controls.Add(SectionLabel("Background Color", New Point(LM, y))) : y += 22
             _picColor = New PictureBox() With {
                 .Location    = New Point(LM, y),
@@ -128,9 +126,8 @@ Namespace Forms
 
             tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
 
-            ' Background image
             tab.Controls.Add(SectionLabel("Background Image", New Point(LM, y)))
-            tab.Controls.Add(InfoLabel("(overrides color when set)", New Point(LM + 136, y + 3)))
+            tab.Controls.Add(InfoLabel("(overrides color when set)", New Point(LM + 148, y + 3)))
             y += 22
             _txtImgPath = DarkTextBox(New Point(LM, y), IW - 102, AppConfig.LockBgImagePath)
             tab.Controls.Add(_txtImgPath)
@@ -147,7 +144,6 @@ Namespace Forms
 
             tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
 
-            ' Lock message
             tab.Controls.Add(SectionLabel("Lock Screen Message", New Point(LM, y))) : y += 22
             _txtMsg = DarkTextBox(New Point(LM, y), IW, AppConfig.LockMessage)
             tab.Controls.Add(_txtMsg)
@@ -165,7 +161,6 @@ Namespace Forms
                 New Point(LM, y))) : y += 44
 
             tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-
             tab.Controls.Add(SectionLabel("Windows Restrictions", New Point(LM, y))) : y += 26
 
             _chkTasks = DarkCheck("Disable Task Manager",       New Point(LM, y), AppConfig.DisableTaskManager)   : tab.Controls.Add(_chkTasks) : y += 30
@@ -186,35 +181,34 @@ Namespace Forms
             Dim tab = DarkTab("  Security")
             Dim y = 18
 
-            ' ── PIN change (two columns) ───────────────────────────────────
-            tab.Controls.Add(SectionLabel("Change Admin PIN", New Point(LM, y))) : y += 22
-            tab.Controls.Add(InfoLabel("Leave blank to keep the current PIN.", New Point(LM, y))) : y += 22
+            ' ── Admin PIN ────────────────────────────────────────────────────
+            tab.Controls.Add(SectionLabel("Change Admin PIN", New Point(LM, y))) : y += 24
+            tab.Controls.Add(InfoLabel("Leave blank to keep the current PIN.", New Point(LM, y))) : y += 26
 
-            Dim col2 = LM + 188
+            Dim col2 = LM + 224
             tab.Controls.Add(SmallLabel("New PIN",     New Point(LM,   y)))
             tab.Controls.Add(SmallLabel("Confirm PIN", New Point(col2, y))) : y += 18
-            _txtPin  = DarkTextBox(New Point(LM,   y), 166, "", pwChar:="●"c) : tab.Controls.Add(_txtPin)
-            _txtPin2 = DarkTextBox(New Point(col2, y), 166, "", pwChar:="●"c) : tab.Controls.Add(_txtPin2)
+            _txtPin  = DarkTextBox(New Point(LM,   y), 200, "", pwChar:="●"c) : tab.Controls.Add(_txtPin)
+            _txtPin2 = DarkTextBox(New Point(col2, y), 200, "", pwChar:="●"c) : tab.Controls.Add(_txtPin2)
             y += 42
 
             tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
 
-            ' ── Low-time warnings ─────────────────────────────────────────
+            ' ── Low-time warnings ────────────────────────────────────────────
             tab.Controls.Add(SectionLabel("Low-Time Warnings", New Point(LM, y)))
-            tab.Controls.Add(InfoLabel("(tray balloon notification)", New Point(LM + 152, y + 3))) : y += 26
+            tab.Controls.Add(InfoLabel("(tray balloon notification)", New Point(LM + 160, y + 3))) : y += 26
             _chkWarn5 = DarkCheck("Warn at 5 minutes remaining", New Point(LM, y), AppConfig.WarnAt5Min) : tab.Controls.Add(_chkWarn5) : y += 28
             _chkWarn1 = DarkCheck("Warn at 1 minute remaining",  New Point(LM, y), AppConfig.WarnAt1Min) : tab.Controls.Add(_chkWarn1) : y += 38
 
             tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
 
-            ' ── Screen monitoring ──────────────────────────────────────────
+            ' ── Screen monitoring ────────────────────────────────────────────
             tab.Controls.Add(SectionLabel("Screen Monitoring", New Point(LM, y))) : y += 26
             _chkCapture = DarkCheck(
                 "Enable remote screen capture (uploads screenshots to admin dashboard)",
                 New Point(LM, y), AppConfig.ScreenCaptureEnabled)
             tab.Controls.Add(_chkCapture) : y += 32
 
-            ' Interval + Quality inline
             Dim col3 = LM + 160
             tab.Controls.Add(SmallLabel("Interval (sec)",       New Point(LM,   y)))
             tab.Controls.Add(SmallLabel("JPEG Quality (30–95)", New Point(col3, y))) : y += 18
@@ -232,7 +226,52 @@ Namespace Forms
             Return tab
         End Function
 
-        ' ── Event handlers ────────────────────────────────────────────────
+        Private Function BuildNotificationsTab() As TabPage
+            Dim tab = DarkTab("  Notifications")
+            Dim y = 18
+
+            ' ── On-screen toasts ─────────────────────────────────────────────
+            tab.Controls.Add(SectionLabel("On-Screen Notifications", New Point(LM, y))) : y += 26
+            _chkNotifs = DarkCheck(
+                "Show animated toast notifications for time added and low-time warnings",
+                New Point(LM, y), AppConfig.NotificationsEnabled)
+            tab.Controls.Add(_chkNotifs) : y += 32
+            tab.Controls.Add(InfoLabel(
+                "Toasts slide in from the right edge of the screen and auto-dismiss after 4 seconds." &
+                " Click a toast to dismiss it early.",
+                New Point(LM, y))) : y += 44
+
+            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
+
+            ' ── Voice announcements ───────────────────────────────────────────
+            tab.Controls.Add(SectionLabel("Voice Announcements", New Point(LM, y))) : y += 26
+            _chkVoice = DarkCheck(
+                "Read notifications aloud using Windows text-to-speech (SAPI)",
+                New Point(LM, y), AppConfig.VoiceEnabled)
+            tab.Controls.Add(_chkVoice) : y += 32
+
+            tab.Controls.Add(SmallLabel("Volume (10–100)", New Point(LM, y))) : y += 18
+            _nudVolume = DarkNud(New Point(LM, y), 80, AppConfig.VoiceVolume, 10, 100)
+            tab.Controls.Add(_nudVolume) : y += 36
+
+            tab.Controls.Add(InfoLabel(
+                "Voice works even when visual toasts are disabled — useful for players" &
+                " focused on full-screen games who cannot see on-screen popups.",
+                New Point(LM, y))) : y += 44
+
+            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
+
+            ' ── Timer overlay hint ────────────────────────────────────────────
+            tab.Controls.Add(SectionLabel("Timer Overlay", New Point(LM, y))) : y += 26
+            tab.Controls.Add(InfoLabel(
+                "Right-click the timer to hide it or reset its position." &
+                " It reappears automatically when a new session starts.",
+                New Point(LM, y)))
+
+            Return tab
+        End Function
+
+        ' ── Handlers ──────────────────────────────────────────────────────────
 
         Private Sub OnPickColor(sender As Object, e As EventArgs)
             Dim dlg = New ColorDialog() With {.Color = _currentBgColor, .FullOpen = True}
@@ -254,7 +293,6 @@ Namespace Forms
         End Sub
 
         Private Sub OnSave(sender As Object, e As EventArgs)
-            ' Validate PIN change
             Dim newPin  = _txtPin.Text.Trim()
             Dim newPin2 = _txtPin2.Text.Trim()
             If newPin.Length > 0 Then
@@ -273,7 +311,6 @@ Namespace Forms
                 AppConfig.SaveAdminPin(newPin)
             End If
 
-            ' Save all settings
             AppConfig.SaveServerUrl(_txtUrl.Text.Trim())
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
             AppConfig.SaveLockBgArgb(_currentBgColor.ToArgb())
@@ -288,8 +325,10 @@ Namespace Forms
             AppConfig.SaveScreenCaptureEnabled(_chkCapture.Checked)
             AppConfig.SaveScreenCaptureIntervalSec(CInt(_nudInterval.Value))
             AppConfig.SaveScreenCaptureQuality(CInt(_nudQuality.Value))
+            AppConfig.SaveNotificationsEnabled(_chkNotifs.Checked)
+            AppConfig.SaveVoiceEnabled(_chkVoice.Checked)
+            AppConfig.SaveVoiceVolume(CInt(_nudVolume.Value))
 
-            ' Re-apply Windows restrictions with updated settings
             WindowsPolicy.Apply()
 
             MessageBox.Show("Settings saved." & vbCrLf &
@@ -305,7 +344,7 @@ Namespace Forms
             If result = DialogResult.Yes Then RaiseEvent ExitRequested()
         End Sub
 
-        ' ── UI factory helpers ─────────────────────────────────────────────
+        ' ── UI factory helpers ────────────────────────────────────────────────
 
         Private Shared Function DarkTab(title As String) As TabPage
             Return New TabPage(title) With {
@@ -314,7 +353,6 @@ Namespace Forms
             }
         End Function
 
-        ''' <summary>Bold accent-colored section heading.</summary>
         Private Shared Function SectionLabel(text As String, loc As Point) As Label
             Return New Label() With {
                 .Text      = text,
@@ -325,19 +363,17 @@ Namespace Forms
             }
         End Function
 
-        ''' <summary>Small muted helper/caption label.</summary>
         Private Shared Function InfoLabel(text As String, loc As Point) As Label
             Return New Label() With {
                 .Text      = text,
                 .AutoSize  = False,
-                .Size      = New Size(554, 32),
+                .Size      = New Size(IW, 40),
                 .Location  = loc,
                 .Font      = New Font("Segoe UI", 8),
                 .ForeColor = Color.FromArgb(94, 110, 140)
             }
         End Function
 
-        ''' <summary>Small white field label (above input controls).</summary>
         Private Shared Function SmallLabel(text As String, loc As Point) As Label
             Return New Label() With {
                 .Text      = text,
@@ -348,7 +384,6 @@ Namespace Forms
             }
         End Function
 
-        ''' <summary>Thin horizontal divider line.</summary>
         Private Shared Function Rule(loc As Point, width As Integer) As Panel
             Return New Panel() With {
                 .Location  = loc,
@@ -402,7 +437,7 @@ Namespace Forms
             Dim b = New Button() With {
                 .Text      = text,
                 .Location  = loc,
-                .Size      = New Size(148, 36),
+                .Size      = New Size(152, 36),
                 .BackColor = bgColor,
                 .ForeColor = Color.White,
                 .FlatStyle = FlatStyle.Flat,

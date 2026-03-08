@@ -10,7 +10,7 @@ Namespace Services
     ''' <summary>
     ''' Captures the primary screen every 5 seconds and uploads a JPEG
     ''' thumbnail to the server so admins can monitor PCs remotely.
-    ''' Only captures while a session is active (PC is unlocked).
+    ''' Captures continuously while enabled — including the lock screen.
     ''' </summary>
     Public Class ScreenCaptureService
         Implements IDisposable
@@ -34,9 +34,7 @@ Namespace Services
         End Sub
 
         Private Async Sub OnCaptureTick(sender As Object, e As ElapsedEventArgs)
-            ' Skip when disabled in config or PC is locked
             If Not AppConfig.ScreenCaptureEnabled Then Return
-            If _session.IsLocked Then Return
             Try
                 Dim jpeg = CaptureScreen()
                 Await _api.UploadScreenshotAsync(jpeg)

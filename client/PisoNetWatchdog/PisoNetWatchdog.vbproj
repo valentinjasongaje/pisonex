@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PisoNetWatchdog</RootNamespace>
+    <AssemblyName>PisoNetWatchdog</AssemblyName>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      System.ServiceProcess.ServiceBase is included in the net8.0-windows TFM.
+      No extra NuGet packages required.
+    -->
+  </PropertyGroup>
+
+</Project>

@@ -126,6 +126,31 @@ Namespace Config
             End Get
         End Property
 
+        ' ── Notifications ─────────────────────────────────────────────────────
+        ''' <summary>Master toggle — when False all in-app toast notifications are suppressed.</summary>
+        Public ReadOnly Property NotificationsEnabled As Boolean
+            Get
+                Return ReadBool("NotificationsEnabled", defaultVal:=True)
+            End Get
+        End Property
+
+        ''' <summary>When True, a TTS voice message is spoken for every notification.</summary>
+        Public ReadOnly Property VoiceEnabled As Boolean
+            Get
+                Return ReadBool("VoiceEnabled", defaultVal:=False)
+            End Get
+        End Property
+
+        ''' <summary>TTS volume 10–100.</summary>
+        Public ReadOnly Property VoiceVolume As Integer
+            Get
+                Dim val = ReadReg("VoiceVolume")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 10 AndAlso n <= 100 Then Return n
+                Return 80
+            End Get
+        End Property
+
         ' ── First-run flag ─────────────────────────────────────────────────
         Public ReadOnly Property IsConfigured As Boolean
             Get
@@ -181,6 +206,26 @@ Namespace Config
         End Sub
         Public Sub SaveScreenCaptureQuality(n As Integer)
             WriteReg("ScreenCaptureQuality", n.ToString())
+        End Sub
+        Public Sub SaveNotificationsEnabled(v As Boolean)
+            WriteReg("NotificationsEnabled", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveVoiceEnabled(v As Boolean)
+            WriteReg("VoiceEnabled", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveVoiceVolume(n As Integer)
+            WriteReg("VoiceVolume", n.ToString())
+        End Sub
+        ''' <summary>Saves own exe path so the watchdog can find it after a restart.</summary>
+        Public Sub SaveClientExePath(path As String)
+            WriteReg("ClientExePath", path)
+        End Sub
+        ''' <summary>
+        ''' Stamps the current UTC Unix timestamp so the watchdog knows the admin
+        ''' intentionally shut down and should not restart for ~5 minutes.
+        ''' </summary>
+        Public Sub SaveGracefulShutdown()
+            WriteReg("ShutdownAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString())
         End Sub
 
         ' ── Registry helpers ───────────────────────────────────────────────

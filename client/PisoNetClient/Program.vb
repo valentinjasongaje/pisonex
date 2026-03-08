@@ -1,4 +1,6 @@
+Imports System.Diagnostics
 Imports System.Drawing
+Imports System.IO
 Imports System.Windows.Forms
 Imports Microsoft.Win32
 Imports PisoNetClient.Config
@@ -7,12 +9,14 @@ Imports PisoNetClient.Forms
 
 Module Program
 
-    Private _api     As ApiService
-    Private _lockMgr As LockManager
-    Private _session As SessionManager
-    Private _overlay As TimerOverlay
-    Private _tray    As SystemTray
-    Private _capture As ScreenCaptureService
+    Private _api         As ApiService
+    Private _lockMgr     As LockManager
+    Private _session     As SessionManager
+    Private _overlay     As TimerOverlay
+    Private _tray        As SystemTray
+    Private _capture     As ScreenCaptureService
+    Private _notifs      As NotificationService
+    Private _guardTimer  As System.Timers.Timer   ' mutual watchdog keeper
 
     <STAThread>
     Sub Main()
@@ -32,6 +36,16 @@ Module Program
 
         RegisterStartup()
 
+        ' ── Register exe path + spawn the watchdog guardian ───────────────
+        AppConfig.SaveClientExePath(Application.ExecutablePath)
+        SpawnGuard()
+
+        ' Mutual watchdog: keep the guard process alive every 30 s
+        _guardTimer = New System.Timers.Timer(30_000)
+        AddHandler _guardTimer.Elapsed, Sub(s, e) EnsureGuardRunning()
+        _guardTimer.AutoReset = True
+        _guardTimer.Start()
+
         ' ── Apply Windows restrictions ────────────────────────────────────
         WindowsPolicy.Apply()
 
@@ -44,6 +58,7 @@ Module Program
         _session = New SessionManager(_api, _lockMgr)
         _overlay = New TimerOverlay()
         _tray    = New SystemTray()
+        _notifs  = New NotificationService(_overlay)
 
         ' Force handle creation so InvokeRequired works on background threads
         Dim _fh = _overlay.Handle
@@ -117,17 +132,17 @@ Module Program
     Private Sub OnLowTimeWarning(minutesLeft As Integer)
         If Not AppConfig.WarnAt5Min AndAlso minutesLeft = 5 Then Return
         If Not AppConfig.WarnAt1Min AndAlso minutesLeft = 1 Then Return
-        _tray.ShowBalloon(
-            $"⚠ {minutesLeft} Minute{If(minutesLeft = 1, "", "s")} Left",
-            $"Your session on PC {AppConfig.PCNumber:D2} will end in {minutesLeft} minute{If(minutesLeft = 1, "", "s")}. Insert more coins to continue.",
-            ToolTipIcon.Warning)
+        _notifs.Show(
+            $"{minutesLeft} Minute{If(minutesLeft = 1, "", "s")} Left",
+            $"Your session will end in {minutesLeft} minute{If(minutesLeft = 1, "", "s")}. Insert more coins to continue.",
+            ToastType.Warning)
     End Sub
 
     Private Sub OnTimeAdded(minutes As Integer)
-        _tray.ShowBalloon(
+        _notifs.Show(
             $"+{minutes} Minute{If(minutes = 1, "", "s")} Added",
-            $"{minutes} minute{If(minutes = 1, "", "s")} {If(minutes = 1, "has", "have")} been added to your session on PC {AppConfig.PCNumber:D2}.",
-            ToolTipIcon.Info)
+            $"{minutes} minute{If(minutes = 1, "", "s")} {If(minutes = 1, "has", "have")} been added to your session.",
+            ToastType.Success)
     End Sub
 
     ' ── Admin panel flow ──────────────────────────────────────────────────
@@ -159,6 +174,10 @@ Module Program
     End Sub
 
     Private Sub ExitApplication()
+        ' Tell the watchdog not to restart for ~5 minutes (admin intentional exit)
+        AppConfig.SaveGracefulShutdown()
+        _guardTimer?.Stop()
+        _guardTimer?.Dispose()
         WindowsPolicy.RemoveAll()
         _capture?.Dispose()
         _tray?.Dispose()
@@ -206,6 +225,36 @@ Module Program
         If dlg.ShowDialog() = DialogResult.OK Then Return txt.Text
         Return Nothing
     End Function
+
+    ' ── Watchdog guard (mutual watcher) ───────────────────────────────────
+
+    ''' <summary>
+    ''' Starts PisoNetWatchdog.exe as a companion process if it is not already
+    ''' running (either as a Windows Service or as a standalone process).
+    ''' The watchdog is placed next to PisoNetClient.exe in the same directory.
+    ''' </summary>
+    Private Sub SpawnGuard()
+        If Process.GetProcessesByName("PisoNetWatchdog").Length > 0 Then Return
+
+        Dim watchdogExe = Path.Combine(
+            Path.GetDirectoryName(Application.ExecutablePath), "PisoNetWatchdog.exe")
+        If Not File.Exists(watchdogExe) Then Return
+
+        Try
+            Process.Start(New ProcessStartInfo(watchdogExe) With {
+                .UseShellExecute = False,
+                .CreateNoWindow  = True
+            })
+        Catch
+            ' Watchdog not available — continue without it
+        End Try
+    End Sub
+
+    ''' <summary>Called every 30 s to restart the watchdog if someone killed it.</summary>
+    Private Sub EnsureGuardRunning()
+        If Process.GetProcessesByName("PisoNetWatchdog").Length > 0 Then Return
+        SpawnGuard()
+    End Sub
 
     ' ── Windows startup registration ──────────────────────────────────────
 
