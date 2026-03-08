@@ -4,62 +4,79 @@ Imports System.Windows.Forms
 Namespace Forms
 
     ''' <summary>
-    ''' Small floating timer shown in the corner when a session is active.
-    ''' Shows remaining time and connection status.
+    ''' Small floating timer shown in the top-right corner when a session is active.
+    ''' Shows remaining time and server connection status.
     ''' </summary>
     Public Class TimerOverlay
         Inherits Form
 
-        Private _lblTime As Label
+        ' Background colour used for the form AND all child controls so
+        ' no "white flash" appears.  Do NOT use Opacity — layered windows
+        ' (WS_EX_LAYERED) skip the normal WM_PAINT cycle and render white.
+        Private Shared ReadOnly BgColor As Color = Color.FromArgb(18, 22, 38)
+
+        Private _lblTime   As Label
         Private _lblStatus As Label
-        Private _panelBg As Panel
 
         Public Sub New()
             InitializeComponent()
         End Sub
 
         Private Sub InitializeComponent()
-            Me.FormBorderStyle = FormBorderStyle.None
-            Me.ShowInTaskbar = False
-            Me.TopMost = True
-            Me.Size = New Size(160, 56)
-            Me.BackColor = Color.FromArgb(15, 20, 35)
-            Me.Opacity = 0.92
-            Me.StartPosition = FormStartPosition.Manual
+            Me.DoubleBuffered    = True
+            Me.FormBorderStyle   = FormBorderStyle.None
+            Me.ShowInTaskbar     = False
+            Me.TopMost           = True
+            Me.Size              = New Size(164, 58)
+            Me.BackColor         = BgColor
+            ' ──────────────────────────────────────────────────────────────
+            ' NOTE: Me.Opacity is intentionally NOT set.
+            ' Setting Opacity causes WinForms to add WS_EX_LAYERED, which
+            ' routes all painting through UpdateLayeredWindow instead of
+            ' WM_PAINT.  Child label BackColor = Transparent then resolves
+            ' to white (system default) rather than the form background.
+            ' ──────────────────────────────────────────────────────────────
+            Me.StartPosition     = FormStartPosition.Manual
+            Me.Cursor            = Cursors.SizeAll   ' Shows a move cursor; no spinner
 
             PositionToCorner()
 
             _lblTime = New Label() With {
-                .Font = New Font("Segoe UI", 22, FontStyle.Bold),
+                .Font      = New Font("Segoe UI", 22, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(34, 197, 94),
-                .Text = "--:--",
-                .AutoSize = False,
-                .Size = New Size(160, 38),
-                .Location = New Point(0, 2),
+                .BackColor = BgColor,               ' Must match form — NOT Transparent
+                .Text      = "--:--",
+                .AutoSize  = False,
+                .Size      = New Size(164, 40),
+                .Location  = New Point(0, 2),
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
             _lblStatus = New Label() With {
-                .Font = New Font("Segoe UI", 8),
+                .Font      = New Font("Segoe UI", 8),
                 .ForeColor = Color.FromArgb(100, 116, 139),
-                .Text = "Connected",
-                .AutoSize = False,
-                .Size = New Size(160, 16),
-                .Location = New Point(0, 38),
+                .BackColor = BgColor,               ' Must match form — NOT Transparent
+                .Text      = "Connected",
+                .AutoSize  = False,
+                .Size      = New Size(164, 16),
+                .Location  = New Point(0, 40),
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
             Me.Controls.AddRange({_lblTime, _lblStatus})
 
-            ' Allow dragging the overlay
-            AddHandler _lblTime.MouseDown, AddressOf StartDrag
-            AddHandler Me.MouseDown, AddressOf StartDrag
+            ' Allow clicking anywhere on the overlay to drag it
+            AddHandler Me.MouseDown,         AddressOf StartDrag
+            AddHandler _lblTime.MouseDown,   AddressOf StartDrag
+            AddHandler _lblStatus.MouseDown, AddressOf StartDrag
         End Sub
 
         Private Sub PositionToCorner()
-            Dim workArea = Screen.PrimaryScreen.WorkingArea
-            Me.Location = New Point(workArea.Right - Me.Width - 12, workArea.Top + 12)
+            Dim wa = Screen.PrimaryScreen.WorkingArea
+            Me.Location = New Point(wa.Right - Me.Width - 12, wa.Top + 12)
         End Sub
+
+        ' ── Public API ────────────────────────────────────────────────────
 
         Public Sub UpdateTime(minutes As Integer, seconds As Integer)
             If Me.InvokeRequired Then
@@ -69,9 +86,8 @@ Namespace Forms
             _lblTime.Text = $"{minutes:D2}:{seconds:D2}"
             _lblTime.ForeColor = If(
                 minutes < 5,
-                Color.FromArgb(239, 68, 68),    ' Red when < 5 min
-                Color.FromArgb(34, 197, 94)     ' Green otherwise
-            )
+                Color.FromArgb(239, 68, 68),    ' Red when < 5 min left
+                Color.FromArgb(34, 197, 94))    ' Green otherwise
         End Sub
 
         Public Sub ShowConnected()
@@ -79,7 +95,7 @@ Namespace Forms
                 Me.Invoke(Sub() ShowConnected())
                 Return
             End If
-            _lblStatus.Text = "Connected"
+            _lblStatus.Text      = "Connected"
             _lblStatus.ForeColor = Color.FromArgb(100, 116, 139)
         End Sub
 
@@ -88,21 +104,21 @@ Namespace Forms
                 Me.Invoke(Sub() ShowOffline())
                 Return
             End If
-            _lblStatus.Text = "Offline - timer running"
+            _lblStatus.Text      = "Offline — timer running"
             _lblStatus.ForeColor = Color.FromArgb(245, 158, 11)
         End Sub
 
-        ' ── Drag support ──────────────────────────────────────────────
+        ' ── Drag support ──────────────────────────────────────────────────
 
-        Private _dragging As Boolean = False
+        Private _dragging  As Boolean = False
         Private _dragStart As Point
 
         Private Sub StartDrag(sender As Object, e As MouseEventArgs)
             If e.Button = MouseButtons.Left Then
-                _dragging = True
+                _dragging  = True
                 _dragStart = e.Location
                 AddHandler Me.MouseMove, AddressOf OnDrag
-                AddHandler Me.MouseUp, AddressOf StopDrag
+                AddHandler Me.MouseUp,   AddressOf StopDrag
             End If
         End Sub
 
@@ -110,16 +126,16 @@ Namespace Forms
             If _dragging Then
                 Me.Location = New Point(
                     Me.Left + e.X - _dragStart.X,
-                    Me.Top + e.Y - _dragStart.Y
-                )
+                    Me.Top  + e.Y - _dragStart.Y)
             End If
         End Sub
 
         Private Sub StopDrag(sender As Object, e As MouseEventArgs)
             _dragging = False
             RemoveHandler Me.MouseMove, AddressOf OnDrag
-            RemoveHandler Me.MouseUp, AddressOf StopDrag
+            RemoveHandler Me.MouseUp,   AddressOf StopDrag
         End Sub
+
     End Class
 
 End Namespace

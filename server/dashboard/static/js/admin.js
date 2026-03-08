@@ -22,42 +22,114 @@ function closeModal() {
   document.getElementById('add-time-modal').classList.add('hidden');
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('add-time-form');
-  if (!form) return;
+// ── Shared auth-aware fetch ───────────────────────────────────────────────────
+async function apiPost(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) {
+    window.location.href = '/dashboard/login';
+    return null;
+  }
+  return res;
+}
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const pcNumber = form.querySelector('[name="pc_number"]').value;
-    const minutes  = form.querySelector('[name="minutes"]').value;
-
-    const res = await fetch('/dashboard/api/pc/add-time', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pc_number: parseInt(pcNumber), minutes: parseInt(minutes) }),
-    });
-
-    if (res.status === 401) {
-      // Session expired — redirect to login
-      window.location.href = '/dashboard/login';
-      return;
-    }
-
-    if (res.ok) {
-      closeModal();
-      showToast(`Added ${minutes} minutes to PC ${String(pcNumber).padStart(2, '0')}`, 'success');
-      // Trigger HTMX grid refresh
+// ── Lock PC ───────────────────────────────────────────────────────────────────
+async function lockPc(pcNumber) {
+  if (!confirm(`Lock PC ${String(pcNumber).padStart(2, '0')}? This will end the active session.`)) return;
+  const res = await apiPost(`/dashboard/api/pc/${pcNumber}/lock`, {});
+  if (!res) return;
+  if (res.ok) {
+    showToast(`PC ${String(pcNumber).padStart(2, '0')} locked`, 'success');
+    // Refresh the grid if on overview, or the whole page if on pcs
+    if (document.getElementById('pc-grid')) {
       htmx.trigger('#pc-grid', 'refresh');
     } else {
-      const err = await res.json();
-      showToast(err.detail || 'Failed to add time', 'error');
+      location.reload();
     }
-  });
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Failed to lock PC', 'error');
+  }
+}
 
-  // Close modal on backdrop click
-  document.getElementById('add-time-modal').addEventListener('click', (e) => {
-    if (e.target.id === 'add-time-modal') closeModal();
-  });
+// ── Rename Modal ──────────────────────────────────────────────────────────────
+function openRename(pcNumber, currentName) {
+  document.getElementById('rename-pc-label').textContent = `PC ${String(pcNumber).padStart(2, '0')}`;
+  document.getElementById('rename-pc-number').value = pcNumber;
+  document.getElementById('rename-input').value = currentName;
+  document.getElementById('rename-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('rename-input').select(), 50);
+}
+
+function closeRenameModal() {
+  document.getElementById('rename-modal').classList.add('hidden');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // ── Add Time form ──────────────────────────────────────────────────────────
+  const addTimeForm = document.getElementById('add-time-form');
+  if (addTimeForm) {
+    addTimeForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pcNumber = addTimeForm.querySelector('[name="pc_number"]').value;
+      const minutes  = addTimeForm.querySelector('[name="minutes"]').value;
+
+      const res = await apiPost('/dashboard/api/pc/add-time', {
+        pc_number: parseInt(pcNumber),
+        minutes: parseInt(minutes),
+      });
+      if (!res) return;
+
+      if (res.ok) {
+        closeModal();
+        showToast(`Added ${minutes} min to PC ${String(pcNumber).padStart(2, '0')}`, 'success');
+        if (document.getElementById('pc-grid')) {
+          htmx.trigger('#pc-grid', 'refresh');
+        } else {
+          location.reload();
+        }
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to add time', 'error');
+      }
+    });
+
+    document.getElementById('add-time-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'add-time-modal') closeModal();
+    });
+  }
+
+  // ── Rename form ────────────────────────────────────────────────────────────
+  const renameForm = document.getElementById('rename-form');
+  if (renameForm) {
+    renameForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pcNumber = renameForm.querySelector('[name="pc_number"]').value;
+      const name     = renameForm.querySelector('[name="name"]').value.trim();
+
+      const res = await apiPost(`/dashboard/api/pc/${pcNumber}/rename`, { name });
+      if (!res) return;
+
+      if (res.ok) {
+        const data = await res.json();
+        closeRenameModal();
+        showToast(`PC ${String(pcNumber).padStart(2, '0')} renamed to "${data.name}"`, 'success');
+        // Update the name in the table without a full reload
+        const nameEl = document.getElementById(`pc-name-${pcNumber}`);
+        if (nameEl) nameEl.textContent = data.name;
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to rename PC', 'error');
+      }
+    });
+
+    document.getElementById('rename-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'rename-modal') closeRenameModal();
+    });
+  }
 });
 
 // ── Toast notifications ───────────────────────────────────────────────────────

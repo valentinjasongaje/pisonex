@@ -9,11 +9,17 @@ from sqlalchemy import func, desc
 from jose import JWTError, jwt
 import bcrypt
 
+from pydantic import BaseModel
+
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC
 from schemas import AdminAddTimeRequest
 from services.session_service import SessionService
 from config import settings
+
+
+class RenamePcBody(BaseModel):
+    name: str
 
 router = APIRouter(prefix="/dashboard")
 templates = Jinja2Templates(directory="dashboard/templates")
@@ -320,3 +326,68 @@ def dashboard_lock_pc(
     if not ok:
         raise HTTPException(status_code=404, detail=f"PC {pc_number} not found")
     return {"status": "locked", "pc_number": pc_number}
+
+
+@router.post("/api/pc/{pc_number}/rename")
+def dashboard_rename_pc(
+    pc_number: int,
+    body: RenamePcBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Rename a PC — called from the PC Management page."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Name cannot be empty")
+
+    pc = db.query(PC).filter(PC.pc_number == pc_number).first()
+    if not pc:
+        raise HTTPException(status_code=404, detail=f"PC {pc_number} not found")
+
+    pc.name = name
+    db.commit()
+    return {"pc_number": pc_number, "name": pc.name}
+
+
+# ── PC Management page ────────────────────────────────────────────────────────
+
+@router.get("/pcs", response_class=HTMLResponse)
+def pcs_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+
+    svc = SessionService(db)
+    pcs = svc.get_all_pcs()
+    timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+
+    pc_data = []
+    for pc in pcs:
+        if pc.last_seen and pc.last_seen < timeout:
+            pc.is_online = False
+        session = svc.get_active_session(pc.pc_number)
+        remaining_sec = svc.remaining_seconds(session)
+        pc_data.append({
+            "pc_number": pc.pc_number,
+            "name": pc.name,
+            "mac_address": pc.mac_address,
+            "ip_address": pc.ip_address or "—",
+            "is_online": pc.is_online,
+            "is_locked": pc.is_locked,
+            "last_seen": pc.last_seen,
+            "remaining_minutes": remaining_sec // 60,
+            "remaining_seconds": remaining_sec % 60,
+        })
+    db.commit()
+
+    return templates.TemplateResponse("pcs.html", {
+        "request": request,
+        "pcs": pc_data,
+        "total": len(pc_data),
+    })

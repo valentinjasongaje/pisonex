@@ -25,6 +25,11 @@ Module Program
         _lockMgr = New LockManager()
         _session = New SessionManager(_api, _lockMgr)
         _overlay = New TimerOverlay()
+        ' Force window handle creation on this UI thread NOW, before the
+        ' heartbeat timers start.  Without this, InvokeRequired returns False
+        ' on background threads (no handle = no thread affinity), so Show()
+        ' gets called on the wrong thread and the overlay never appears.
+        Dim _forceHandle = _overlay.Handle
 
         ' ── Wire up events ────────────────────────────────────────────
         AddHandler _session.TimeUpdated,           AddressOf OnTimeUpdated

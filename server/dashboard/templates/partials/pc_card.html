@@ -29,10 +29,7 @@
     {% if not pc.is_locked %}
     <button
       class="btn btn-sm btn-danger"
-      hx-post="/api/pc/{{ pc.pc_number }}/lock"
-      hx-confirm="Lock PC {{ '%02d' | format(pc.pc_number) }}?"
-      hx-target="#pc-grid"
-      hx-swap="outerHTML"
+      onclick="lockPc({{ pc.pc_number }})"
     >Lock</button>
     {% endif %}
   </div>
