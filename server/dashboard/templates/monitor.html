@@ -1,0 +1,127 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>PC Monitor</h1>
+  <div class="header-stats">
+    <span class="stat-pill" id="refresh-indicator">● Live</span>
+    <span class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">Refreshes every 5s</span>
+  </div>
+</div>
+
+{% if not pcs %}
+<div class="card" style="text-align:center;padding:48px;color:var(--text-dim)">
+  No PCs registered yet.
+</div>
+{% else %}
+<div class="monitor-grid">
+  {% for pc in pcs %}
+  <div class="monitor-card {% if not pc.is_online %}monitor-offline{% elif not pc.is_locked %}monitor-active{% endif %}"
+       id="card-{{ pc.pc_number }}">
+
+    <div class="monitor-card-header">
+      <span class="monitor-pc-label">PC {{ "%02d"|format(pc.pc_number) }}</span>
+      <span class="monitor-pc-name">{{ pc.name }}</span>
+      <span class="monitor-status-dot
+        {% if not pc.is_online %}dot-offline
+        {% elif not pc.is_locked %}dot-active
+        {% else %}dot-locked{% endif %}">
+      </span>
+    </div>
+
+    <div class="monitor-screen" onclick="openFullscreen({{ pc.pc_number }})"
+         title="Click to enlarge">
+      {% if pc.has_screenshot %}
+      <img id="shot-{{ pc.pc_number }}"
+           src="/dashboard/api/pc/{{ pc.pc_number }}/screenshot"
+           alt="PC {{ pc.pc_number }} screen"
+           onerror="handleImgError(this)" />
+      {% else %}
+      <div class="monitor-no-shot" id="noshot-{{ pc.pc_number }}">
+        <span>No screenshot yet</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="monitor-card-footer">
+      {% if not pc.is_online %}
+        <span style="color:var(--gray)">Offline</span>
+      {% elif pc.is_locked %}
+        <span style="color:var(--gray)">Locked</span>
+      {% else %}
+        <span class="monitor-time">
+          {{ "%02d"|format(pc.remaining_minutes) }}:{{ "%02d"|format(pc.remaining_seconds) }}
+        </span>
+        <span style="color:var(--text-dim);font-size:11px">remaining</span>
+      {% endif %}
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Fullscreen modal -->
+<div id="fullscreen-modal" class="modal hidden" onclick="closeFullscreen()">
+  <div class="fullscreen-box" onclick="event.stopPropagation()">
+    <div class="fullscreen-header">
+      <span id="fullscreen-label"></span>
+      <button class="fullscreen-close" onclick="closeFullscreen()">✕</button>
+    </div>
+    <img id="fullscreen-img" src="" alt="Full screen view" />
+  </div>
+</div>
+
+<script>
+const PC_NUMBERS = [{% for pc in pcs %}{{ pc.pc_number }}{% if not loop.last %},{% endif %}{% endfor %}];
+let _fullscreenPc = null;
+
+function refreshScreenshots() {
+  const t = Date.now();
+  PC_NUMBERS.forEach(n => {
+    const img = document.getElementById('shot-' + n);
+    if (img) {
+      img.src = `/dashboard/api/pc/${n}/screenshot?t=${t}`;
+    }
+  });
+  // Also refresh fullscreen if open
+  if (_fullscreenPc !== null) {
+    document.getElementById('fullscreen-img').src =
+      `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${t}`;
+  }
+  // Pulse the indicator
+  const dot = document.getElementById('refresh-indicator');
+  dot.style.opacity = '0.4';
+  setTimeout(() => { dot.style.opacity = '1'; }, 300);
+}
+
+function handleImgError(img) {
+  img.style.display = 'none';
+  const noshot = document.getElementById('noshot-' + img.id.replace('shot-', ''));
+  if (noshot) noshot.style.display = 'flex';
+}
+
+function openFullscreen(pcNumber) {
+  _fullscreenPc = pcNumber;
+  const modal = document.getElementById('fullscreen-modal');
+  const img   = document.getElementById('fullscreen-img');
+  const label = document.getElementById('fullscreen-label');
+  label.textContent = `PC ${String(pcNumber).padStart(2, '0')}`;
+  img.src = `/dashboard/api/pc/${pcNumber}/screenshot?t=${Date.now()}`;
+  modal.classList.remove('hidden');
+}
+
+function closeFullscreen() {
+  _fullscreenPc = null;
+  document.getElementById('fullscreen-modal').classList.add('hidden');
+  document.getElementById('fullscreen-img').src = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeFullscreen();
+});
+
+setInterval(refreshScreenshots, 5000);
+</script>
+
+{% endblock %}

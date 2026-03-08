@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -107,6 +108,23 @@ def all_pc_status(db: Session = Depends(get_db)):
 
     db.commit()
     return result
+
+
+@router.post("/{pc_number}/screenshot")
+async def upload_screenshot(pc_number: int, request: Request):
+    """
+    Called by PC client every 5 seconds with a JPEG screenshot body.
+    Stores in memory for admin monitoring. No authentication required
+    (already on the internal LAN, same as heartbeat).
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "Empty body")
+    if len(body) > 2 * 1024 * 1024:  # 2 MB max
+        raise HTTPException(413, "Screenshot too large")
+    import screenshot_store
+    screenshot_store.save(pc_number, body)
+    return {"status": "ok"}
 
 
 @router.post("/{pc_number}/lock")

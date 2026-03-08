@@ -63,6 +63,23 @@ Namespace Services
             End Try
         End Function
 
+        ''' <summary>
+        ''' Uploads a JPEG screenshot to the server for remote monitoring.
+        ''' Fire-and-forget — returns False silently on failure.
+        ''' </summary>
+        Public Async Function UploadScreenshotAsync(jpegBytes As Byte()) As Task(Of Boolean)
+            Try
+                Dim content = New ByteArrayContent(jpegBytes)
+                content.Headers.ContentType =
+                    New System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg")
+                Dim url = $"{_baseUrl}/api/pc/{_pcNumber}/screenshot"
+                Dim response = Await _client.PostAsync(url, content)
+                Return response.IsSuccessStatusCode
+            Catch
+                Return False
+            End Try
+        End Function
+
         Private Shared Function GetMacAddress() As String
             For Each nic In NetworkInterface.GetAllNetworkInterfaces()
                 If nic.OperationalStatus = OperationalStatus.Up AndAlso

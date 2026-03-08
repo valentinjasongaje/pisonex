@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -350,6 +350,71 @@ def dashboard_rename_pc(
     pc.name = name
     db.commit()
     return {"pc_number": pc_number, "name": pc.name}
+
+
+# ── PC Monitor page ───────────────────────────────────────────────────────────
+
+@router.get("/monitor", response_class=HTMLResponse)
+def monitor_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+
+    svc = SessionService(db)
+    pcs = svc.get_all_pcs()
+    timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+
+    import screenshot_store
+    pc_data = []
+    for pc in pcs:
+        if pc.last_seen and pc.last_seen < timeout:
+            pc.is_online = False
+        session = svc.get_active_session(pc.pc_number)
+        remaining_sec = svc.remaining_seconds(session)
+        screenshot_time = screenshot_store.get_time(pc.pc_number)
+        pc_data.append({
+            "pc_number": pc.pc_number,
+            "name": pc.name,
+            "is_online": pc.is_online,
+            "is_locked": pc.is_locked,
+            "remaining_minutes": remaining_sec // 60,
+            "remaining_seconds": remaining_sec % 60,
+            "has_screenshot": screenshot_store.get(pc.pc_number) is not None,
+            "screenshot_age": (
+                int((datetime.utcnow() - screenshot_time).total_seconds())
+                if screenshot_time else None
+            ),
+        })
+    db.commit()
+
+    return templates.TemplateResponse("monitor.html", {
+        "request": request,
+        "pcs": pc_data,
+    })
+
+
+@router.get("/api/pc/{pc_number}/screenshot")
+def serve_screenshot(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Serves the latest screenshot for a PC to the admin dashboard."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    import screenshot_store
+    data = screenshot_store.get(pc_number)
+    if not data:
+        raise HTTPException(status_code=404, detail="No screenshot available")
+
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ── PC Management page ────────────────────────────────────────────────────────

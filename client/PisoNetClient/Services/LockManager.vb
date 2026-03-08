@@ -3,34 +3,27 @@ Imports System.Windows.Forms
 Namespace Services
 
     ''' <summary>
-    ''' Controls the lock screen.
-    ''' The LockForm is created once on the UI thread and reused —
-    ''' no SynchronizationContext needed.
+    ''' Controls the lock screen form.
+    ''' LockForm is created once on the UI thread and reused — no SynchronizationContext needed.
     ''' </summary>
     Public Class LockManager
 
         Private ReadOnly _lockForm As Forms.LockForm
 
-        Public Sub New()
-            ' Must be called from the UI thread (STAThread in Program.vb)
-            _lockForm = New Forms.LockForm()
-        End Sub
+        ''' <summary>Forwarded from LockForm.AdminPanelRequested — wired in Program.vb.</summary>
+        Public Event LockFormAdminRequested()
 
-        ''' <summary>Returns the underlying form so Program.vb can pass it to Application.Run.</summary>
-        Public ReadOnly Property LockForm As Forms.LockForm
-            Get
-                Return _lockForm
-            End Get
-        End Property
+        Public Sub New()
+            _lockForm = New Forms.LockForm()
+            AddHandler _lockForm.AdminPanelRequested, Sub() RaiseEvent LockFormAdminRequested()
+        End Sub
 
         Public Sub LockPC()
             If _lockForm.InvokeRequired Then
                 _lockForm.Invoke(Sub() LockPC())
                 Return
             End If
-            If Not _lockForm.Visible Then
-                _lockForm.Show()
-            End If
+            If Not _lockForm.Visible Then _lockForm.Show()
             _lockForm.BringToFront()
         End Sub
 
@@ -39,9 +32,29 @@ Namespace Services
                 _lockForm.Invoke(Sub() UnlockPC())
                 Return
             End If
-            If _lockForm.Visible Then
-                _lockForm.Hide()
+            If _lockForm.Visible Then _lockForm.Hide()
+        End Sub
+
+        Public Sub ShowOfflineStatus()
+            _lockForm.ShowOfflineStatus()
+        End Sub
+
+        Public Sub HideOfflineStatus()
+            _lockForm.HideOfflineStatus()
+        End Sub
+
+        Public Sub RefreshLockAppearance()
+            _lockForm.RefreshAppearance()
+        End Sub
+
+        ''' <summary>Call before Application.Exit() so WM_CLOSE is honoured.</summary>
+        Public Sub AllowExit()
+            If _lockForm.InvokeRequired Then
+                _lockForm.Invoke(Sub() AllowExit())
+                Return
             End If
+            _lockForm.AllowExit()
+            If _lockForm.Visible Then _lockForm.Close()
         End Sub
 
     End Class

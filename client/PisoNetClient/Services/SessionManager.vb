@@ -17,6 +17,10 @@ Namespace Services
         Private _serverReachable As Boolean = True
         Private _sessionToken As String = Nothing
 
+        ' Low-time warning flags — reset each time a new session starts
+        Private _warned5Min As Boolean = False
+        Private _warned1Min As Boolean = False
+
         ' Guards _remainingSeconds from concurrent access
         Private ReadOnly _stateLock As New Object()
 
@@ -26,6 +30,8 @@ Namespace Services
         Public Event SessionEnded()
         Public Event ServerConnectionLost()
         Public Event ServerConnectionRestored()
+        ''' <summary>Fired at 5 and 1 minute(s) remaining. minutesLeft = 5 or 1.</summary>
+        Public Event LowTimeWarning(minutesLeft As Integer)
 
         Public Sub New(api As ApiService, lockMgr As LockManager)
             _api = api
@@ -60,6 +66,15 @@ Namespace Services
                 Dim mins = _remainingSeconds \ 60
                 Dim secs = _remainingSeconds Mod 60
                 RaiseEvent TimeUpdated(mins, secs)
+
+                ' Low-time warnings (fire once per session at 5 min and 1 min)
+                If _remainingSeconds = 300 AndAlso Not _warned5Min Then
+                    _warned5Min = True
+                    RaiseEvent LowTimeWarning(5)
+                ElseIf _remainingSeconds = 60 AndAlso Not _warned1Min Then
+                    _warned1Min = True
+                    RaiseEvent LowTimeWarning(1)
+                End If
 
                 ' Time ran out locally — lock regardless of server state
                 If _remainingSeconds = 0 Then
@@ -111,8 +126,10 @@ Namespace Services
                     RaiseEvent SessionEnded()
 
                 ElseIf Not serverSaysLocked AndAlso _isLocked Then
-                    ' Server unlocked us (coins inserted)
-                    _isLocked = False
+                    ' Server unlocked us (coins inserted) — reset warning flags for the new session
+                    _isLocked   = False
+                    _warned5Min = False
+                    _warned1Min = False
                     _lock.UnlockPC()
                     RaiseEvent SessionStarted()
                 End If
