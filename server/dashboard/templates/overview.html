@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Overview</h1>
+  <div class="header-stats">
+    <div class="stat-pill online">🟢 <span id="online-count">{{ online_count }}</span> Online</div>
+    <div class="stat-pill active">⚡ <span id="active-count">{{ active_count }}</span> Active</div>
+    <div class="stat-pill earnings">₱ <span id="today-earnings">{{ today_pesos }}</span> Today</div>
+  </div>
+</div>
+
+<!-- PC Grid — auto-refreshes every 10s via HTMX -->
+<div
+  id="pc-grid"
+  class="pc-grid"
+  hx-get="/dashboard/partials/pc-grid"
+  hx-trigger="every 10s"
+  hx-swap="outerHTML"
+>
+  {% for pc in pcs %}
+  {% include "partials/pc_card.html" %}
+  {% endfor %}
+</div>
+
+<!-- Add Time Modal -->
+<div id="add-time-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>Add Time to <span id="modal-pc-label"></span></h2>
+    <form id="add-time-form">
+      <input type="hidden" id="modal-pc-number" name="pc_number" />
+      <label>Minutes to add</label>
+      <input type="number" name="minutes" min="1" max="999" placeholder="30" required />
+      <div class="modal-actions">
+        <button type="button" onclick="closeModal()">Cancel</button>
+        <button type="submit">Add Time</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

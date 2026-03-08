@@ -1,0 +1,40 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    # Server
+    DATABASE_URL: str = "sqlite:///./pisonet.db"
+    SECRET_KEY: str = "change-this-to-a-random-256-bit-secret-key"
+    TOKEN_EXPIRE_HOURS: int = 8
+    SERVER_HOST: str = "0.0.0.0"
+    SERVER_PORT: int = 8000
+
+    # Coin rates
+    DEFAULT_RATE_PESOS: int = 5
+    DEFAULT_RATE_MINUTES: int = 30
+
+    # PC monitoring
+    PC_HEARTBEAT_TIMEOUT: int = 30  # seconds before PC is marked offline
+
+    # Admin credentials (used to seed admin on first run)
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "admin123"
+
+    # GPIO pins (BCM numbering)
+    COIN_PIN: int = 4
+    KEYPAD_ROWS: list[int] = [17, 27, 22, 10]
+    KEYPAD_COLS: list[int] = [9, 11, 5]
+    LCD_I2C_ADDRESS: int = 0x27
+    LCD_I2C_PORT: int = 1
+
+    # Timing
+    COIN_DEBOUNCE_MS: int = 50
+    COIN_PULSE_TIMEOUT: float = 1.5
+    KEYPAD_SCAN_INTERVAL: float = 0.05
+    PC_IDLE_TIMEOUT: int = 30       # seconds before returning to idle screen
+    DISPLAY_CONFIRM_DELAY: int = 3  # seconds to show confirmation message
+
+
+settings = Settings()

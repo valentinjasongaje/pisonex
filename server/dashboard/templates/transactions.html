@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Transactions</h1>
+  <div class="header-stats">
+    <div class="stat-pill earnings">₱ {{ total_pesos }} total ({{ days }} days)</div>
+  </div>
+</div>
+
+<div class="card">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>PC</th>
+        <th>Amount</th>
+        <th>Minutes Added</th>
+        <th>Date / Time</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tx in transactions %}
+      <tr>
+        <td>{{ tx.id }}</td>
+        <td>PC {{ "%02d" | format(tx.pc_id) if tx.pc_id else "—" }}</td>
+        <td class="money">₱{{ tx.amount_pesos }}</td>
+        <td>{{ tx.minutes_added }} min</td>
+        <td>{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -1,0 +1,11 @@
+<div
+  id="pc-grid"
+  class="pc-grid"
+  hx-get="/dashboard/partials/pc-grid"
+  hx-trigger="every 10s"
+  hx-swap="outerHTML"
+>
+  {% for pc in pcs %}
+  {% include "partials/pc_card.html" %}
+  {% endfor %}
+</div>

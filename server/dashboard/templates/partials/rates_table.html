@@ -1,0 +1,26 @@
+<div id="rates-table" class="card">
+  <h2>Active Rates</h2>
+  <table class="data-table">
+    <thead>
+      <tr><th>Pesos</th><th>Minutes</th><th>Rate/hr</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      {% for rate in rates %}
+      <tr>
+        <td>₱{{ rate.pesos }}</td>
+        <td>{{ rate.minutes }} min</td>
+        <td>₱{{ ((60 / rate.minutes) * rate.pesos) | round(1) }}/hr</td>
+        <td>
+          <button
+            class="btn btn-sm btn-danger"
+            hx-delete="/api/admin/rates/{{ rate.id }}"
+            hx-target="#rates-table"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this rate?"
+          >Delete</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

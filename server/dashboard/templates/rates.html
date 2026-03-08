@@ -1,0 +1,52 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Coin Rates</h1>
+</div>
+
+<div class="card">
+  <h2>Add / Update Rate</h2>
+  <form hx-post="/dashboard/rates" hx-target="#rates-table" hx-swap="outerHTML">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Pesos (₱)</label>
+        <input type="number" name="pesos" min="1" max="1000" required placeholder="5" />
+      </div>
+      <div class="form-group">
+        <label>Minutes</label>
+        <input type="number" name="minutes" min="1" max="9999" required placeholder="30" />
+      </div>
+      <button type="submit" class="btn btn-primary align-end">Save Rate</button>
+    </div>
+  </form>
+</div>
+
+<div id="rates-table" class="card">
+  <h2>Active Rates</h2>
+  <table class="data-table">
+    <thead>
+      <tr><th>Pesos</th><th>Minutes</th><th>Rate/hr</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      {% for rate in rates %}
+      <tr>
+        <td>₱{{ rate.pesos }}</td>
+        <td>{{ rate.minutes }} min</td>
+        <td>₱{{ ((60 / rate.minutes) * rate.pesos) | round(1) }}/hr</td>
+        <td>
+          <button
+            class="btn btn-sm btn-danger"
+            hx-delete="/api/admin/rates/{{ rate.id }}"
+            hx-target="#rates-table"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this rate?"
+          >Delete</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

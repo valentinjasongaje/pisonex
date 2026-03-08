@@ -1,0 +1,40 @@
+{% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
+<div class="pc-card pc-{{ state }}">
+  <div class="pc-header">
+    <span class="pc-number">PC {{ "%02d" | format(pc.pc_number) }}</span>
+    <span class="pc-badge badge-{{ state }}">
+      {% if not pc.is_online %}OFFLINE
+      {% elif not pc.is_locked %}ACTIVE
+      {% else %}LOCKED{% endif %}
+    </span>
+  </div>
+
+  <div class="pc-body">
+    {% if not pc.is_locked and pc.remaining_minutes > 0 %}
+    <div class="pc-timer">{{ pc.remaining_minutes }}m remaining</div>
+    {% elif pc.is_online %}
+    <div class="pc-idle">Waiting for coins</div>
+    {% else %}
+    <div class="pc-offline-msg">{{ pc.last_seen.strftime('%H:%M') if pc.last_seen else "Never" }}</div>
+    {% endif %}
+    <div class="pc-ip">{{ pc.ip_address or "—" }}</div>
+  </div>
+
+  {% if pc.is_online %}
+  <div class="pc-actions">
+    <button
+      class="btn btn-sm btn-primary"
+      onclick="openAddTime({{ pc.pc_number }})"
+    >+ Time</button>
+    {% if not pc.is_locked %}
+    <button
+      class="btn btn-sm btn-danger"
+      hx-post="/api/pc/{{ pc.pc_number }}/lock"
+      hx-confirm="Lock PC {{ '%02d' | format(pc.pc_number) }}?"
+      hx-target="#pc-grid"
+      hx-swap="outerHTML"
+    >Lock</button>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

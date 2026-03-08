@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PisoNet Admin</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="stylesheet" href="/static/css/admin.css" />
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <span class="logo-icon">🖥</span>
+    <span>PisoNet</span>
+  </div>
+  <ul class="sidebar-nav">
+    <li><a href="/dashboard"         class="nav-link" data-page="overview">Overview</a></li>
+    <li><a href="/dashboard/pcs"     class="nav-link" data-page="pcs">PC Management</a></li>
+    <li><a href="/dashboard/transactions" class="nav-link" data-page="transactions">Transactions</a></li>
+    <li><a href="/dashboard/rates"   class="nav-link" data-page="rates">Coin Rates</a></li>
+    <li><a href="/dashboard/logs"    class="nav-link" data-page="logs">System Logs</a></li>
+  </ul>
+  <div class="sidebar-footer">v1.0.0</div>
+</nav>
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="/static/js/admin.js"></script>
+</body>
+</html>

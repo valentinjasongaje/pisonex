@@ -1,0 +1,30 @@
+# ── Python (server) ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.env
+*.db
+*.db-shm
+*.db-wal
+pisonet.log
+pisonet.log.*
+backups/
+
+# ── VB.NET / .NET (client) ───────────────────────────────────────
+bin/
+obj/
+*.user
+.vs/
+*.suo
+*.sln.docstates
+publish/
+*.ncrunchproject
+*.ncrunchsolution
+
+# ── OS ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
