@@ -63,6 +63,14 @@ def heartbeat(
         raise HTTPException(404, f"PC {pc_number} is not registered")
 
     session = svc.get_active_session(pc_number)
+
+    # If this is the first heartbeat after a new session was created, reset
+    # started_at to now so the client receives the full granted time.
+    svc.acknowledge_session_start(pc_number, session)
+
+    # Grab minutes-added notification before computing remaining_seconds.
+    time_added = svc.pop_pending_notification(pc_number)
+
     remaining_sec = svc.remaining_seconds(session)
 
     # Auto-expire: if time ran out, end the session and lock
@@ -77,6 +85,7 @@ def heartbeat(
         remaining_minutes=remaining_sec // 60,
         remaining_seconds=remaining_sec % 60,
         session_token=session.session_token if session else None,
+        time_added_minutes=time_added,
     )
 
 

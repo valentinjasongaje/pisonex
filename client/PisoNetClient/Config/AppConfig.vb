@@ -98,6 +98,34 @@ Namespace Config
             End Get
         End Property
 
+        ' ── Screen monitoring ──────────────────────────────────────────────
+        ''' <summary>Whether to upload screenshots for remote admin monitoring.</summary>
+        Public ReadOnly Property ScreenCaptureEnabled As Boolean
+            Get
+                Return ReadBool("ScreenCaptureEnabled", defaultVal:=True)
+            End Get
+        End Property
+
+        ''' <summary>How often to capture a screenshot, in seconds (3–60).</summary>
+        Public ReadOnly Property ScreenCaptureIntervalSec As Integer
+            Get
+                Dim val = ReadReg("ScreenCaptureIntervalSec")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 3 AndAlso n <= 60 Then Return n
+                Return 5
+            End Get
+        End Property
+
+        ''' <summary>JPEG quality for screenshots (30–95). Higher = clearer but larger upload.</summary>
+        Public ReadOnly Property ScreenCaptureQuality As Integer
+            Get
+                Dim val = ReadReg("ScreenCaptureQuality")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 30 AndAlso n <= 95 Then Return n
+                Return 75
+            End Get
+        End Property
+
         ' ── First-run flag ─────────────────────────────────────────────────
         Public ReadOnly Property IsConfigured As Boolean
             Get
@@ -144,6 +172,15 @@ Namespace Config
         End Sub
         Public Sub SaveIsConfigured(v As Boolean)
             WriteReg("IsConfigured", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveScreenCaptureEnabled(v As Boolean)
+            WriteReg("ScreenCaptureEnabled", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveScreenCaptureIntervalSec(n As Integer)
+            WriteReg("ScreenCaptureIntervalSec", n.ToString())
+        End Sub
+        Public Sub SaveScreenCaptureQuality(n As Integer)
+            WriteReg("ScreenCaptureQuality", n.ToString())
         End Sub
 
         ' ── Registry helpers ───────────────────────────────────────────────

@@ -10,6 +10,7 @@ Namespace Services
         Public Property remaining_minutes As Integer
         Public Property remaining_seconds As Integer
         Public Property session_token As String
+        Public Property time_added_minutes As Integer
     End Class
 
     Public Class ApiService

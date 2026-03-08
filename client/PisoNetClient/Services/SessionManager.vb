@@ -32,6 +32,8 @@ Namespace Services
         Public Event ServerConnectionRestored()
         ''' <summary>Fired at 5 and 1 minute(s) remaining. minutesLeft = 5 or 1.</summary>
         Public Event LowTimeWarning(minutesLeft As Integer)
+        ''' <summary>Fired when the server reports that time was added to this PC's session.</summary>
+        Public Event TimeAdded(minutes As Integer)
 
         Public Sub New(api As ApiService, lockMgr As LockManager)
             _api = api
@@ -134,6 +136,11 @@ Namespace Services
                     RaiseEvent SessionStarted()
                 End If
             End SyncLock
+
+            ' Notify the user if the server reports that time was added
+            If response.time_added_minutes > 0 Then
+                RaiseEvent TimeAdded(response.time_added_minutes)
+            End If
         End Function
 
         ' ── Public state ─────────────────────────────────────────────

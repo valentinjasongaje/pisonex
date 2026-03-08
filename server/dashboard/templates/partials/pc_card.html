@@ -11,7 +11,7 @@
 
   <div class="pc-body">
     {% if not pc.is_locked and pc.remaining_minutes > 0 %}
-    <div class="pc-timer">{{ pc.remaining_minutes }}m remaining</div>
+    <div class="pc-timer" data-remaining-sec="{{ pc.remaining_minutes * 60 + pc.remaining_seconds }}">{{ "%02d" | format(pc.remaining_minutes) }}:{{ "%02d" | format(pc.remaining_seconds) }}</div>
     {% elif pc.is_online %}
     <div class="pc-idle">Waiting for coins</div>
     {% else %}

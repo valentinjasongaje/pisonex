@@ -48,7 +48,7 @@
         <td style="color: var(--text-dim); font-size: 12px;">{{ pc.mac_address or "—" }}</td>
         <td>
           {% if not pc.is_locked and pc.remaining_minutes > 0 %}
-          <span class="money">{{ pc.remaining_minutes }}m {{ "%02d" | format(pc.remaining_seconds) }}s</span>
+          <span class="money" data-remaining-sec="{{ pc.remaining_minutes * 60 + pc.remaining_seconds }}">{{ "%02d" | format(pc.remaining_minutes) }}:{{ "%02d" | format(pc.remaining_seconds) }}</span>
           {% else %}
           <span style="color: var(--gray);">—</span>
           {% endif %}

@@ -14,6 +14,7 @@ class PCHeartbeatResponse(BaseModel):
     remaining_minutes: int
     remaining_seconds: int
     session_token: Optional[str] = None
+    time_added_minutes: int = 0
 
 class PCStatusResponse(BaseModel):
     pc_number: int

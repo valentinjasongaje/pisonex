@@ -55,6 +55,7 @@ Module Program
         AddHandler _session.ServerConnectionLost,     AddressOf OnConnectionLost
         AddHandler _session.ServerConnectionRestored, AddressOf OnConnectionRestored
         AddHandler _session.LowTimeWarning,           AddressOf OnLowTimeWarning
+        AddHandler _session.TimeAdded,                AddressOf OnTimeAdded
 
         ' Admin panel from lock form shortcut and from tray menu
         AddHandler _lockMgr.LockFormAdminRequested, AddressOf OnAdminPanelRequested
@@ -120,6 +121,13 @@ Module Program
             $"⚠ {minutesLeft} Minute{If(minutesLeft = 1, "", "s")} Left",
             $"Your session on PC {AppConfig.PCNumber:D2} will end in {minutesLeft} minute{If(minutesLeft = 1, "", "s")}. Insert more coins to continue.",
             ToolTipIcon.Warning)
+    End Sub
+
+    Private Sub OnTimeAdded(minutes As Integer)
+        _tray.ShowBalloon(
+            $"+{minutes} Minute{If(minutes = 1, "", "s")} Added",
+            $"{minutes} minute{If(minutes = 1, "", "s")} {If(minutes = 1, "has", "have")} been added to your session on PC {AppConfig.PCNumber:D2}.",
+            ToolTipIcon.Info)
     End Sub
 
     ' ── Admin panel flow ──────────────────────────────────────────────────

@@ -132,6 +132,22 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// ── Real-time countdown ───────────────────────────────────────────────────────
+(function startTimerCountdown() {
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  setInterval(() => {
+    if (document.hidden) return; // don't tick while tab is in background
+    document.querySelectorAll('[data-remaining-sec]').forEach(el => {
+      let sec = parseInt(el.dataset.remainingSec, 10);
+      if (isNaN(sec) || sec <= 0) return;
+      sec -= 1;
+      el.dataset.remainingSec = sec;
+      el.textContent = `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
+    });
+  }, 1000);
+})();
+
 // ── Toast notifications ───────────────────────────────────────────────────────
 function showToast(message, type = 'success') {
   const toast = document.createElement('div');

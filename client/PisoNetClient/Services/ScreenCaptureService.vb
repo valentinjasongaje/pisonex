@@ -3,6 +3,7 @@ Imports System.Drawing.Imaging
 Imports System.IO
 Imports System.Timers
 Imports System.Windows.Forms
+Imports PisoNetClient.Config
 
 Namespace Services
 
@@ -16,7 +17,7 @@ Namespace Services
 
         Private ReadOnly _api     As ApiService
         Private ReadOnly _session As SessionManager
-        Private _timer            As Timer
+        Private _timer            As System.Timers.Timer
         Private _disposed         As Boolean = False
 
         Public Sub New(api As ApiService, session As SessionManager)
@@ -25,14 +26,16 @@ Namespace Services
         End Sub
 
         Public Sub Start()
-            _timer = New Timer(5_000)
+            Dim intervalMs = AppConfig.ScreenCaptureIntervalSec * 1_000
+            _timer = New System.Timers.Timer(intervalMs)
             AddHandler _timer.Elapsed, AddressOf OnCaptureTick
             _timer.AutoReset = True
             _timer.Start()
         End Sub
 
         Private Async Sub OnCaptureTick(sender As Object, e As ElapsedEventArgs)
-            ' Skip when PC is locked — no point capturing the lock screen
+            ' Skip when disabled in config or PC is locked
+            If Not AppConfig.ScreenCaptureEnabled Then Return
             If _session.IsLocked Then Return
             Try
                 Dim jpeg = CaptureScreen()
@@ -59,7 +62,7 @@ Namespace Services
                     Using ms = New MemoryStream()
                         Dim codec = GetJpegCodec()
                         Using ep = New EncoderParameters(1)
-                            ep.Param(0) = New EncoderParameter(Encoder.Quality, 55L)
+                            ep.Param(0) = New EncoderParameter(Encoder.Quality, CLng(AppConfig.ScreenCaptureQuality))
                             scaled.Save(ms, codec, ep)
                         End Using
                         Return ms.ToArray()

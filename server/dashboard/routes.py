@@ -129,6 +129,7 @@ def _pc_overview_data(db: Session):
             "ip_address": pc.ip_address,
             "last_seen": pc.last_seen,
             "remaining_minutes": remaining_sec // 60,
+            "remaining_seconds": remaining_sec % 60,
         })
 
     db.commit()

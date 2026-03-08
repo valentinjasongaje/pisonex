@@ -7,6 +7,13 @@ from services.rate_service import pesos_to_minutes
 
 logger = logging.getLogger(__name__)
 
+# ── Module-level pending state (survives requests, resets on server restart) ──
+# Tracks PCs with a brand-new session that the client hasn't acknowledged yet.
+# On first client heartbeat we reset started_at so the full time is granted.
+_pending_start: set[int] = set()
+# How many minutes were added since the client's last heartbeat (for notification).
+_pending_notify: dict[int, int] = {}
+
 
 class SessionService:
     def __init__(self, db: DBSession):
@@ -103,6 +110,9 @@ class SessionService:
             )
             self._db.add(session)
             pc.is_locked = False
+            _pending_start.add(pc_number)
+
+        _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + minutes
 
         tx = CoinTransaction(
             pc_id=pc.id,
@@ -136,11 +146,31 @@ class SessionService:
             )
             self._db.add(session)
             pc.is_locked = False
+            _pending_start.add(pc_number)
+
+        _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + minutes
 
         self._log("INFO", "admin", f"Admin added {minutes}min to PC {pc_number:02d}")
         self._db.commit()
         self._db.refresh(session)
         return session
+
+    def acknowledge_session_start(self, pc_number: int, session) -> None:
+        """
+        Called on each client heartbeat. If the PC has a fresh session that the
+        client hasn't seen yet, reset started_at to now so the full granted time
+        is available from the moment the client unlocks — not from when the admin
+        clicked the button.
+        """
+        if pc_number not in _pending_start or not session:
+            return
+        session.started_at = datetime.utcnow()
+        self._db.commit()
+        _pending_start.discard(pc_number)
+
+    def pop_pending_notification(self, pc_number: int) -> int:
+        """Returns minutes added since the last heartbeat and clears the counter."""
+        return _pending_notify.pop(pc_number, 0)
 
     def end_session(self, pc_number: int) -> bool:
         session = self.get_active_session(pc_number)
