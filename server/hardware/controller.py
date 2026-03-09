@@ -43,7 +43,10 @@ class HardwareController:
         self._idle_timer: threading.Timer | None = None
 
         self._lcd = LCD()
-        self._coin = CoinSlot(on_coin_complete=self._on_coin)
+        self._coin = CoinSlot(
+            on_coin_complete=self._on_coin,
+            on_coin_progress=self._on_coin_progress,
+        )
         self._keypad = Keypad(on_key_press=self._on_key)
 
         self._keypad.start()
@@ -154,6 +157,15 @@ class HardwareController:
         logger.info("PC %02d selected — awaiting coins", pc_number)
 
     # ── Coin insertion handling ───────────────────────────────────
+
+    def _on_coin_progress(self, pesos: int):
+        """Called on each debounced pulse — updates LCD with running total."""
+        with self._lock:
+            if self._state != State.AWAITING_COINS:
+                return
+            pc = self._selected_pc
+        minutes_preview = (pesos // settings.DEFAULT_RATE_PESOS) * settings.DEFAULT_RATE_MINUTES
+        self._lcd.show(Screen.inserting_coins(pc, pesos, minutes_preview))
 
     def _on_coin(self, pesos: int):
         with self._lock:

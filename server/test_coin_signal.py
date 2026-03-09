@@ -33,7 +33,9 @@ GPIO.setup(COIN_PIN,  GPIO.IN,  pull_up_down=GPIO.PUD_OFF)
 GPIO.output(RELAY_PIN, GPIO.HIGH)
 print(f"Relay BCM {RELAY_PIN} → HIGH (coin acceptor powered)\n")
 
+time.sleep(0.1)   # let acceptor stabilise before sampling resting level
 last_level = GPIO.input(COIN_PIN)
+_resting_level = last_level
 
 print(f"Monitoring BCM {COIN_PIN} — insert coins now.  Ctrl+C to stop.\n")
 print(f"  Resting level right now: {last_level}")
@@ -63,11 +65,13 @@ finally:
         falling = sum(1 for _, e in _events if "FALLING" in e)
         print(f"  RISING  (↑) : {rising}")
         print(f"  FALLING (↓) : {falling}")
-        if falling > rising:
-            print("\n  → Edge to use: FALLING (custom board inverts signal)")
-            print("     Set COIN_EDGE=FALLING in your .env  (already the default)")
+        # Correct recommendation: resting HIGH → pulses are FALLING edges
+        #                         resting LOW  → pulses are RISING  edges
+        if _resting_level == 1:
+            print("\n  → Edge to use: FALLING  (pin rests HIGH, coin pulse goes LOW)")
+            print("     COIN_EDGE=FALLING  ← already the default, no change needed")
         else:
-            print("\n  → Edge to use: RISING")
+            print("\n  → Edge to use: RISING  (pin rests LOW, coin pulse goes HIGH)")
             print("     Set COIN_EDGE=RISING in your .env")
     else:
         print("\n  !! No signal detected at all.")

@@ -109,6 +109,16 @@ class Screen:
         ]
 
     @staticmethod
+    def inserting_coins(pc_number: int, pesos: int, minutes: int) -> list[str]:
+        """Real-time progress screen shown while coins are still being inserted."""
+        return [
+            f"   PC {pc_number:02d} Selected   ",
+            "  Inserting coins...",
+            f"  Inserted: P{pesos}",
+            f"  = {minutes} min so far",
+        ]
+
+    @staticmethod
     def coin_inserted(pesos: int, minutes: int, total_min: int) -> list[str]:
         return [
             f"   +P{pesos} Inserted!    ",

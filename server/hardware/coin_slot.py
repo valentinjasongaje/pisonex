@@ -36,12 +36,15 @@ class CoinSlot:
             Relay NO      →  UCB Mini v4 12V
     """
 
-    def __init__(self, on_coin_complete):
+    def __init__(self, on_coin_complete, on_coin_progress=None):
         """
         on_coin_complete: callable(amount_pesos: int)
             Called when a full coin insertion is detected.
+        on_coin_progress: callable(pesos_so_far: int) | None
+            Called on each debounced pulse so the UI can show a running total.
         """
         self._on_complete = on_coin_complete
+        self._on_progress = on_coin_progress
         self._pulse_count = 0
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
@@ -162,12 +165,14 @@ class CoinSlot:
             return
 
         now = time.monotonic()
+        current_count = None
         with self._lock:
             # Software debounce — ignore transitions closer together than COIN_DEBOUNCE_MS
             if now - self._last_pulse_time < (settings.COIN_DEBOUNCE_MS / 1000):
                 return
             self._last_pulse_time = now
             self._pulse_count += 1
+            current_count = self._pulse_count
             logger.debug("CoinSlot: pulse #%d", self._pulse_count)
 
             if self._timer:
@@ -178,6 +183,9 @@ class CoinSlot:
             )
             self._timer.daemon = True
             self._timer.start()
+
+        if self._on_progress:
+            self._on_progress(current_count)
 
     def _finalize(self):
         with self._lock:
