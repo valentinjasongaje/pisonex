@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # UCB Mini v4 pulse gap is ~50-80 ms; 30 ms debounce catches bounce without
     # swallowing legitimate pulses on ₱5 / ₱10 multi-pulse coins.
     COIN_DEBOUNCE_MS: int = 30
-    COIN_PULSE_TIMEOUT: float = 1.5
+    COIN_PULSE_TIMEOUT: float = 3.0   # seconds of silence before finalizing — allows inserting multiple coins
     KEYPAD_SCAN_INTERVAL: float = 0.05
     PC_IDLE_TIMEOUT: int = 30       # seconds before returning to idle screen
     DISPLAY_CONFIRM_DELAY: int = 3  # seconds to show confirmation message

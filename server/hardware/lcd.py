@@ -17,6 +17,7 @@ class LCD:
     def __init__(self):
         self._lock = threading.Lock()
         self._lcd = None
+        self._displayed: list[str] = [""] * ROWS   # tracks what is on screen
         self._setup()
 
     def _setup(self):
@@ -42,14 +43,17 @@ class LCD:
     def show(self, lines: list[str]):
         """
         Display up to 4 lines on the LCD.
+        Only rewrites lines whose content has changed — eliminates flicker.
         Each line is truncated / padded to exactly 20 characters.
         """
         with self._lock:
             if self._lcd:
-                self._lcd.clear()
-                for i, line in enumerate(lines[:ROWS]):
-                    self._lcd.cursor_pos = (i, 0)
-                    self._lcd.write_string(self._pad(line))
+                for i in range(ROWS):
+                    text = self._pad(lines[i] if i < len(lines) else "")
+                    if text != self._displayed[i]:
+                        self._lcd.cursor_pos = (i, 0)
+                        self._lcd.write_string(text)
+                        self._displayed[i] = text
             else:
                 # Simulation: print to console
                 border = "+" + "-" * COLS + "+"
@@ -63,6 +67,7 @@ class LCD:
         with self._lock:
             if self._lcd:
                 self._lcd.clear()
+            self._displayed = [""] * ROWS
 
     def cleanup(self):
         self.clear()
