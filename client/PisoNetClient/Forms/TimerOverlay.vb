@@ -22,9 +22,11 @@ Namespace Forms
         Private Shared ReadOnly DimColor As Color = Color.FromArgb(100, 116, 139)
 
         ' Fixed dimensions
-        Private Const FORM_W      As Integer = 196   ' width stays constant
-        Private Const FORM_H_SLIM As Integer = 52    ' no PC label  / Side label
-        Private Const FORM_H_TALL As Integer = 70    ' PC label Above
+        Private Const FORM_W      As Integer = 260   ' width stays constant
+        Private Const PAD_X       As Integer = 10   ' horizontal inner padding
+        Private Const PAD_Y       As Integer = 8    ' vertical inner padding
+        Private Const FORM_H_SLIM As Integer = 48    ' no PC label / Side label
+        Private Const FORM_H_TALL As Integer = 68    ' PC label Above
 
         Private Const DOT_SIZE As Integer = 10   ' connection indicator circle diameter
         Private Const DOT_MARGIN As Integer = 6  ' gap from right / top edge
@@ -64,7 +66,7 @@ Namespace Forms
 
             ' ── Time label ───────────────────────────────────────────────────
             _lblTime = New Label() With {
-                .Font      = New Font("Segoe UI", 22, FontStyle.Bold),
+                .Font      = New Font("Segoe UI", 16, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(34, 197, 94),
                 .BackColor = BgColor,
                 .Text      = "--:--",
@@ -138,14 +140,14 @@ Namespace Forms
 
                 _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
 
-                Dim pcW = If(showDot, FORM_W - DOT_SIZE - DOT_MARGIN - 2, FORM_W)
-                _lblPC.Location = New Point(0, 5)
-                _lblPC.Size     = New Size(pcW, 18)
-                _lblPC.Font     = New Font("Segoe UI", 8)
+                Dim pcW = If(showDot, FORM_W - DOT_SIZE - DOT_MARGIN - 2, FORM_W) - PAD_X * 2
+                _lblPC.Location  = New Point(PAD_X, PAD_Y)
+                _lblPC.Size      = New Size(pcW, 16)
+                _lblPC.Font      = New Font("Segoe UI", 9)
                 _lblPC.TextAlign = ContentAlignment.MiddleCenter
 
-                _lblTime.Location = New Point(0, 24)
-                _lblTime.Size     = New Size(FORM_W, 42)
+                _lblTime.Location = New Point(PAD_X, PAD_Y + 18)
+                _lblTime.Size     = New Size(FORM_W - PAD_X * 2, FORM_H_TALL - PAD_Y - 18 - PAD_Y)
 
             ElseIf showPc Then
                 ' ── PC label side (right of time, vertically centered) ────
@@ -153,21 +155,21 @@ Namespace Forms
 
                 _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
 
-                ' Time takes ~150px, PC label gets the remaining strip
-                _lblTime.Location = New Point(0, 6)
-                _lblTime.Size     = New Size(150, FORM_H_SLIM - 10)
+                ' Time gets padded left, PC label sits right of it
+                _lblTime.Location = New Point(PAD_X, PAD_Y)
+                _lblTime.Size     = New Size(170, FORM_H_SLIM - PAD_Y * 2)
 
-                _lblPC.Location  = New Point(152, (FORM_H_SLIM - 16) \ 2)
-                _lblPC.Size      = New Size(38, 16)
-                _lblPC.Font      = New Font("Segoe UI", 7)
+                _lblPC.Location  = New Point(PAD_X + 170 + 4, (FORM_H_SLIM - 24) \ 2)
+                _lblPC.Size      = New Size(64, 24)
+                _lblPC.Font      = New Font("Segoe UI", 9, FontStyle.Bold)
                 _lblPC.TextAlign = ContentAlignment.MiddleLeft
 
             Else
                 ' ── No PC label ───────────────────────────────────────────
                 Me.Size = New Size(FORM_W, FORM_H_SLIM)
                 _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
-                _lblTime.Location  = New Point(0, 6)
-                _lblTime.Size      = New Size(FORM_W, FORM_H_SLIM - 10)
+                _lblTime.Location  = New Point(PAD_X, 6)
+                _lblTime.Size      = New Size(FORM_W - PAD_X * 2, FORM_H_SLIM - 10)
             End If
 
             ' Refresh dot and time colours
@@ -192,7 +194,7 @@ Namespace Forms
             If minutes >= 60 Then
                 Dim hrs  = minutes \ 60
                 Dim mins = minutes Mod 60
-                _lblTime.Text = $"{hrs}h {mins}m"
+                _lblTime.Text = If(mins = 0, $"{hrs}h", $"{hrs}h {mins}m")
             Else
                 _lblTime.Text = $"{minutes:D2}:{seconds:D2}"
             End If

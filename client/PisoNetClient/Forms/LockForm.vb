@@ -394,10 +394,17 @@ Namespace Forms
 
         Protected Overrides Sub OnPaintBackground(e As PaintEventArgs)
             If _bgImage IsNot Nothing Then
-                Dim scale = Math.Max(CSng(Me.Width) / _bgImage.Width,
-                                     CSng(Me.Height) / _bgImage.Height)
-                Dim w = CInt(_bgImage.Width * scale)
-                Dim h = CInt(_bgImage.Height * scale)
+                Dim w As Integer, h As Integer
+                Select Case AppConfig.LockBgImageFit
+                    Case "Cover"
+                        Dim s = Math.Max(CSng(Me.Width) / _bgImage.Width, CSng(Me.Height) / _bgImage.Height)
+                        w = CInt(_bgImage.Width * s) : h = CInt(_bgImage.Height * s)
+                    Case "Stretch"
+                        w = Me.Width : h = Me.Height
+                    Case Else ' Contain (default)
+                        Dim s = Math.Min(CSng(Me.Width) / _bgImage.Width, CSng(Me.Height) / _bgImage.Height)
+                        w = CInt(_bgImage.Width * s) : h = CInt(_bgImage.Height * s)
+                End Select
                 e.Graphics.DrawImage(_bgImage, (Me.Width - w) \ 2, (Me.Height - h) \ 2, w, h)
                 Using br = New SolidBrush(Color.FromArgb(160, 0, 0, 0))
                     e.Graphics.FillRectangle(br, Me.ClientRectangle)
@@ -425,18 +432,22 @@ Namespace Forms
             ' YPct = % of the slack space (Height - labelHeight), so 47 ≈ slightly above middle.
             Dim msgSlackX = Math.Max(0, Me.ClientSize.Width  - _lblMessage.Width)
             Dim msgSlackY = Math.Max(0, Me.ClientSize.Height - _lblMessage.Height)
-            _lblMessage.Location = New Point(
-                CInt(msgSlackX * AppConfig.LockMsgXPct / 100.0),
-                CInt(msgSlackY * AppConfig.LockMsgYPct / 100.0))
+            Dim msgX = If(AppConfig.LockMsgCenterX,
+                          msgSlackX \ 2,
+                          CInt(msgSlackX * AppConfig.LockMsgXPct / 100.0))
+            _lblMessage.Location = New Point(msgX, CInt(msgSlackY * AppConfig.LockMsgYPct / 100.0))
 
             ' Sub-message always sits directly below the main message, centered
             _lblSub.Location = New Point(
                 (Me.ClientSize.Width - _lblSub.Width) \ 2,
                 _lblMessage.Bottom + 16)
 
-            ' PC label: position as % of screen dimensions (not slack space)
+            ' PC label: centered based on rendered width, or % of screen width
+            Dim pcX = If(AppConfig.LockPcLabelCenterX,
+                         (Me.ClientSize.Width - _lblPCNumber.Width) \ 2,
+                         CInt(Me.ClientSize.Width * AppConfig.LockPcLabelXPct / 100.0))
             _lblPCNumber.Location = New Point(
-                CInt(Me.ClientSize.Width  * AppConfig.LockPcLabelXPct / 100.0),
+                pcX,
                 CInt(Me.ClientSize.Height * AppConfig.LockPcLabelYPct / 100.0))
 
             If _lblOffline.Visible Then

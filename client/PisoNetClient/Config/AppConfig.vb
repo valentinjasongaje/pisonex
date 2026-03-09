@@ -53,6 +53,15 @@ Namespace Config
             End Get
         End Property
 
+        ''' <summary>How the background image is scaled: Contain | Cover | Stretch (default Contain).</summary>
+        Public ReadOnly Property LockBgImageFit As String
+            Get
+                Dim v = ReadReg("LockBgImageFit")
+                If v = "Cover" OrElse v = "Stretch" Then Return v
+                Return "Contain"
+            End Get
+        End Property
+
         Public ReadOnly Property LockMessage As String
             Get
                 Dim val = ReadReg("LockMessage")
@@ -263,8 +272,22 @@ Namespace Config
             Get
                 Dim val = ReadReg("LockPcLabelSize")
                 Dim n As Integer
-                If Integer.TryParse(val, n) AndAlso n >= 8 AndAlso n <= 24 Then Return n
+                If Integer.TryParse(val, n) AndAlso n >= 8 AndAlso n <= 76 Then Return n
                 Return 11
+            End Get
+        End Property
+
+        ''' <summary>When True, main message is horizontally centered (ignores LockMsgXPct).</summary>
+        Public ReadOnly Property LockMsgCenterX As Boolean
+            Get
+                Return ReadBool("LockMsgCenterX", defaultVal:=True)
+            End Get
+        End Property
+
+        ''' <summary>When True, PC label is horizontally centered (ignores LockPcLabelXPct).</summary>
+        Public ReadOnly Property LockPcLabelCenterX As Boolean
+            Get
+                Return ReadBool("LockPcLabelCenterX", defaultVal:=False)
             End Get
         End Property
 
@@ -310,6 +333,9 @@ Namespace Config
         End Sub
         Public Sub SaveLockBgImagePath(p As String)
             WriteReg("LockBgImagePath", p)
+        End Sub
+        Public Sub SaveLockBgImageFit(v As String)
+            WriteReg("LockBgImageFit", v)
         End Sub
         Public Sub SaveLockMessage(msg As String)
             WriteReg("LockMessage", msg)
@@ -380,6 +406,9 @@ Namespace Config
         Public Sub SaveLockMsgXPct(n As Integer)
             WriteReg("LockMsgXPct", n.ToString())
         End Sub
+        Public Sub SaveLockMsgCenterX(v As Boolean)
+            WriteReg("LockMsgCenterX", If(v, "1", "0"))
+        End Sub
         Public Sub SaveLockMsgYPct(n As Integer)
             WriteReg("LockMsgYPct", n.ToString())
         End Sub
@@ -391,6 +420,9 @@ Namespace Config
         End Sub
         Public Sub SaveLockPcLabelXPct(n As Integer)
             WriteReg("LockPcLabelXPct", n.ToString())
+        End Sub
+        Public Sub SaveLockPcLabelCenterX(v As Boolean)
+            WriteReg("LockPcLabelCenterX", If(v, "1", "0"))
         End Sub
         Public Sub SaveLockPcLabelYPct(n As Integer)
             WriteReg("LockPcLabelYPct", n.ToString())

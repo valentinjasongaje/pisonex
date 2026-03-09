@@ -23,6 +23,7 @@ Namespace Forms
         Private _nudPcNum       As NumericUpDown
         Private _picColor       As PictureBox
         Private _txtImgPath     As TextBox
+        Private _cmbBgFit       As ComboBox
         Private _txtMsg         As TextBox
         Private _chkTasks       As CheckBox
         Private _chkCmd         As CheckBox
@@ -50,13 +51,13 @@ Namespace Forms
         ' Lock screen text — main message
         Private _picMsgColor     As PictureBox
         Private _nudMsgSize      As NumericUpDown
-        Private _nudMsgX         As NumericUpDown
+        Private _chkMsgCenterX   As CheckBox
         Private _nudMsgY         As NumericUpDown
         Private _currentMsgColor As Color
         ' Lock screen text — PC number label
         Private _picPcLblColor   As PictureBox
         Private _nudPcLblSize    As NumericUpDown
-        Private _nudPcLblX       As NumericUpDown
+        Private _chkPcLblCenterX As CheckBox
         Private _nudPcLblY       As NumericUpDown
         Private _currentPcLblColor As Color
         ' Lock screen preview (Appearance tab)
@@ -178,7 +179,21 @@ Namespace Forms
             Dim btnClear = MakeBtn("Clear Image", New Point(LM, y), Color.FromArgb(42, 46, 64))
             btnClear.Size = New Size(106, 26)
             AddHandler btnClear.Click, Sub(s, e) _txtImgPath.Text = ""
-            tab.Controls.Add(btnClear) : y += 44
+            tab.Controls.Add(btnClear)
+
+            tab.Controls.Add(SmallLabel("Fit:", New Point(LM + 116, y + 5)))
+            _cmbBgFit = New ComboBox() With {
+                .Location      = New Point(LM + 138, y),
+                .Width         = 110,
+                .DropDownStyle = ComboBoxStyle.DropDownList,
+                .BackColor     = Color.FromArgb(24, 28, 44),
+                .ForeColor     = Color.White,
+                .FlatStyle     = FlatStyle.Flat,
+                .Font          = New Font("Segoe UI", 9)
+            }
+            _cmbBgFit.Items.AddRange({"Contain", "Cover", "Stretch"})
+            _cmbBgFit.SelectedItem = AppConfig.LockBgImageFit
+            tab.Controls.Add(_cmbBgFit) : y += 44
 
             tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
 
@@ -445,7 +460,7 @@ Namespace Forms
             inner.Controls.Add(SmallLabel("Element",      New Point(LM,       y)))
             inner.Controls.Add(SmallLabel("Color",        New Point(LM + 130, y)))
             inner.Controls.Add(SmallLabel("Font Size",    New Point(LM + 200, y)))
-            inner.Controls.Add(SmallLabel("X Position %", New Point(LM + 278, y)))
+            inner.Controls.Add(SmallLabel("Center X",     New Point(LM + 278, y)))
             inner.Controls.Add(SmallLabel("Y Position %", New Point(LM + 358, y))) : y += 18
 
             ' ── Main Message row ─────────────────────────────────────────────
@@ -464,8 +479,8 @@ Namespace Forms
             _nudMsgSize = DarkNud(New Point(LM + 200, y), 70, AppConfig.LockMsgSize, 18, 72)
             inner.Controls.Add(_nudMsgSize)
 
-            _nudMsgX = DarkNud(New Point(LM + 278, y), 70, AppConfig.LockMsgXPct, 0, 100)
-            inner.Controls.Add(_nudMsgX)
+            _chkMsgCenterX = DarkCheck("Center", New Point(LM + 278, y + 2), AppConfig.LockMsgCenterX)
+            inner.Controls.Add(_chkMsgCenterX)
 
             _nudMsgY = DarkNud(New Point(LM + 358, y), 70, AppConfig.LockMsgYPct, 0, 100)
             inner.Controls.Add(_nudMsgY) : y += 30
@@ -483,18 +498,18 @@ Namespace Forms
             AddHandler _picPcLblColor.Click, AddressOf OnPickPcLblColor
             inner.Controls.Add(_picPcLblColor)
 
-            _nudPcLblSize = DarkNud(New Point(LM + 200, y), 70, AppConfig.LockPcLabelSize, 8, 24)
+            _nudPcLblSize = DarkNud(New Point(LM + 200, y), 70, AppConfig.LockPcLabelSize, 8, 72)
             inner.Controls.Add(_nudPcLblSize)
 
-            _nudPcLblX = DarkNud(New Point(LM + 278, y), 70, AppConfig.LockPcLabelXPct, 0, 100)
-            inner.Controls.Add(_nudPcLblX)
+            _chkPcLblCenterX = DarkCheck("Center", New Point(LM + 278, y + 2), AppConfig.LockPcLabelCenterX)
+            inner.Controls.Add(_chkPcLblCenterX)
 
             _nudPcLblY = DarkNud(New Point(LM + 358, y), 70, AppConfig.LockPcLabelYPct, 0, 100)
             inner.Controls.Add(_nudPcLblY) : y += 30
 
             inner.Controls.Add(InfoLabel(
-                "X/Y: 0 = left/top edge, 50 = centered, 100 = right/bottom edge." &
-                " Position applies as a % of the remaining space after the label size.",
+                "Y: 0 = top edge, 50 = centered, 100 = bottom edge." &
+                " Center X auto-centers the label based on its rendered pixel width.",
                 New Point(LM, y))) : y += 38
 
             inner.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
@@ -520,12 +535,12 @@ Namespace Forms
             AddHandler _cmbTimerPcPos.SelectedIndexChanged, timerRefresh
 
             Dim lockRefresh = New EventHandler(AddressOf InvalidateLockPreview)
-            AddHandler _nudMsgSize.ValueChanged,   lockRefresh
-            AddHandler _nudMsgX.ValueChanged,      lockRefresh
-            AddHandler _nudMsgY.ValueChanged,      lockRefresh
-            AddHandler _nudPcLblSize.ValueChanged, lockRefresh
-            AddHandler _nudPcLblX.ValueChanged,    lockRefresh
-            AddHandler _nudPcLblY.ValueChanged,    lockRefresh
+            AddHandler _nudMsgSize.ValueChanged,        lockRefresh
+            AddHandler _chkMsgCenterX.CheckedChanged,   lockRefresh
+            AddHandler _nudMsgY.ValueChanged,           lockRefresh
+            AddHandler _nudPcLblSize.ValueChanged,      lockRefresh
+            AddHandler _chkPcLblCenterX.CheckedChanged, lockRefresh
+            AddHandler _nudPcLblY.ValueChanged,         lockRefresh
 
             ' Sync lock preview when the message text is edited on the Lock Screen tab
             If _txtMsg IsNot Nothing Then
@@ -634,12 +649,13 @@ Namespace Forms
             ' ── Main message ─────────────────────────────────────────────────
             Dim msgText = If(String.IsNullOrWhiteSpace(_txtMsg?.Text), "Insert Coins to Start", _txtMsg.Text)
             Dim msgPt   = Math.Max(4.0F, CInt(_nudMsgSize.Value) * scale)
-            Dim msgXPct = CInt(_nudMsgX.Value) / 100.0F
             Dim msgYPct = CInt(_nudMsgY.Value) / 100.0F
 
             Using msgFont = New Font("Segoe UI", msgPt, FontStyle.Bold)
                 Dim msgSz = e.Graphics.MeasureString(msgText, msgFont)
-                Dim msgX  = (pw - msgSz.Width)  * msgXPct
+                Dim msgX  = If(_chkMsgCenterX.Checked,
+                               (pw - msgSz.Width) / 2.0F,
+                               (pw - msgSz.Width) * CSng(AppConfig.LockMsgXPct) / 100.0F)
                 Dim msgY  = (ph - msgSz.Height) * msgYPct
                 Using msgBr = New SolidBrush(_currentMsgColor)
                     e.Graphics.DrawString(msgText, msgFont, msgBr, msgX, msgY)
@@ -661,12 +677,13 @@ Namespace Forms
             ' ── PC number label ───────────────────────────────────────────────
             Dim pcText = $"PC {AppConfig.PCNumber:D2}"
             Dim pcPt   = Math.Max(3.0F, CInt(_nudPcLblSize.Value) * scale)
-            Dim pcXPct = CInt(_nudPcLblX.Value) / 100.0F
             Dim pcYPct = CInt(_nudPcLblY.Value) / 100.0F
 
             Using pcFont = New Font("Segoe UI", pcPt)
                 Dim pcSz = e.Graphics.MeasureString(pcText, pcFont)
-                Dim pcX  = pw * pcXPct
+                Dim pcX  = If(_chkPcLblCenterX.Checked,
+                              (pw - pcSz.Width) / 2.0F,
+                              pw * CSng(AppConfig.LockPcLabelXPct) / 100.0F)
                 Dim pcY  = ph * pcYPct
                 Using pcBr = New SolidBrush(_currentPcLblColor)
                     e.Graphics.DrawString(pcText, pcFont, pcBr, pcX, pcY)
@@ -758,6 +775,7 @@ Namespace Forms
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
             AppConfig.SaveLockBgArgb(_currentBgColor.ToArgb())
             AppConfig.SaveLockBgImagePath(_txtImgPath.Text.Trim())
+            AppConfig.SaveLockBgImageFit(If(_cmbBgFit.SelectedItem?.ToString(), "Contain"))
             AppConfig.SaveLockMessage(_txtMsg.Text.Trim())
             AppConfig.SaveDisableTaskManager(_chkTasks.Checked)
             AppConfig.SaveDisableCmdPrompt(_chkCmd.Checked)
@@ -786,11 +804,11 @@ Namespace Forms
             ' ── Appearance: lock screen text ───────────────────────────────────
             AppConfig.SaveLockMsgForeArgb(_currentMsgColor.ToArgb())
             AppConfig.SaveLockMsgSize(CInt(_nudMsgSize.Value))
-            AppConfig.SaveLockMsgXPct(CInt(_nudMsgX.Value))
+            AppConfig.SaveLockMsgCenterX(_chkMsgCenterX.Checked)
             AppConfig.SaveLockMsgYPct(CInt(_nudMsgY.Value))
             AppConfig.SaveLockPcLabelForeArgb(_currentPcLblColor.ToArgb())
             AppConfig.SaveLockPcLabelSize(CInt(_nudPcLblSize.Value))
-            AppConfig.SaveLockPcLabelXPct(CInt(_nudPcLblX.Value))
+            AppConfig.SaveLockPcLabelCenterX(_chkPcLblCenterX.Checked)
             AppConfig.SaveLockPcLabelYPct(CInt(_nudPcLblY.Value))
 
             WindowsPolicy.Apply()
