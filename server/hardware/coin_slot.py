@@ -51,49 +51,55 @@ class CoinSlot:
             import RPi.GPIO as GPIO
             self._GPIO = GPIO
             GPIO.setmode(GPIO.BCM)
+        except ImportError:
+            self._GPIO = None
+            logger.warning("CoinSlot: RPi.GPIO not available — running in simulation mode")
+            return
 
-            # Relay pin — OUTPUT, starts LOW (coin acceptor unpowered at boot)
+        # Relay pin — set up independently so a failure here doesn't kill coin detection
+        try:
             GPIO.setup(settings.RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
+            logger.info("CoinSlot: relay pin BCM %d ready — starts LOW (unpowered)",
+                        settings.RELAY_PIN)
+        except Exception as e:
+            logger.error("CoinSlot: relay pin BCM %d setup FAILED: %s — relay will not work",
+                         settings.RELAY_PIN, e)
 
-            # Coin signal pin — INPUT with pull-down; UCB Mini v4 pulses HIGH
-            GPIO.setup(
-                settings.COIN_PIN,
-                GPIO.IN,
-                pull_up_down=GPIO.PUD_DOWN,
-            )
+        # Coin signal pin
+        try:
+            GPIO.setup(settings.COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
             GPIO.add_event_detect(
                 settings.COIN_PIN,
                 GPIO.RISING,
                 callback=self._pulse_detected,
                 bouncetime=settings.COIN_DEBOUNCE_MS,
             )
-            logger.info(
-                "CoinSlot: coin pin BCM %d, relay pin BCM %d — initialized",
-                settings.COIN_PIN, settings.RELAY_PIN,
-            )
-        except (ImportError, RuntimeError):
-            # Running on non-RPi hardware (dev mode)
-            self._GPIO = None
-            logger.warning("CoinSlot: RPi.GPIO not available — running in simulation mode")
+            logger.info("CoinSlot: coin pin BCM %d ready (PUD_DOWN, RISING)",
+                        settings.COIN_PIN)
+        except Exception as e:
+            logger.error("CoinSlot: coin pin BCM %d setup FAILED: %s — coin detection will not work",
+                         settings.COIN_PIN, e)
 
     def enable(self):
         """Power the coin acceptor via relay and enable pulse detection."""
         if self._GPIO:
             self._GPIO.output(settings.RELAY_PIN, self._GPIO.HIGH)
+            logger.info("CoinSlot: relay BCM %d → HIGH (coin acceptor powered)",
+                        settings.RELAY_PIN)
         self._enabled = True
-        logger.debug("CoinSlot: relay ON — coin acceptor powered")
 
     def disable(self):
         """Cut power to coin acceptor via relay and clear any pending pulses."""
         self._enabled = False
         if self._GPIO:
             self._GPIO.output(settings.RELAY_PIN, self._GPIO.LOW)
+            logger.info("CoinSlot: relay BCM %d → LOW (coin acceptor unpowered)",
+                        settings.RELAY_PIN)
         with self._lock:
             self._pulse_count = 0
             if self._timer:
                 self._timer.cancel()
                 self._timer = None
-        logger.debug("CoinSlot: relay OFF — coin acceptor unpowered")
 
     def simulate_coin(self, pesos: int):
         """Simulate a coin insertion — for development/testing only."""
