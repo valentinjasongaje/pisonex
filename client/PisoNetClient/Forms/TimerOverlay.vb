@@ -1,6 +1,8 @@
 Imports System.Drawing
+Imports System.Drawing.Drawing2D
 Imports System.Runtime.InteropServices
 Imports System.Windows.Forms
+Imports PisoNetClient.Config
 
 Namespace Forms
 
@@ -8,16 +10,32 @@ Namespace Forms
     ''' Small floating timer shown in the top-right corner when a session is active.
     ''' • Left-click-drag uses native Win32 caption drag (smooth, zero lag).
     ''' • Right-click shows a context menu to hide or reset position.
+    ''' • Connection indicator: small filled circle (green = connected, amber = offline)
+    '''   drawn in the upper-right corner of the form.
+    ''' • PC label: "PC 01" shown above or beside the time, configurable.
+    ''' • Call ApplyConfig() after changing AppConfig timer settings to re-layout.
     ''' </summary>
     Public Class TimerOverlay
         Inherits Form
 
-        Private Shared ReadOnly BgColor As Color = Color.FromArgb(18, 22, 38)
+        Private Shared ReadOnly BgColor  As Color = Color.FromArgb(18, 22, 38)
+        Private Shared ReadOnly DimColor As Color = Color.FromArgb(100, 116, 139)
 
-        Private _lblTime   As Label
-        Private _lblStatus As Label
+        ' Fixed dimensions
+        Private Const FORM_W      As Integer = 196   ' width stays constant
+        Private Const FORM_H_SLIM As Integer = 52    ' no PC label  / Side label
+        Private Const FORM_H_TALL As Integer = 70    ' PC label Above
 
-        ' ── Native drag (zero-lag, handled by Windows DWM) ───────────────────
+        Private Const DOT_SIZE As Integer = 10   ' connection indicator circle diameter
+        Private Const DOT_MARGIN As Integer = 6  ' gap from right / top edge
+
+        Private _lblTime As Label
+        Private _lblPC   As Label    ' PC number badge — shown/hidden per config
+        Private _dotPanel As Panel   ' connection indicator dot (transparent, Paint-driven)
+
+        Private _isConnected As Boolean = True
+
+        ' ── Native drag (handled by Windows DWM — zero lag) ──────────────────
         <DllImport("user32.dll", CharSet:=CharSet.Auto)>
         Private Shared Function ReleaseCapture() As Boolean
         End Function
@@ -32,48 +50,131 @@ Namespace Forms
 
         Public Sub New()
             InitializeComponent()
+            ApplyConfig()
         End Sub
 
         Private Sub InitializeComponent()
-            Me.DoubleBuffered    = True
-            Me.FormBorderStyle   = FormBorderStyle.None
-            Me.ShowInTaskbar     = False
-            Me.TopMost           = True
-            Me.Size              = New Size(164, 58)
-            Me.BackColor         = BgColor
-            Me.StartPosition     = FormStartPosition.Manual
-            Me.Cursor            = Cursors.SizeAll
+            Me.DoubleBuffered  = True
+            Me.FormBorderStyle = FormBorderStyle.None
+            Me.ShowInTaskbar   = False
+            Me.TopMost         = True
+            Me.BackColor       = BgColor
+            Me.StartPosition   = FormStartPosition.Manual
+            Me.Cursor          = Cursors.SizeAll
 
-            PositionToCorner()
-
+            ' ── Time label ───────────────────────────────────────────────────
             _lblTime = New Label() With {
                 .Font      = New Font("Segoe UI", 22, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(34, 197, 94),
                 .BackColor = BgColor,
                 .Text      = "--:--",
                 .AutoSize  = False,
-                .Size      = New Size(164, 40),
-                .Location  = New Point(0, 2),
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
-            _lblStatus = New Label() With {
+            ' ── PC number label ───────────────────────────────────────────────
+            _lblPC = New Label() With {
+                .Text      = $"PC {AppConfig.PCNumber:D2}",
                 .Font      = New Font("Segoe UI", 8),
-                .ForeColor = Color.FromArgb(100, 116, 139),
+                .ForeColor = DimColor,
                 .BackColor = BgColor,
-                .Text      = "Connected",
                 .AutoSize  = False,
-                .Size      = New Size(164, 16),
-                .Location  = New Point(0, 40),
-                .TextAlign = ContentAlignment.MiddleCenter
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Visible   = False
             }
 
-            Me.Controls.AddRange({_lblTime, _lblStatus})
+            ' ── Connection dot (transparent panel — drawn in Paint event) ─────
+            _dotPanel = New Panel() With {
+                .BackColor = Color.Transparent,
+                .Size      = New Size(DOT_SIZE, DOT_SIZE),
+                .Visible   = False
+            }
+            AddHandler _dotPanel.Paint, AddressOf OnDotPaint
 
-            ' Left-click drag on every surface
-            AddHandler Me.MouseDown,         AddressOf OnMouseDown
-            AddHandler _lblTime.MouseDown,   AddressOf OnMouseDown
-            AddHandler _lblStatus.MouseDown, AddressOf OnMouseDown
+            Me.Controls.AddRange({_lblTime, _lblPC, _dotPanel})
+
+            ' Left-click drag on every visible surface
+            Dim drag = New MouseEventHandler(AddressOf OnMouseDown)
+            AddHandler Me.MouseDown,       drag
+            AddHandler _lblTime.MouseDown, drag
+            AddHandler _lblPC.MouseDown,   drag
+        End Sub
+
+        ' ── Connection dot paint ──────────────────────────────────────────────
+
+        Private Sub OnDotPaint(sender As Object, e As PaintEventArgs)
+            Dim clr = If(_isConnected,
+                         Color.FromArgb(34, 197, 94),    ' green
+                         Color.FromArgb(245, 158, 11))   ' amber
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+            Using br = New SolidBrush(clr)
+                e.Graphics.FillEllipse(br, 0, 0, DOT_SIZE - 1, DOT_SIZE - 1)
+            End Using
+        End Sub
+
+        ' ── Layout engine ─────────────────────────────────────────────────────
+
+        ''' <summary>
+        ''' Re-layouts the overlay according to current AppConfig timer settings.
+        ''' Safe to call from any thread.
+        ''' </summary>
+        Public Sub ApplyConfig()
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() ApplyConfig())
+                Return
+            End If
+
+            Dim showDot  = AppConfig.TimerShowConnDot
+            Dim showPc   = AppConfig.TimerShowPcLabel
+            Dim pcAbove  = (AppConfig.TimerPcLabelPosition = "Above")
+
+            _dotPanel.Visible = showDot
+            _lblPC.Visible    = showPc
+            _lblPC.Text       = $"PC {AppConfig.PCNumber:D2}"
+
+            If showPc AndAlso pcAbove Then
+                ' ── PC label above time ────────────────────────────────────
+                Me.Size = New Size(FORM_W, FORM_H_TALL)
+
+                _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
+
+                Dim pcW = If(showDot, FORM_W - DOT_SIZE - DOT_MARGIN - 2, FORM_W)
+                _lblPC.Location = New Point(0, 5)
+                _lblPC.Size     = New Size(pcW, 18)
+                _lblPC.Font     = New Font("Segoe UI", 8)
+                _lblPC.TextAlign = ContentAlignment.MiddleCenter
+
+                _lblTime.Location = New Point(0, 24)
+                _lblTime.Size     = New Size(FORM_W, 42)
+
+            ElseIf showPc Then
+                ' ── PC label side (right of time, vertically centered) ────
+                Me.Size = New Size(FORM_W, FORM_H_SLIM)
+
+                _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
+
+                ' Time takes ~150px, PC label gets the remaining strip
+                _lblTime.Location = New Point(0, 6)
+                _lblTime.Size     = New Size(150, FORM_H_SLIM - 10)
+
+                _lblPC.Location  = New Point(152, (FORM_H_SLIM - 16) \ 2)
+                _lblPC.Size      = New Size(38, 16)
+                _lblPC.Font      = New Font("Segoe UI", 7)
+                _lblPC.TextAlign = ContentAlignment.MiddleLeft
+
+            Else
+                ' ── No PC label ───────────────────────────────────────────
+                Me.Size = New Size(FORM_W, FORM_H_SLIM)
+                _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
+                _lblTime.Location  = New Point(0, 6)
+                _lblTime.Size      = New Size(FORM_W, FORM_H_SLIM - 10)
+            End If
+
+            ' Refresh dot and time colours
+            _dotPanel.Invalidate()
+            ' Re-apply time colour in case it changed (next UpdateTime will refine for low-time)
+            _lblTime.ForeColor = Color.FromArgb(AppConfig.TimerTimeArgb)
+            PositionToCorner()
         End Sub
 
         Private Sub PositionToCorner()
@@ -88,11 +189,17 @@ Namespace Forms
                 Me.Invoke(Sub() UpdateTime(minutes, seconds))
                 Return
             End If
-            _lblTime.Text = $"{minutes:D2}:{seconds:D2}"
+            If minutes >= 60 Then
+                Dim hrs  = minutes \ 60
+                Dim mins = minutes Mod 60
+                _lblTime.Text = $"{hrs}h {mins}m"
+            Else
+                _lblTime.Text = $"{minutes:D2}:{seconds:D2}"
+            End If
             _lblTime.ForeColor = If(
                 minutes < 5,
-                Color.FromArgb(239, 68, 68),
-                Color.FromArgb(34, 197, 94))
+                Color.FromArgb(AppConfig.TimerLowTimeArgb),
+                Color.FromArgb(AppConfig.TimerTimeArgb))
         End Sub
 
         Public Sub ShowConnected()
@@ -100,8 +207,8 @@ Namespace Forms
                 Me.Invoke(Sub() ShowConnected())
                 Return
             End If
-            _lblStatus.Text      = "Connected"
-            _lblStatus.ForeColor = Color.FromArgb(100, 116, 139)
+            _isConnected = True
+            _dotPanel.Invalidate()
         End Sub
 
         Public Sub ShowOffline()
@@ -109,15 +216,14 @@ Namespace Forms
                 Me.Invoke(Sub() ShowOffline())
                 Return
             End If
-            _lblStatus.Text      = "Offline — timer running"
-            _lblStatus.ForeColor = Color.FromArgb(245, 158, 11)
+            _isConnected = False
+            _dotPanel.Invalidate()
         End Sub
 
         ' ── Mouse handling ─────────────────────────────────────────────────────
 
         Private Sub OnMouseDown(sender As Object, e As MouseEventArgs)
             If e.Button = MouseButtons.Left Then
-                ' Let Windows handle the drag natively — no jitter, perfect tracking
                 ReleaseCapture()
                 SendMessage(Me.Handle, WM_NCLBUTTONDOWN, New IntPtr(HTCAPTION), IntPtr.Zero)
 

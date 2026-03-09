@@ -9,14 +9,14 @@ Imports PisoNetClient.Forms
 
 Module Program
 
-    Private _api         As ApiService
-    Private _lockMgr     As LockManager
-    Private _session     As SessionManager
-    Private _overlay     As TimerOverlay
-    Private _tray        As SystemTray
-    Private _capture     As ScreenCaptureService
-    Private _notifs      As NotificationService
-    Private _guardTimer  As System.Timers.Timer   ' mutual watchdog keeper
+    Private _api As ApiService
+    Private _lockMgr As LockManager
+    Private _session As SessionManager
+    Private _overlay As TimerOverlay
+    Private _tray As SystemTray
+    Private _capture As ScreenCaptureService
+    Private _notifs As NotificationService
+    Private _guardTimer As System.Timers.Timer   ' mutual watchdog keeper
 
     <STAThread>
     Sub Main()
@@ -53,33 +53,34 @@ Module Program
         AddHandler Application.ApplicationExit, Sub(s, e) WindowsPolicy.RemoveAll()
 
         ' ── Create all UI objects on the STA thread ───────────────────────
-        _api     = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
+        _api = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
         _lockMgr = New LockManager()
         _session = New SessionManager(_api, _lockMgr)
         _overlay = New TimerOverlay()
-        _tray    = New SystemTray()
-        _notifs  = New NotificationService(_overlay)
+        _tray = New SystemTray()
+        _notifs = New NotificationService(_overlay)
 
         ' Force handle creation so InvokeRequired works on background threads
         Dim _fh = _overlay.Handle
 
         ' ── Wire up events ────────────────────────────────────────────────
-        AddHandler _session.TimeUpdated,              AddressOf OnTimeUpdated
-        AddHandler _session.SessionStarted,           AddressOf OnSessionStarted
-        AddHandler _session.SessionEnded,             AddressOf OnSessionEnded
-        AddHandler _session.ServerConnectionLost,     AddressOf OnConnectionLost
+        AddHandler _session.TimeUpdated, AddressOf OnTimeUpdated
+        AddHandler _session.SessionStarted, AddressOf OnSessionStarted
+        AddHandler _session.SessionEnded, AddressOf OnSessionEnded
+        AddHandler _session.ServerConnectionLost, AddressOf OnConnectionLost
         AddHandler _session.ServerConnectionRestored, AddressOf OnConnectionRestored
-        AddHandler _session.LowTimeWarning,           AddressOf OnLowTimeWarning
-        AddHandler _session.TimeAdded,                AddressOf OnTimeAdded
+        AddHandler _session.LowTimeWarning, AddressOf OnLowTimeWarning
+        AddHandler _session.TimeAdded, AddressOf OnTimeAdded
 
         ' Admin panel from lock form shortcut and from tray menu
         AddHandler _lockMgr.LockFormAdminRequested, AddressOf OnAdminPanelRequested
-        AddHandler _tray.AdminPanelRequested,        AddressOf OnAdminPanelRequested
+        AddHandler _tray.AdminPanelRequested, AddressOf OnAdminPanelRequested
+        AddHandler _tray.TimerToggleRequested, AddressOf OnTimerToggleRequested
 
         ' ── Register PC with server ────────────────────────────────────────
         Task.Run(Async Function()
-            Await _api.RegisterAsync()
-        End Function)
+                     Await _api.RegisterAsync()
+                 End Function)
 
         ' ── Start heartbeat + local countdown ────────────────────────────
         _session.Start()
@@ -106,6 +107,7 @@ Module Program
             Return
         End If
         If Not _overlay.Visible Then _overlay.Show()
+        _tray.SetTimerVisible(True)
         _tray.UpdateStatus("PisoNet — Session active")
     End Sub
 
@@ -115,7 +117,22 @@ Module Program
             Return
         End If
         _overlay.Hide()
+        _tray.SetTimerVisible(False)
         _tray.UpdateStatus("PisoNet — Waiting for coins")
+    End Sub
+
+    Private Sub OnTimerToggleRequested()
+        If _overlay.InvokeRequired Then
+            _overlay.Invoke(Sub() OnTimerToggleRequested())
+            Return
+        End If
+        If _overlay.Visible Then
+            _overlay.Hide()
+            _tray.SetTimerVisible(False)
+        Else
+            _overlay.Show()
+            _tray.SetTimerVisible(True)
+        End If
     End Sub
 
     Private Sub OnConnectionLost()
@@ -167,9 +184,15 @@ Module Program
 
         Dim panel = New AdminPanel()
         AddHandler panel.ExitRequested, AddressOf ExitApplication
+        ' Refresh live UI immediately on save so the user sees changes right away
+        AddHandler panel.SettingsSaved, Sub()
+                                            _overlay.ApplyConfig()
+                                            _lockMgr.RefreshLockAppearance()
+                                        End Sub
         panel.ShowDialog()
 
-        ' After admin closes panel, refresh the lock screen in case settings changed
+        ' Also refresh once more when the panel is closed (catches unsaved drag/position changes)
+        _overlay.ApplyConfig()
         _lockMgr.RefreshLockAppearance()
     End Sub
 
@@ -189,14 +212,14 @@ Module Program
 
     Private Function AskForPin() As String
         Dim dlg = New Form() With {
-            .Text            = "Admin Access",
-            .Size            = New Size(300, 160),
-            .StartPosition   = FormStartPosition.CenterScreen,
+            .Text = "Admin Access",
+            .Size = New Size(300, 160),
+            .StartPosition = FormStartPosition.CenterScreen,
             .FormBorderStyle = FormBorderStyle.FixedDialog,
-            .MaximizeBox     = False, .MinimizeBox = False,
-            .TopMost         = True,
-            .BackColor       = Color.FromArgb(15, 20, 35),
-            .ForeColor       = Color.White
+            .MaximizeBox = False, .MinimizeBox = False,
+            .TopMost = True,
+            .BackColor = Color.FromArgb(15, 20, 35),
+            .ForeColor = Color.White
         }
 
         Dim lbl = New Label() With {
@@ -243,7 +266,7 @@ Module Program
         Try
             Process.Start(New ProcessStartInfo(watchdogExe) With {
                 .UseShellExecute = False,
-                .CreateNoWindow  = True
+                .CreateNoWindow = True
             })
         Catch
             ' Watchdog not available — continue without it

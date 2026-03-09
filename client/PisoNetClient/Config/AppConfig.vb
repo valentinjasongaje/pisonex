@@ -112,17 +112,17 @@ Namespace Config
                 Dim val = ReadReg("ScreenCaptureIntervalSec")
                 Dim n As Integer
                 If Integer.TryParse(val, n) AndAlso n >= 3 AndAlso n <= 60 Then Return n
-                Return 5
+                Return 3
             End Get
         End Property
 
-        ''' <summary>JPEG quality for screenshots (30–95). Higher = clearer but larger upload.</summary>
+        ''' <summary>JPEG quality for screenshots (30–100). Higher = clearer but larger upload.</summary>
         Public ReadOnly Property ScreenCaptureQuality As Integer
             Get
                 Dim val = ReadReg("ScreenCaptureQuality")
                 Dim n As Integer
-                If Integer.TryParse(val, n) AndAlso n >= 30 AndAlso n <= 95 Then Return n
-                Return 75
+                If Integer.TryParse(val, n) AndAlso n >= 30 AndAlso n <= 100 Then Return n
+                Return 85
             End Get
         End Property
 
@@ -148,6 +148,143 @@ Namespace Config
                 Dim n As Integer
                 If Integer.TryParse(val, n) AndAlso n >= 10 AndAlso n <= 100 Then Return n
                 Return 80
+            End Get
+        End Property
+
+        ''' <summary>
+        ''' Partial name of the preferred SAPI voice (e.g. "Zira", "David", "Aria").
+        ''' Empty string = auto-select: prefer the first female voice, then first available.
+        ''' </summary>
+        Public ReadOnly Property VoiceName As String
+            Get
+                Return If(ReadReg("VoiceName"), "")
+            End Get
+        End Property
+
+        ' ── Timer overlay appearance ────────────────────────────────────────
+        ''' <summary>ARGB color of the large time text when the session has more than 5 minutes left.</summary>
+        Public ReadOnly Property TimerTimeArgb As Integer
+            Get
+                Dim val = ReadReg("TimerTimeArgb")
+                Dim n As Integer
+                If Integer.TryParse(val, n) Then Return n
+                Return Color.FromArgb(34, 197, 94).ToArgb()   ' default: green
+            End Get
+        End Property
+
+        ''' <summary>ARGB color of the time text when fewer than 5 minutes remain (low-time warning).</summary>
+        Public ReadOnly Property TimerLowTimeArgb As Integer
+            Get
+                Dim val = ReadReg("TimerLowTimeArgb")
+                Dim n As Integer
+                If Integer.TryParse(val, n) Then Return n
+                Return Color.FromArgb(239, 68, 68).ToArgb()   ' default: red
+            End Get
+        End Property
+
+        ''' <summary>Show a green/red filled circle in the upper-right of the timer
+        ''' instead of (or in addition to) a status text label.</summary>
+        Public ReadOnly Property TimerShowConnDot As Boolean
+            Get
+                Return ReadBool("TimerShowConnDot", defaultVal:=True)
+            End Get
+        End Property
+
+        ''' <summary>Show the PC number label on the timer overlay.</summary>
+        Public ReadOnly Property TimerShowPcLabel As Boolean
+            Get
+                Return ReadBool("TimerShowPcLabel", defaultVal:=True)
+            End Get
+        End Property
+
+        ''' <summary>"Above" (default) or "Side" — controls where PC label appears relative to the time.</summary>
+        Public ReadOnly Property TimerPcLabelPosition As String
+            Get
+                Dim val = ReadReg("TimerPcLabelPosition")
+                Return If(String.IsNullOrWhiteSpace(val), "Above", val)
+            End Get
+        End Property
+
+        ' ── Lock screen text appearance ─────────────────────────────────────
+        ''' <summary>ARGB color of the main lock message text (default: White).</summary>
+        Public ReadOnly Property LockMsgForeArgb As Integer
+            Get
+                Dim val = ReadReg("LockMsgForeArgb")
+                Dim n As Integer
+                If Integer.TryParse(val, n) Then Return n
+                Return Color.White.ToArgb()
+            End Get
+        End Property
+
+        ''' <summary>Font size for the main lock message (18–72 pt, default 36).</summary>
+        Public ReadOnly Property LockMsgSize As Integer
+            Get
+                Dim val = ReadReg("LockMsgSize")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 18 AndAlso n <= 72 Then Return n
+                Return 36
+            End Get
+        End Property
+
+        ''' <summary>Horizontal position of main message as % of (screen width – label width).
+        ''' 50 = horizontally centered (default).</summary>
+        Public ReadOnly Property LockMsgXPct As Integer
+            Get
+                Dim val = ReadReg("LockMsgXPct")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 0 AndAlso n <= 100 Then Return n
+                Return 50
+            End Get
+        End Property
+
+        ''' <summary>Vertical position of main message as % of (screen height – label height).
+        ''' 47 = slightly above center (default).</summary>
+        Public ReadOnly Property LockMsgYPct As Integer
+            Get
+                Dim val = ReadReg("LockMsgYPct")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 0 AndAlso n <= 100 Then Return n
+                Return 47
+            End Get
+        End Property
+
+        ''' <summary>ARGB color of the PC number badge on the lock screen.</summary>
+        Public ReadOnly Property LockPcLabelForeArgb As Integer
+            Get
+                Dim val = ReadReg("LockPcLabelForeArgb")
+                Dim n As Integer
+                If Integer.TryParse(val, n) Then Return n
+                Return Color.FromArgb(100, 120, 160).ToArgb()
+            End Get
+        End Property
+
+        ''' <summary>Font size for the PC number label on the lock screen (8–24 pt, default 11).</summary>
+        Public ReadOnly Property LockPcLabelSize As Integer
+            Get
+                Dim val = ReadReg("LockPcLabelSize")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 8 AndAlso n <= 24 Then Return n
+                Return 11
+            End Get
+        End Property
+
+        ''' <summary>PC label horizontal position as % of screen width (default 4 = near left).</summary>
+        Public ReadOnly Property LockPcLabelXPct As Integer
+            Get
+                Dim val = ReadReg("LockPcLabelXPct")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 0 AndAlso n <= 100 Then Return n
+                Return 4
+            End Get
+        End Property
+
+        ''' <summary>PC label vertical position as % of screen height (default 4 = near top).</summary>
+        Public ReadOnly Property LockPcLabelYPct As Integer
+            Get
+                Dim val = ReadReg("LockPcLabelYPct")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 0 AndAlso n <= 100 Then Return n
+                Return 4
             End Get
         End Property
 
@@ -215,6 +352,48 @@ Namespace Config
         End Sub
         Public Sub SaveVoiceVolume(n As Integer)
             WriteReg("VoiceVolume", n.ToString())
+        End Sub
+        Public Sub SaveVoiceName(name As String)
+            WriteReg("VoiceName", If(name, ""))
+        End Sub
+        Public Sub SaveTimerTimeArgb(argb As Integer)
+            WriteReg("TimerTimeArgb", argb.ToString())
+        End Sub
+        Public Sub SaveTimerLowTimeArgb(argb As Integer)
+            WriteReg("TimerLowTimeArgb", argb.ToString())
+        End Sub
+        Public Sub SaveTimerShowConnDot(v As Boolean)
+            WriteReg("TimerShowConnDot", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveTimerShowPcLabel(v As Boolean)
+            WriteReg("TimerShowPcLabel", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveTimerPcLabelPosition(pos As String)
+            WriteReg("TimerPcLabelPosition", If(pos, "Above"))
+        End Sub
+        Public Sub SaveLockMsgForeArgb(argb As Integer)
+            WriteReg("LockMsgForeArgb", argb.ToString())
+        End Sub
+        Public Sub SaveLockMsgSize(n As Integer)
+            WriteReg("LockMsgSize", n.ToString())
+        End Sub
+        Public Sub SaveLockMsgXPct(n As Integer)
+            WriteReg("LockMsgXPct", n.ToString())
+        End Sub
+        Public Sub SaveLockMsgYPct(n As Integer)
+            WriteReg("LockMsgYPct", n.ToString())
+        End Sub
+        Public Sub SaveLockPcLabelForeArgb(argb As Integer)
+            WriteReg("LockPcLabelForeArgb", argb.ToString())
+        End Sub
+        Public Sub SaveLockPcLabelSize(n As Integer)
+            WriteReg("LockPcLabelSize", n.ToString())
+        End Sub
+        Public Sub SaveLockPcLabelXPct(n As Integer)
+            WriteReg("LockPcLabelXPct", n.ToString())
+        End Sub
+        Public Sub SaveLockPcLabelYPct(n As Integer)
+            WriteReg("LockPcLabelYPct", n.ToString())
         End Sub
         ''' <summary>Saves own exe path so the watchdog can find it after a restart.</summary>
         Public Sub SaveClientExePath(path As String)

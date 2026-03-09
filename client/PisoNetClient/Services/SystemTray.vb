@@ -10,11 +10,14 @@ Namespace Services
     Public Class SystemTray
         Implements IDisposable
 
-        Private ReadOnly _notify As NotifyIcon
-        Private _disposed As Boolean = False
+        Private ReadOnly _notify    As NotifyIcon
+        Private _timerItem          As ToolStripMenuItem
+        Private _disposed           As Boolean = False
 
         ''' <summary>Raised when the user clicks "Admin Panel..." in the tray menu.</summary>
         Public Event AdminPanelRequested()
+        ''' <summary>Raised when the user clicks the Show/Hide Timer menu item.</summary>
+        Public Event TimerToggleRequested()
 
         Public Sub New()
             _notify = New NotifyIcon()
@@ -33,11 +36,25 @@ Namespace Services
 
             menu.Items.Add(New ToolStripSeparator())
 
+            _timerItem = New ToolStripMenuItem("Show Timer") With {
+                .ForeColor = Color.White
+            }
+            AddHandler _timerItem.Click, Sub(s, e) RaiseEvent TimerToggleRequested()
+            menu.Items.Add(_timerItem)
+
+            menu.Items.Add(New ToolStripSeparator())
+
             Dim adminItem = CType(menu.Items.Add("Admin Panel..."), ToolStripMenuItem)
             adminItem.ForeColor = Color.White
             AddHandler adminItem.Click, AddressOf OnAdminPanelClick
 
             _notify.ContextMenuStrip = menu
+        End Sub
+
+        ''' <summary>Sync the Show/Hide Timer label with the overlay's current visibility.</summary>
+        Public Sub SetTimerVisible(visible As Boolean)
+            If _disposed Then Return
+            _timerItem.Text = If(visible, "Hide Timer", "Show Timer")
         End Sub
 
         ''' <summary>Update the tooltip shown when hovering the tray icon.</summary>

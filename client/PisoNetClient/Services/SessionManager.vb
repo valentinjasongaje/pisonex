@@ -35,6 +35,14 @@ Namespace Services
         ''' <summary>Fired when the server reports that time was added to this PC's session.</summary>
         Public Event TimeAdded(minutes As Integer)
 
+        ' ── Heartbeat interval ───────────────────────────────────────
+        ' 1-second poll in all states.  On a local LAN with FastAPI +
+        ' SQLite this is negligible (< 1 ms server work per request,
+        ' even with 20+ PCs polling simultaneously on a Raspberry Pi).
+        ' Coins / admin time-adds are reflected on the client within 1 s.
+        Private Const HEARTBEAT_LOCKED_MS As Integer = 1_000    ' 1 s (waiting for coins)
+        Private Const HEARTBEAT_ACTIVE_MS As Integer = 1_000    ' 1 s (session running)
+
         Public Sub New(api As ApiService, lockMgr As LockManager)
             _api = api
             _lock = lockMgr
@@ -47,8 +55,10 @@ Namespace Services
             _countdownTimer.AutoReset = True
             _countdownTimer.Start()
 
-            ' 10-second server sync
-            _heartbeatTimer = New Timer(10_000)
+            ' Server sync — start at the fast locked rate so the first coin
+            ' insertion is detected within 3 s.  Rate is adjusted live by
+            ' SendHeartbeat once a session becomes active.
+            _heartbeatTimer = New Timer(HEARTBEAT_LOCKED_MS)
             AddHandler _heartbeatTimer.Elapsed, AddressOf OnHeartbeat
             _heartbeatTimer.AutoReset = True
             _heartbeatTimer.Start()
@@ -113,6 +123,8 @@ Namespace Services
                 RaiseEvent ServerConnectionRestored()
             End If
 
+            Dim lockedNow As Boolean   ' captured inside the lock, used below
+
             SyncLock _stateLock
                 ' Server is always the source of truth for remaining time
                 Dim serverSeconds = (response.remaining_minutes * 60) + response.remaining_seconds
@@ -135,7 +147,18 @@ Namespace Services
                     _lock.UnlockPC()
                     RaiseEvent SessionStarted()
                 End If
+
+                lockedNow = _isLocked
             End SyncLock
+
+            ' ── Adaptive poll rate ────────────────────────────────────────────
+            ' Fast while locked — coin / time-add detected within 3 s.
+            ' Slower while active — local 1-second countdown handles display;
+            ' server sync is only needed for drift correction and top-ups.
+            Dim targetMs = If(lockedNow, HEARTBEAT_LOCKED_MS, HEARTBEAT_ACTIVE_MS)
+            If _heartbeatTimer.Interval <> targetMs Then
+                _heartbeatTimer.Interval = targetMs   ' resets the countdown to new interval
+            End If
 
             ' Notify the user if the server reports that time was added
             If response.time_added_minutes > 0 Then

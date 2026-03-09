@@ -5,7 +5,7 @@
   <h1>PC Monitor</h1>
   <div class="header-stats">
     <span class="stat-pill" id="refresh-indicator">● Live</span>
-    <span class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">Updates every 5s</span>
+    <span class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">Updates every 3s</span>
   </div>
 </div>
 
@@ -187,8 +187,8 @@ document.addEventListener('keydown', e => {
 // ── Intervals ───────────────────────────────────────────────────────────────
 // Status (card state) every 5s; screenshots staggered by 2.5s so they don't
 // both hit the server at the same moment.
-setInterval(refreshStatus, 5000);
-setTimeout(() => setInterval(refreshScreenshots, 5000), 2500);
+setInterval(refreshStatus, 3000);
+setTimeout(() => setInterval(refreshScreenshots, 3000), 2500);
 </script>
 
 {% endblock %}

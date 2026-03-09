@@ -52,11 +52,18 @@ Namespace Services
                     g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size)
                 End Using
 
-                ' Scale to 960 wide, maintain aspect ratio
-                Dim targetW = 960
-                Dim targetH = CInt(bounds.Height * (960.0 / bounds.Width))
+                ' Scale to 1280 wide, maintain aspect ratio
+                ' Use HighQualityBicubic so the resize is sharp regardless of quality setting
+                Dim targetW = 1280
+                Dim targetH = CInt(bounds.Height * (1280.0 / bounds.Width))
 
-                Using scaled = New Bitmap(bmp, New Size(targetW, targetH))
+                Using scaled = New Bitmap(targetW, targetH, PixelFormat.Format32bppArgb)
+                    Using g2 = Graphics.FromImage(scaled)
+                        g2.InterpolationMode  = Drawing2D.InterpolationMode.HighQualityBicubic
+                        g2.CompositingQuality = Drawing2D.CompositingQuality.HighQuality
+                        g2.SmoothingMode      = Drawing2D.SmoothingMode.HighQuality
+                        g2.DrawImage(bmp, New Rectangle(0, 0, targetW, targetH))
+                    End Using
                     Using ms = New MemoryStream()
                         Dim codec = GetJpegCodec()
                         Using ep = New EncoderParameters(1)
