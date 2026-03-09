@@ -24,13 +24,16 @@ class Settings(BaseSettings):
 
     # GPIO pins (BCM numbering)
     COIN_PIN: int = 4
+    RELAY_PIN: int = 6          # BCM 6 (Physical Pin 31) — relay that powers the coin acceptor
     KEYPAD_ROWS: list[int] = [17, 27, 22, 10]
     KEYPAD_COLS: list[int] = [9, 11, 5]
     LCD_I2C_ADDRESS: int = 0x27
     LCD_I2C_PORT: int = 1
 
-    # Timing
-    COIN_DEBOUNCE_MS: int = 50
+    # Timing — tuned for UCB Mini v4 coin acceptor
+    # UCB Mini v4 pulse gap is ~50-80 ms; 30 ms debounce catches bounce without
+    # swallowing legitimate pulses on ₱5 / ₱10 multi-pulse coins.
+    COIN_DEBOUNCE_MS: int = 30
     COIN_PULSE_TIMEOUT: float = 1.5
     KEYPAD_SCAN_INTERVAL: float = 0.05
     PC_IDLE_TIMEOUT: int = 30       # seconds before returning to idle screen

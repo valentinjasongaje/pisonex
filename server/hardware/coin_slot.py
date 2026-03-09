@@ -8,11 +8,28 @@ logger = logging.getLogger(__name__)
 
 class CoinSlot:
     """
-    Detects coin pulses from a coin slot connected to a GPIO pin.
+    Detects coin pulses from a UCB Mini v4 coin acceptor (GPIO pin, BCM 4).
 
-    Each pulse = ₱1.  Pulses are batched: once PULSE_TIMEOUT seconds
-    pass without a new pulse, the batch is considered complete and
-    on_coin_complete is called with the total peso amount.
+    The UCB Mini v4 outputs 5V active-HIGH pulses (normally LOW).
+    Each denomination sends N pulses: ₱1 = 1 pulse, ₱5 = 5 pulses, ₱10 = 10 pulses.
+    Pulses are batched: once COIN_PULSE_TIMEOUT seconds pass without a new pulse,
+    the batch is finalised and on_coin_complete is called with the total peso amount.
+
+    Wiring:
+        UCB Mini v4 12V  →  Relay COM/NO (switched 12V line from PSU)
+        UCB Mini v4 GND  →  External 12V PSU (−) + Pi GND  (common ground)
+        UCB Mini v4 SIG  →  1 kΩ → BCM 4 (Pin 7)
+                                         ↓
+                                        2 kΩ   (voltage divider: 5V → 3.3V)
+                                         ↓
+                                        GND (Pin 9)
+
+        Relay (custom board):
+            Relay signal  →  BCM 6 (Pin 31)   HIGH = relay ON = coin acceptor powered
+            Relay VCC     →  Pi Pin 2  (5V)
+            Relay GND     →  Pi Pin 14 (GND)
+            Relay COM     →  12V PSU (+)
+            Relay NO      →  UCB Mini v4 12V
     """
 
     def __init__(self, on_coin_complete):
@@ -34,10 +51,15 @@ class CoinSlot:
             import RPi.GPIO as GPIO
             self._GPIO = GPIO
             GPIO.setmode(GPIO.BCM)
+
+            # Relay pin — OUTPUT, starts LOW (coin acceptor unpowered at boot)
+            GPIO.setup(settings.RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
+
+            # Coin signal pin — INPUT with pull-down; UCB Mini v4 pulses HIGH
             GPIO.setup(
                 settings.COIN_PIN,
                 GPIO.IN,
-                pull_up_down=GPIO.PUD_UP,
+                pull_up_down=GPIO.PUD_DOWN,
             )
             GPIO.add_event_detect(
                 settings.COIN_PIN,
@@ -45,26 +67,33 @@ class CoinSlot:
                 callback=self._pulse_detected,
                 bouncetime=settings.COIN_DEBOUNCE_MS,
             )
-            logger.info("CoinSlot: GPIO %d initialized", settings.COIN_PIN)
+            logger.info(
+                "CoinSlot: coin pin BCM %d, relay pin BCM %d — initialized",
+                settings.COIN_PIN, settings.RELAY_PIN,
+            )
         except (ImportError, RuntimeError):
             # Running on non-RPi hardware (dev mode)
             self._GPIO = None
             logger.warning("CoinSlot: RPi.GPIO not available — running in simulation mode")
 
     def enable(self):
-        """Enable coin detection. Call after a PC is selected."""
+        """Power the coin acceptor via relay and enable pulse detection."""
+        if self._GPIO:
+            self._GPIO.output(settings.RELAY_PIN, self._GPIO.HIGH)
         self._enabled = True
-        logger.debug("CoinSlot: enabled")
+        logger.debug("CoinSlot: relay ON — coin acceptor powered")
 
     def disable(self):
-        """Disable coin detection. Call when returning to idle."""
+        """Cut power to coin acceptor via relay and clear any pending pulses."""
         self._enabled = False
+        if self._GPIO:
+            self._GPIO.output(settings.RELAY_PIN, self._GPIO.LOW)
         with self._lock:
             self._pulse_count = 0
             if self._timer:
                 self._timer.cancel()
                 self._timer = None
-        logger.debug("CoinSlot: disabled")
+        logger.debug("CoinSlot: relay OFF — coin acceptor unpowered")
 
     def simulate_coin(self, pesos: int):
         """Simulate a coin insertion — for development/testing only."""
@@ -104,7 +133,7 @@ class CoinSlot:
             self._on_complete(amount)
 
     def cleanup(self):
-        self.disable()
+        self.disable()   # also sets relay LOW
         if self._GPIO:
             try:
                 self._GPIO.remove_event_detect(settings.COIN_PIN)
