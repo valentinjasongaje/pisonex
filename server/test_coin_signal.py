@@ -31,12 +31,18 @@ def _on_edge(channel):
 
 
 GPIO.setmode(GPIO.BCM)
+GPIO.setup(COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_OFF)
+
+# Clear any stale event detection from a previous run before adding ours
+try:
+    GPIO.remove_event_detect(COIN_PIN)
+except Exception:
+    pass
 
 # Use BOTH edges and no pull so we see the raw signal from the custom board.
 # If you see no events at all → signal is not reaching the pin (wiring/level issue).
 # If events fire on FALLING → custom board inverts (optocoupler); set COIN_EDGE=FALLING.
 # If events fire on RISING  → signal is active-HIGH;              set COIN_EDGE=RISING.
-GPIO.setup(COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_OFF)
 GPIO.add_event_detect(COIN_PIN, GPIO.BOTH, callback=_on_edge, bouncetime=5)
 
 print(f"Monitoring BCM {COIN_PIN} — insert coins now.  Ctrl+C to stop.\n")

@@ -80,6 +80,16 @@ class CoinSlot:
 
         try:
             GPIO.setup(settings.COIN_PIN, GPIO.IN, pull_up_down=pull)
+
+            # Remove any stale event detection left by a previous crashed run —
+            # RPi.GPIO keeps kernel-level registrations across process restarts
+            # and raises RuntimeError("Failed to add edge detection") if you try
+            # to add a second handler without removing the first.
+            try:
+                GPIO.remove_event_detect(settings.COIN_PIN)
+            except Exception:
+                pass
+
             GPIO.add_event_detect(
                 settings.COIN_PIN,
                 edge,
