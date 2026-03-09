@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     LCD_I2C_ADDRESS: int = 0x27
     LCD_I2C_PORT: int = 1
 
+    # Coin signal edge polarity — depends on whether the custom board inverts the signal.
+    #   "RISING"  — direct connection or buffer (signal goes HIGH on coin pulse)
+    #   "FALLING" — custom board with optocoupler (signal goes LOW on coin pulse)
+    # Run server/test_coin_signal.py to detect which one your board uses.
+    COIN_EDGE: str = "FALLING"
+
     # Timing — tuned for UCB Mini v4 coin acceptor
     # UCB Mini v4 pulse gap is ~50-80 ms; 30 ms debounce catches bounce without
     # swallowing legitimate pulses on ₱5 / ₱10 multi-pulse coins.

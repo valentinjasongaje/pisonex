@@ -65,17 +65,29 @@ class CoinSlot:
             logger.error("CoinSlot: relay pin BCM %d setup FAILED: %s — relay will not work",
                          settings.RELAY_PIN, e)
 
-        # Coin signal pin
+        # Coin signal pin — edge polarity depends on whether the custom board inverts.
+        # FALLING + PUD_UP  → board uses optocoupler (active-LOW pulse at Pi)
+        # RISING  + PUD_DOWN → direct / buffered signal (active-HIGH pulse at Pi)
+        edge_name = settings.COIN_EDGE.upper()
+        if edge_name == "FALLING":
+            edge  = GPIO.FALLING
+            pull  = GPIO.PUD_UP
+            pull_name = "PUD_UP"
+        else:
+            edge  = GPIO.RISING
+            pull  = GPIO.PUD_DOWN
+            pull_name = "PUD_DOWN"
+
         try:
-            GPIO.setup(settings.COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            GPIO.setup(settings.COIN_PIN, GPIO.IN, pull_up_down=pull)
             GPIO.add_event_detect(
                 settings.COIN_PIN,
-                GPIO.RISING,
+                edge,
                 callback=self._pulse_detected,
                 bouncetime=settings.COIN_DEBOUNCE_MS,
             )
-            logger.info("CoinSlot: coin pin BCM %d ready (PUD_DOWN, RISING)",
-                        settings.COIN_PIN)
+            logger.info("CoinSlot: coin pin BCM %d ready (%s, %s)",
+                        settings.COIN_PIN, pull_name, edge_name)
         except Exception as e:
             logger.error("CoinSlot: coin pin BCM %d setup FAILED: %s — coin detection will not work",
                          settings.COIN_PIN, e)
