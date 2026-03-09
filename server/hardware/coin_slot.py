@@ -1,6 +1,7 @@
 import threading
 import time
 import logging
+import os
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -79,14 +80,15 @@ class CoinSlot:
             pull_name = "PUD_DOWN"
 
         try:
-            # Unexport the coin pin first to clear any stuck kernel interrupt
-            # state from a previous crashed run.  cleanup(pin) unexports the pin
-            # from /sys/class/gpio, which is the only reliable way to clear a
-            # "Failed to add edge detection" error across process restarts.
+            # Force-unexport via sysfs before setting up — the only reliable way
+            # to clear a stuck kernel interrupt from a previous crashed process.
+            # GPIO.cleanup() only works for pins set up by the current process.
             try:
-                GPIO.cleanup(settings.COIN_PIN)
-            except Exception:
-                pass
+                with open("/sys/class/gpio/unexport", "w") as f:
+                    f.write(str(settings.COIN_PIN))
+                time.sleep(0.05)
+            except OSError:
+                pass   # pin wasn't exported yet — nothing to clear
 
             GPIO.setup(settings.COIN_PIN, GPIO.IN, pull_up_down=pull)
             GPIO.add_event_detect(

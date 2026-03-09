@@ -30,13 +30,16 @@ def _on_edge(channel):
     print(f"  [{ts:7.3f}s]  BCM {channel}  {edge}  (level={level})")
 
 
-# Full GPIO reset first — this unexports ALL pins from /sys/class/gpio and
-# clears any stuck kernel interrupt state from a previous crashed process.
-# Safe to call before setmode; fine for a standalone test script.
+# Force-unexport the pin directly via sysfs before touching it with RPi.GPIO.
+# GPIO.cleanup() only works for pins the CURRENT process set up — it cannot
+# clear kernel interrupt state left by a previous crashed process.
+# Writing to /sys/class/gpio/unexport is the only reliable way to do that.
 try:
-    GPIO.cleanup()
-except Exception:
-    pass
+    with open("/sys/class/gpio/unexport", "w") as f:
+        f.write(str(COIN_PIN))
+    time.sleep(0.05)   # give the kernel a moment to release the file handles
+except OSError:
+    pass   # pin wasn't exported — that's fine, nothing to clear
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_OFF)
