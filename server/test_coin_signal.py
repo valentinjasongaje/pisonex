@@ -30,14 +30,16 @@ def _on_edge(channel):
     print(f"  [{ts:7.3f}s]  BCM {channel}  {edge}  (level={level})")
 
 
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_OFF)
-
-# Clear any stale event detection from a previous run before adding ours
+# Full GPIO reset first — this unexports ALL pins from /sys/class/gpio and
+# clears any stuck kernel interrupt state from a previous crashed process.
+# Safe to call before setmode; fine for a standalone test script.
 try:
-    GPIO.remove_event_detect(COIN_PIN)
+    GPIO.cleanup()
 except Exception:
     pass
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_OFF)
 
 # Use BOTH edges and no pull so we see the raw signal from the custom board.
 # If you see no events at all → signal is not reaching the pin (wiring/level issue).
