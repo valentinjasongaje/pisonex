@@ -20,12 +20,18 @@ try:
 except ImportError:
     sys.exit("RPi.GPIO not found — run this on the Raspberry Pi.")
 
-COIN_PIN = 4
+COIN_PIN  = 4
+RELAY_PIN = 6
 _events: list[tuple[float, str]] = []
 _start = time.monotonic()
 
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(COIN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_OFF)
+GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
+GPIO.setup(COIN_PIN,  GPIO.IN,  pull_up_down=GPIO.PUD_OFF)
+
+# Power the coin acceptor via relay
+GPIO.output(RELAY_PIN, GPIO.HIGH)
+print(f"Relay BCM {RELAY_PIN} → HIGH (coin acceptor powered)\n")
 
 last_level = GPIO.input(COIN_PIN)
 
