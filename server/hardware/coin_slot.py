@@ -1,7 +1,6 @@
 import threading
 import time
 import logging
-import os
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -15,6 +14,10 @@ class CoinSlot:
     Each denomination sends N pulses: ₱1 = 1 pulse, ₱5 = 5 pulses, ₱10 = 10 pulses.
     Pulses are batched: once COIN_PULSE_TIMEOUT seconds pass without a new pulse,
     the batch is finalised and on_coin_complete is called with the total peso amount.
+
+    Detection uses a 1 ms polling thread instead of RPi.GPIO sysfs interrupts.
+    This avoids the "Failed to add edge detection" RuntimeError that occurs when
+    BCM 4 (GPCLK0) or any other pin has a stuck kernel interrupt from a previous run.
 
     Wiring:
         UCB Mini v4 12V  →  Relay COM/NO (switched 12V line from PSU)
@@ -44,6 +47,9 @@ class CoinSlot:
         self._timer: threading.Timer | None = None
         self._last_pulse_time = 0.0
         self._enabled = False
+        self._detect_edge = "FALLING"   # overwritten in _setup_gpio
+        self._stop_polling: threading.Event | None = None
+        self._poll_thread: threading.Thread | None = None
 
         self._setup_gpio()
 
@@ -57,7 +63,7 @@ class CoinSlot:
             logger.warning("CoinSlot: RPi.GPIO not available — running in simulation mode")
             return
 
-        # Relay pin — set up independently so a failure here doesn't kill coin detection
+        # ── Relay pin ────────────────────────────────────────────────────────
         try:
             GPIO.setup(settings.RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
             logger.info("CoinSlot: relay pin BCM %d ready — starts LOW (unpowered)",
@@ -66,42 +72,60 @@ class CoinSlot:
             logger.error("CoinSlot: relay pin BCM %d setup FAILED: %s — relay will not work",
                          settings.RELAY_PIN, e)
 
-        # Coin signal pin — edge polarity depends on whether the custom board inverts.
-        # FALLING + PUD_UP  → board uses optocoupler (active-LOW pulse at Pi)
-        # RISING  + PUD_DOWN → direct / buffered signal (active-HIGH pulse at Pi)
+        # ── Coin signal pin (polling — no sysfs interrupt) ───────────────────
+        # FALLING + PUD_UP  → custom board with optocoupler (active-LOW pulse)
+        # RISING  + PUD_DOWN → direct / buffered signal     (active-HIGH pulse)
         edge_name = settings.COIN_EDGE.upper()
         if edge_name == "FALLING":
-            edge  = GPIO.FALLING
-            pull  = GPIO.PUD_UP
-            pull_name = "PUD_UP"
+            pull, pull_name = GPIO.PUD_UP, "PUD_UP"
         else:
-            edge  = GPIO.RISING
-            pull  = GPIO.PUD_DOWN
-            pull_name = "PUD_DOWN"
+            pull, pull_name = GPIO.PUD_DOWN, "PUD_DOWN"
+
+        self._detect_edge = edge_name
 
         try:
-            # Force-unexport via sysfs before setting up — the only reliable way
-            # to clear a stuck kernel interrupt from a previous crashed process.
-            # GPIO.cleanup() only works for pins set up by the current process.
-            try:
-                with open("/sys/class/gpio/unexport", "w") as f:
-                    f.write(str(settings.COIN_PIN))
-                time.sleep(0.05)
-            except OSError:
-                pass   # pin wasn't exported yet — nothing to clear
-
             GPIO.setup(settings.COIN_PIN, GPIO.IN, pull_up_down=pull)
-            GPIO.add_event_detect(
-                settings.COIN_PIN,
-                edge,
-                callback=self._pulse_detected,
-                bouncetime=settings.COIN_DEBOUNCE_MS,
-            )
-            logger.info("CoinSlot: coin pin BCM %d ready (%s, %s)",
+            logger.info("CoinSlot: coin pin BCM %d ready (%s, %s) — polling mode",
                         settings.COIN_PIN, pull_name, edge_name)
+
+            self._stop_polling = threading.Event()
+            self._poll_thread = threading.Thread(
+                target=self._poll_loop,
+                name="coin-poller",
+                daemon=True,
+            )
+            self._poll_thread.start()
+
         except Exception as e:
             logger.error("CoinSlot: coin pin BCM %d setup FAILED: %s — coin detection will not work",
                          settings.COIN_PIN, e)
+
+    # ── Polling thread ────────────────────────────────────────────────────────
+
+    def _poll_loop(self):
+        """
+        Polls BCM COIN_PIN every 1 ms and fires _pulse_detected on each
+        matching edge transition.  1 ms is fast enough to catch the UCB Mini
+        v4's ~50 ms pulses while adding negligible CPU load on the Pi.
+        """
+        GPIO = self._GPIO
+        last_level = GPIO.input(settings.COIN_PIN)
+
+        while not self._stop_polling.is_set():
+            level = GPIO.input(settings.COIN_PIN)
+
+            if level != last_level:
+                is_match = (
+                    (self._detect_edge == "FALLING" and level == 0) or
+                    (self._detect_edge == "RISING"  and level == 1)
+                )
+                if is_match:
+                    self._pulse_detected(settings.COIN_PIN)
+                last_level = level
+
+            time.sleep(0.001)   # 1 ms poll interval
+
+    # ── Enable / disable relay ────────────────────────────────────────────────
 
     def enable(self):
         """Power the coin acceptor via relay and enable pulse detection."""
@@ -124,10 +148,14 @@ class CoinSlot:
                 self._timer.cancel()
                 self._timer = None
 
+    # ── Simulation ────────────────────────────────────────────────────────────
+
     def simulate_coin(self, pesos: int):
         """Simulate a coin insertion — for development/testing only."""
         logger.info("CoinSlot: simulating ₱%d", pesos)
         self._on_complete(pesos)
+
+    # ── Pulse handling ────────────────────────────────────────────────────────
 
     def _pulse_detected(self, _channel):
         if not self._enabled:
@@ -135,7 +163,7 @@ class CoinSlot:
 
         now = time.monotonic()
         with self._lock:
-            # Extra software debounce on top of RPi hardware debounce
+            # Software debounce — ignore transitions closer together than COIN_DEBOUNCE_MS
             if now - self._last_pulse_time < (settings.COIN_DEBOUNCE_MS / 1000):
                 return
             self._last_pulse_time = now
@@ -161,10 +189,9 @@ class CoinSlot:
             logger.info("CoinSlot: finalized ₱%d", amount)
             self._on_complete(amount)
 
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+
     def cleanup(self):
         self.disable()   # also sets relay LOW
-        if self._GPIO:
-            try:
-                self._GPIO.remove_event_detect(settings.COIN_PIN)
-            except Exception:
-                pass
+        if self._stop_polling:
+            self._stop_polling.set()
