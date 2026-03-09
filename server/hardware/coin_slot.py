@@ -1,3 +1,4 @@
+import queue
 import threading
 import time
 import logging
@@ -53,6 +54,16 @@ class CoinSlot:
         self._detect_edge = "FALLING"   # overwritten in _setup_gpio
         self._stop_polling: threading.Event | None = None
         self._poll_thread: threading.Thread | None = None
+
+        # Progress display queue — keeps the poller unblocked while LCD writes
+        self._progress_queue: queue.SimpleQueue = queue.SimpleQueue()
+        if on_coin_progress:
+            self._progress_thread = threading.Thread(
+                target=self._progress_worker,
+                name="coin-progress",
+                daemon=True,
+            )
+            self._progress_thread.start()
 
         self._setup_gpio()
 
@@ -185,7 +196,29 @@ class CoinSlot:
             self._timer.start()
 
         if self._on_progress:
-            self._on_progress(current_count)
+            self._progress_queue.put(current_count)
+
+    def _progress_worker(self):
+        """
+        Dedicated thread that drains the progress queue and calls _on_progress
+        with only the latest value.  Keeps the polling thread unblocked while
+        the LCD does slow I2C writes.
+        """
+        while True:
+            pesos = self._progress_queue.get()   # blocks until a value arrives
+            if pesos is None:                    # sentinel from cleanup()
+                return
+            # Drain the queue — if more pulses arrived while LCD was writing,
+            # skip stale values and only display the latest count.
+            while True:
+                try:
+                    latest = self._progress_queue.get_nowait()
+                    if latest is None:
+                        return
+                    pesos = latest
+                except queue.Empty:
+                    break
+            self._on_progress(pesos)
 
     def _finalize(self):
         with self._lock:
@@ -203,3 +236,4 @@ class CoinSlot:
         self.disable()   # also sets relay LOW
         if self._stop_polling:
             self._stop_polling.set()
+        self._progress_queue.put(None)  # stop progress worker
