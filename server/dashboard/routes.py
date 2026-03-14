@@ -452,6 +452,28 @@ def serve_screenshot(
     )
 
 
+# ── Documentation pages ───────────────────────────────────────────────────────
+
+@router.get("/docs/api", response_class=HTMLResponse)
+def docs_api_page(
+    request: Request,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    return templates.TemplateResponse("docs_api.html", {"request": request})
+
+
+@router.get("/docs/wiring", response_class=HTMLResponse)
+def docs_wiring_page(
+    request: Request,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    return templates.TemplateResponse("docs_wiring.html", {"request": request})
+
+
 # ── PC Management page ────────────────────────────────────────────────────────
 
 @router.get("/pcs", response_class=HTMLResponse)

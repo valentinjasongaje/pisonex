@@ -1,0 +1,917 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<style>
+/* ── Docs layout ─────────────────────────────────────────────────── */
+.docs-wrap        { display: grid; grid-template-columns: 210px 1fr; gap: 1.5rem; align-items: start; }
+.docs-toc         { position: sticky; top: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 0.75rem; }
+.toc-group        { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); padding: 0.6rem 0.5rem 0.3rem; }
+.toc-link         { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; color: var(--text-dim); text-decoration: none; border-radius: 6px; font-size: 0.83rem; transition: .15s; }
+.toc-link:hover   { color: var(--text); background: rgba(255,255,255,.05); }
+.toc-link.active  { color: var(--accent); background: rgba(79,142,247,.1); }
+.toc-link .toc-ct { margin-left: auto; background: var(--border); color: var(--text-dim); font-size: .7rem; padding: .05rem .35rem; border-radius: 10px; }
+
+/* ── Search bar ──────────────────────────────────────────────────── */
+.search-row       { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; }
+.search-input     { flex: 1; min-width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .55rem .9rem; color: var(--text); font-size: .88rem; outline: none; }
+.search-input:focus { border-color: var(--accent); }
+.base-url-wrap    { display: flex; align-items: center; gap: .5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .4rem .75rem; }
+.base-url-wrap label { font-size: .75rem; color: var(--text-dim); white-space: nowrap; }
+.base-url-input   { background: none; border: none; color: var(--accent); font-family: monospace; font-size: .85rem; width: 200px; outline: none; }
+
+/* ── Section ─────────────────────────────────────────────────────── */
+.docs-section     { margin-bottom: 2rem; }
+.section-head     { display: flex; align-items: center; gap: .6rem; font-size: 1rem; font-weight: 600; color: var(--text); padding-bottom: .6rem; border-bottom: 1px solid var(--border); margin-bottom: .85rem; }
+.section-head .section-icon { font-size: 1.1rem; }
+.section-auth     { margin-left: auto; font-size: .7rem; font-weight: 600; padding: .15rem .5rem; border-radius: 4px; }
+.auth-jwt         { background: rgba(245,158,11,.18); color: #f59e0b; }
+.auth-cookie      { background: rgba(167,139,250,.18); color: #a78bfa; }
+.auth-none        { background: rgba(107,114,128,.15); color: #6b7280; }
+
+/* ── Endpoint card ───────────────────────────────────────────────── */
+.endpoint         { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: .6rem; transition: border-color .15s; }
+.endpoint:hover   { border-color: #3a3d52; }
+.endpoint.open    { border-color: var(--accent); }
+.ep-header        { display: flex; align-items: center; gap: .7rem; padding: .8rem 1rem; cursor: pointer; user-select: none; }
+.ep-path          { font-family: monospace; font-size: .88rem; color: var(--text); flex: 1; }
+.ep-brief         { font-size: .78rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.ep-chevron       { color: var(--text-dim); font-size: .75rem; transition: transform .2s; margin-left: .25rem; }
+.endpoint.open .ep-chevron { transform: rotate(90deg); }
+.ep-body          { display: none; border-top: 1px solid var(--border); padding: 1rem 1.1rem; }
+.endpoint.open .ep-body { display: block; }
+
+/* ── Method badges ───────────────────────────────────────────────── */
+.mb              { display: inline-block; padding: .2rem .55rem; border-radius: 4px; font-size: .72rem; font-weight: 700; font-family: monospace; letter-spacing: .06em; min-width: 52px; text-align: center; }
+.mb-get          { background: rgba(79,142,247,.18); color: #4f8ef7; }
+.mb-post         { background: rgba(34,197,94,.18); color: #22c55e; }
+.mb-delete       { background: rgba(239,68,68,.18); color: #ef4444; }
+
+/* ── Params tables ───────────────────────────────────────────────── */
+.pt              { width: 100%; border-collapse: collapse; font-size: .83rem; margin: .65rem 0 1rem; }
+.pt th           { text-align: left; padding: .45rem .75rem; background: rgba(255,255,255,.03); color: var(--text-dim); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--border); }
+.pt td           { padding: .45rem .75rem; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: top; line-height: 1.45; }
+.pt tr:last-child td { border-bottom: none; }
+.pt code         { background: rgba(79,142,247,.1); color: var(--accent); padding: .1rem .3rem; border-radius: 3px; font-size: .8rem; }
+.req             { background: rgba(239,68,68,.13); color: #ef4444; font-size: .68rem; padding: .05rem .3rem; border-radius: 3px; font-weight: 600; }
+.opt             { background: rgba(107,114,128,.15); color: #6b7280; font-size: .68rem; padding: .05rem .3rem; border-radius: 3px; }
+
+/* ── Code blocks ─────────────────────────────────────────────────── */
+.ex-label        { font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; color: var(--text-dim); margin: .75rem 0 .35rem; }
+.cb              { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: .85rem 1rem; position: relative; margin-bottom: .75rem; }
+.cb pre          { margin: 0; font-family: 'Consolas','Monaco',monospace; font-size: .8rem; color: #cdd6f4; white-space: pre-wrap; word-break: break-all; line-height: 1.55; }
+.copy-btn        { position: absolute; top: .45rem; right: .45rem; padding: .2rem .55rem; background: var(--border); border: none; border-radius: 4px; color: var(--text-dim); font-size: .72rem; cursor: pointer; transition: .15s; }
+.copy-btn:hover  { background: var(--accent); color: #fff; }
+.copy-btn.copied { background: var(--green); color: #fff; }
+
+/* ── JSON colors ─────────────────────────────────────────────────── */
+.j-key           { color: #89b4fa; }
+.j-str           { color: #a6e3a1; }
+.j-num           { color: #fab387; }
+.j-bool          { color: #f38ba8; }
+.j-null          { color: #6c7086; }
+
+/* ── Status codes ────────────────────────────────────────────────── */
+.status-badge    { display: inline-block; font-size: .7rem; font-weight: 600; padding: .1rem .4rem; border-radius: 3px; margin-left: .4rem; font-family: monospace; }
+.s200            { background: rgba(34,197,94,.18); color: #22c55e; }
+.s400            { background: rgba(245,158,11,.18); color: #f59e0b; }
+.s401            { background: rgba(239,68,68,.18); color: #ef4444; }
+.s404            { background: rgba(239,68,68,.18); color: #ef4444; }
+
+/* ── Subsection label ────────────────────────────────────────────── */
+.sub-label       { font-size: .8rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .05em; margin-bottom: .35rem; margin-top: .75rem; }
+.ep-note         { font-size: .83rem; color: var(--text-dim); line-height: 1.6; margin-bottom: .75rem; }
+.ep-note strong  { color: var(--text); }
+.warn-note       { background: rgba(245,158,11,.1); border-left: 3px solid #f59e0b; padding: .5rem .75rem; border-radius: 0 4px 4px 0; font-size: .82rem; color: #f59e0b; margin: .6rem 0; }
+.hidden-ep       { display: none; }
+</style>
+
+<div class="page-header">
+  <h1>📋 API Reference</h1>
+  <div class="header-stats">
+    <span class="stat-pill">28 Endpoints</span>
+    <span class="stat-pill online">Base URL: <code style="margin-left:.3rem;font-family:monospace;color:var(--accent)">:8000</code></span>
+  </div>
+</div>
+
+<div class="search-row">
+  <input id="epSearch" type="text" class="search-input" placeholder="🔍  Search by path or description…" oninput="filterEndpoints(this.value)">
+  <div class="base-url-wrap">
+    <label>Base URL:</label>
+    <input id="baseUrl" type="text" class="base-url-input" value="http://192.168.1.100:8000" oninput="updateBaseUrl(this.value)">
+  </div>
+</div>
+
+<div class="docs-wrap">
+
+  <!-- ── Left TOC ── -->
+  <nav class="docs-toc">
+    <div class="toc-group">Sections</div>
+    <a class="toc-link" href="#s-general">🌐 General <span class="toc-ct">1</span></a>
+    <a class="toc-link" href="#s-auth">🔐 Auth <span class="toc-ct">1</span></a>
+    <a class="toc-link" href="#s-pc">🖥 PC <span class="toc-ct">5</span></a>
+    <a class="toc-link" href="#s-session">⏱ Session <span class="toc-ct">3</span></a>
+    <a class="toc-link" href="#s-admin">⚙️ Admin <span class="toc-ct">10</span></a>
+    <a class="toc-link" href="#s-dashboard">📊 Dashboard <span class="toc-ct">8</span></a>
+    <div class="toc-group" style="margin-top:.75rem">Reference</div>
+    <a class="toc-link" href="#s-errors">❌ HTTP Errors</a>
+    <a class="toc-link" href="#s-interactive">🧪 Interactive</a>
+  </nav>
+
+  <!-- ── Main content ── -->
+  <div id="docsContent">
+
+    <!-- ═══════════════ GENERAL ═══════════════ -->
+    <div class="docs-section" id="s-general">
+      <div class="section-head">
+        <span class="section-icon">🌐</span> General
+        <span class="section-auth auth-none">No Auth</span>
+      </div>
+
+      <div class="endpoint" id="ep-health">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/health</span>
+          <span class="ep-brief">Server health check</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Returns server status and version. No authentication required. Useful for monitoring that the server is up.</p>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/health</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"status": "ok", "version": "1.0.0"}</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ AUTH ═══════════════ -->
+    <div class="docs-section" id="s-auth">
+      <div class="section-head">
+        <span class="section-icon">🔐</span> Authentication
+        <span class="section-auth auth-none">No Auth Required</span>
+      </div>
+
+      <div class="endpoint" id="ep-token">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/auth/token</span>
+          <span class="ep-brief">Get admin JWT token</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Authenticates admin credentials and returns a <strong>JWT Bearer token</strong>. Include this token as <code>Authorization: Bearer &lt;token&gt;</code> on all admin API requests. Token expires in <strong>8 hours</strong>.</p>
+          <div class="sub-label">Request Body <small style="text-transform:none;font-weight:400;color:var(--text-dim)">(application/x-www-form-urlencoded)</small></div>
+          <table class="pt">
+            <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            <tr><td><code>username</code></td><td>string</td><td><span class="req">required</span></td><td>Admin username</td></tr>
+            <tr><td><code>password</code></td><td>string</td><td><span class="req">required</span></td><td>Admin password</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/auth/token \
+  -d "username=admin&password=admin123"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "token_type": "bearer"}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s401">401 Unauthorized</span></div>
+          <div class="cb"><pre class="json-block">{"detail": "Incorrect username or password"}</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ PC ENDPOINTS ═══════════════ -->
+    <div class="docs-section" id="s-pc">
+      <div class="section-head">
+        <span class="section-icon">🖥</span> PC Endpoints
+        <span class="section-auth auth-none">No Auth</span>
+      </div>
+
+      <!-- register -->
+      <div class="endpoint" id="ep-register">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/pc/register</span>
+          <span class="ep-brief">Register or reconnect a PC</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Called by the VB.NET client on startup. Registers the PC on first launch. On subsequent calls it updates the IP address and MAC. Returns whether this was a fresh registration.</p>
+          <div class="sub-label">Query Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td><span class="req">required</span></td><td>Unique PC number (e.g. <code>1</code>, <code>2</code>)</td></tr>
+            <tr><td><code>mac_address</code></td><td>string</td><td><span class="req">required</span></td><td>MAC address of the client machine</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/register?pc_number=1&mac_address=AA:BB:CC:DD:EE:FF"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — new PC</div>
+          <div class="cb"><pre class="json-block">{"pc_id": 1, "pc_number": 1, "name": "PC-01", "registered": true}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — already registered (IP/MAC updated)</div>
+          <div class="cb"><pre class="json-block">{"pc_id": 1, "pc_number": 1, "name": "PC-01", "registered": false}</pre></div>
+        </div>
+      </div>
+
+      <!-- heartbeat -->
+      <div class="endpoint" id="ep-heartbeat">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/pc/heartbeat/{pc_number}</span>
+          <span class="ep-brief">Client heartbeat — syncs session state</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Sent by the client every <strong>10 seconds</strong>. Marks the PC as online and returns the authoritative session state. If <code>time_added_minutes &gt; 0</code> the client shows a toast notification. If <code>is_locked: true</code> and the local timer hits zero, the client locks the screen.</p>
+          <div class="sub-label">Path Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td>The PC's number</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/heartbeat/1</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — Active session</div>
+          <div class="cb"><pre class="json-block">{"is_locked": false, "remaining_minutes": 28, "remaining_seconds": 45, "session_token": "tok_abc123", "time_added_minutes": 0}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — No session / locked</div>
+          <div class="cb"><pre class="json-block">{"is_locked": true, "remaining_minutes": 0, "remaining_seconds": 0, "session_token": null, "time_added_minutes": 0}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — Admin just added time</div>
+          <div class="cb"><pre class="json-block">{"is_locked": false, "remaining_minutes": 60, "remaining_seconds": 0, "session_token": "tok_abc123", "time_added_minutes": 30}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s404">404</span> — PC not registered</div>
+          <div class="cb"><pre class="json-block">{"detail": "PC not registered"}</pre></div>
+        </div>
+      </div>
+
+      <!-- status -->
+      <div class="endpoint" id="ep-status">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/api/pc/status</span>
+          <span class="ep-brief">All PCs with online/lock status</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Returns all registered PCs. PCs that missed a heartbeat for more than <strong>30 seconds</strong> (<code>PC_HEARTBEAT_TIMEOUT</code>) are automatically marked offline.</p>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/status</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">[
+  {"pc_number": 1, "name": "PC-01", "is_online": true, "is_locked": false, "ip_address": "192.168.1.101", "last_seen": "2026-03-14T10:30:00", "remaining_minutes": 28},
+  {"pc_number": 2, "name": "PC-02", "is_online": false, "is_locked": true, "ip_address": "192.168.1.102", "last_seen": "2026-03-14T09:15:00", "remaining_minutes": 0}
+]</pre></div>
+        </div>
+      </div>
+
+      <!-- screenshot -->
+      <div class="endpoint" id="ep-screenshot">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/pc/{pc_number}/screenshot</span>
+          <span class="ep-brief">Upload live screenshot from client</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Client uploads a JPEG screenshot every 5 seconds for the monitor page. Stored <strong>in memory only</strong> — not persisted to disk. Max size: <strong>2 MB</strong>.</p>
+          <div class="sub-label">Path Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td>The PC's number</td></tr>
+          </table>
+          <div class="sub-label">Headers</div>
+          <table class="pt">
+            <tr><th>Header</th><th>Value</th></tr>
+            <tr><td><code>Content-Type</code></td><td><code>image/jpeg</code></td></tr>
+          </table>
+          <p class="ep-note">Body: Raw JPEG binary (max 2 MB)</p>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/1/screenshot \
+  -H "Content-Type: image/jpeg" --data-binary @screenshot.jpg</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"status": "ok"}</pre></div>
+        </div>
+      </div>
+
+      <!-- lock -->
+      <div class="endpoint" id="ep-pc-lock">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/pc/{pc_number}/lock</span>
+          <span class="ep-brief">End session and lock a PC</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Ends the active session and immediately locks the specified PC. Called by admin or the dashboard UI.</p>
+          <div class="sub-label">Path Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td>The PC's number</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/1/lock</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"status": "locked", "pc_number": 1}</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ SESSION ═══════════════ -->
+    <div class="docs-section" id="s-session">
+      <div class="section-head">
+        <span class="section-icon">⏱</span> Session Endpoints
+        <span class="section-auth auth-none">No Auth</span>
+      </div>
+
+      <!-- add-time -->
+      <div class="endpoint" id="ep-add-time">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/session/add-time</span>
+          <span class="ep-brief">Add time by inserting coins (pesos → minutes)</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Called by the <strong>hardware controller</strong> when coins are inserted. Converts pesos to minutes using the configured coin rates, creates or extends the session, and unlocks the PC.</p>
+          <div class="sub-label">Request Body <small style="text-transform:none;font-weight:400;color:var(--text-dim)">(application/json)</small></div>
+          <table class="pt">
+            <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td><span class="req">required</span></td><td>Target PC number</td></tr>
+            <tr><td><code>pesos</code></td><td>int</td><td><span class="req">required</span></td><td>Total coins inserted (e.g. <code>5</code>, <code>10</code>)</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/session/add-time \
+  -H "Content-Type: application/json" \
+  -d '{"pc_number": 1, "pesos": 5}'</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"pc_number": 1, "pesos_added": 5, "minutes_added": 30, "total_minutes": 60, "session_token": "tok_abc123"}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s400">400</span> — No matching rate</div>
+          <div class="cb"><pre class="json-block">{"detail": "No rate configured for ₱5"}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s404">404</span> — PC not found</div>
+          <div class="cb"><pre class="json-block">{"detail": "PC 1 not found"}</pre></div>
+        </div>
+      </div>
+
+      <!-- session status -->
+      <div class="endpoint" id="ep-session-status">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/api/session/{pc_number}</span>
+          <span class="ep-brief">Get current session for a PC</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Path Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td>The PC's number</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/session/1</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — Active session</div>
+          <div class="cb"><pre class="json-block">{"has_session": true, "remaining_minutes": 28, "remaining_seconds": 45, "minutes_granted": 60, "started_at": "2026-03-14T10:00:00", "session_token": "tok_abc123"}</pre></div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — No session</div>
+          <div class="cb"><pre class="json-block">{"has_session": false, "remaining_minutes": 0, "remaining_seconds": 0, "minutes_granted": 0, "started_at": null, "session_token": null}</pre></div>
+        </div>
+      </div>
+
+      <!-- end session -->
+      <div class="endpoint" id="ep-end-session">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/session/{pc_number}/end</span>
+          <span class="ep-brief">End active session and lock PC</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Path Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td>The PC's number</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/session/1/end</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"status": "session ended", "pc_number": 1}</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ ADMIN ═══════════════ -->
+    <div class="docs-section" id="s-admin">
+      <div class="section-head">
+        <span class="section-icon">⚙️</span> Admin Endpoints
+        <span class="section-auth auth-jwt">🔑 JWT Bearer Required</span>
+      </div>
+      <div class="warn-note">All endpoints in this section require <code>Authorization: Bearer &lt;token&gt;</code>. Get a token from <a href="#ep-token" onclick="scrollAndOpen('ep-token')" style="color:#f59e0b">/api/auth/token</a>.</div>
+
+      <!-- earnings -->
+      <div class="endpoint" id="ep-earnings">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/api/admin/earnings</span>
+          <span class="ep-brief">Total revenue for last N days</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            <tr><td><code>days</code></td><td>int</td><td><code>30</code></td><td>Look-back period in days</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/earnings?days=7" \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"total_pesos": 1250, "total_transactions": 87, "period_days": 7}</pre></div>
+        </div>
+      </div>
+
+      <!-- earnings daily -->
+      <div class="endpoint" id="ep-earnings-daily">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/api/admin/earnings/daily</span>
+          <span class="ep-brief">Per-day earnings breakdown</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            <tr><td><code>days</code></td><td>int</td><td><code>7</code></td><td>Number of days to return</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/earnings/daily?days=7" \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">[
+  {"date": "2026-03-08", "total_pesos": 150, "transactions": 10},
+  {"date": "2026-03-09", "total_pesos": 200, "transactions": 14},
+  {"date": "2026-03-14", "total_pesos": 150, "transactions": 11}
+]</pre></div>
+        </div>
+      </div>
+
+      <!-- transactions -->
+      <div class="endpoint" id="ep-transactions">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/api/admin/transactions</span>
+          <span class="ep-brief">Paginated transaction list</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            <tr><td><code>limit</code></td><td>int</td><td><code>100</code></td><td>Max records to return</td></tr>
+            <tr><td><code>offset</code></td><td>int</td><td><code>0</code></td><td>Skip first N records (pagination)</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/transactions?limit=10&offset=0" \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">[
+  {"id": 42, "pc_id": 1, "amount_pesos": 10, "minutes_added": 60, "created_at": "2026-03-14T10:05:00"},
+  {"id": 41, "pc_id": 3, "amount_pesos": 5,  "minutes_added": 30, "created_at": "2026-03-14T09:45:00"}
+]</pre></div>
+        </div>
+      </div>
+
+      <!-- get rates -->
+      <div class="endpoint" id="ep-get-rates">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/api/admin/rates</span>
+          <span class="ep-brief">List all active coin rates</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/rates \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">[
+  {"id": 1, "pesos": 5,  "minutes": 30, "label": "₱5 = 30 minutes",  "is_active": true},
+  {"id": 2, "pesos": 10, "minutes": 60, "label": "₱10 = 60 minutes", "is_active": true}
+]</pre></div>
+        </div>
+      </div>
+
+      <!-- create rate -->
+      <div class="endpoint" id="ep-create-rate">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/admin/rates</span>
+          <span class="ep-brief">Create or update a coin rate</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Creates a new coin rate. If a rate for the same peso amount already exists, the old one is <strong>soft-deleted</strong> (deactivated) and replaced.</p>
+          <div class="sub-label">Request Body <small style="text-transform:none;font-weight:400;color:var(--text-dim)">(application/json)</small></div>
+          <table class="pt">
+            <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            <tr><td><code>pesos</code></td><td>int</td><td><span class="req">required</span></td><td>Coin denomination (e.g. <code>5</code>)</td></tr>
+            <tr><td><code>minutes</code></td><td>int</td><td><span class="req">required</span></td><td>Minutes granted (e.g. <code>30</code>)</td></tr>
+            <tr><td><code>label</code></td><td>string</td><td><span class="opt">optional</span></td><td>Display label — auto-generated if omitted</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/rates \
+  -H "Authorization: Bearer &lt;token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"pesos": 5, "minutes": 30}'</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"id": 3, "pesos": 5, "minutes": 30, "label": "₱5 = 30 minutes", "is_active": true}</pre></div>
+        </div>
+      </div>
+
+      <!-- delete rate -->
+      <div class="endpoint" id="ep-delete-rate">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-delete">DELETE</span>
+          <span class="ep-path">/api/admin/rates/{rate_id}</span>
+          <span class="ep-brief">Soft-delete a coin rate</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Marks the rate as inactive (<code>is_active = false</code>). The rate is not permanently removed from the database.</p>
+          <div class="sub-label">Path Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>rate_id</code></td><td>int</td><td>ID of the rate to delete</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X DELETE <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/rates/1 \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"status": "deleted"}</pre></div>
+        </div>
+      </div>
+
+      <!-- admin add time -->
+      <div class="endpoint" id="ep-admin-add-time">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/admin/pc/add-time</span>
+          <span class="ep-brief">Admin manually adds minutes to a PC</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Adds minutes directly without coin conversion. Useful for complimentary time or error correction. The PC client receives the update on its next heartbeat and shows a toast notification.</p>
+          <div class="sub-label">Request Body <small style="text-transform:none;font-weight:400;color:var(--text-dim)">(application/json)</small></div>
+          <table class="pt">
+            <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td><span class="req">required</span></td><td>Target PC number</td></tr>
+            <tr><td><code>minutes</code></td><td>int</td><td><span class="req">required</span></td><td>Minutes to add (must be &gt; 0)</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/pc/add-time \
+  -H "Authorization: Bearer &lt;token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"pc_number": 2, "minutes": 30}'</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"pc_number": 2, "minutes_added": 30, "total_minutes": 90}</pre></div>
+        </div>
+      </div>
+
+      <!-- admin lock -->
+      <div class="endpoint" id="ep-admin-lock">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/api/admin/pc/{pc_number}/lock</span>
+          <span class="ep-brief">Lock a PC immediately</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Path Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td>The PC's number</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/pc/2/lock \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"status": "locked"}</pre></div>
+        </div>
+      </div>
+
+      <!-- logs get -->
+      <div class="endpoint" id="ep-get-logs">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/api/admin/logs</span>
+          <span class="ep-brief">Query system logs</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            <tr><td><code>limit</code></td><td>int</td><td><code>200</code></td><td>Max log entries</td></tr>
+            <tr><td><code>level</code></td><td>string</td><td><code>null</code></td><td>Filter: <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code></td></tr>
+            <tr><td><code>source</code></td><td>string</td><td><code>null</code></td><td>Filter: <code>hardware</code>, <code>api</code>, <code>session</code></td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/logs?level=ERROR&limit=50" \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">[
+  {"id": 199, "level": "ERROR", "source": "hardware", "message": "Error processing ₱5 for PC 02", "created_at": "2026-03-14T10:22:00"}
+]</pre></div>
+        </div>
+      </div>
+
+      <!-- logs delete -->
+      <div class="endpoint" id="ep-delete-logs">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-delete">DELETE</span>
+          <span class="ep-path">/api/admin/logs</span>
+          <span class="ep-brief">Delete logs older than N days</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="pt">
+            <tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            <tr><td><code>days</code></td><td>int</td><td><code>30</code></td><td>Delete logs older than N days</td></tr>
+          </table>
+          <div class="ex-label">Request</div>
+          <div class="cb">
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            <pre class="base-url-aware">curl -X DELETE "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/logs?days=7" \
+  -H "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"deleted": 142}</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ DASHBOARD ═══════════════ -->
+    <div class="docs-section" id="s-dashboard">
+      <div class="section-head">
+        <span class="section-icon">📊</span> Dashboard Endpoints
+        <span class="section-auth auth-cookie">🍪 Session Cookie</span>
+      </div>
+      <p class="ep-note" style="margin-bottom:.75rem">The dashboard uses a <code>pisonet_session</code> JWT cookie set on login. These endpoints are called by the admin UI JavaScript and are only accessible from a logged-in browser session.</p>
+
+      <div class="endpoint" id="ep-dash-login">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/dashboard/login</span>
+          <span class="ep-brief">Admin login — sets session cookie</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Form submission with <code>username</code> and <code>password</code>. On success: redirects to <code>/dashboard</code> and sets <code>pisonet_session</code> cookie (HTTPOnly, SameSite=lax, 8h). On failure: re-renders the login page with an error.</p>
+        </div>
+      </div>
+
+      <div class="endpoint" id="ep-monitor-status">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/dashboard/monitor/status</span>
+          <span class="ep-brief">Live PC status for monitor page</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Called by the monitor page every 3 seconds via JavaScript. Returns all PC statuses including screenshot availability.</p>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">[
+  {"pc_number": 1, "name": "PC-01", "is_online": true, "is_locked": false,
+   "remaining_minutes": 28, "remaining_seconds": 45, "remaining_total_sec": 1725, "has_screenshot": true}
+]</pre></div>
+        </div>
+      </div>
+
+      <div class="endpoint" id="ep-dash-add-time">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/dashboard/api/pc/add-time</span>
+          <span class="ep-brief">Add minutes from dashboard UI</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Same behavior as <code>/api/admin/pc/add-time</code> but uses session cookie instead of Bearer token. Called by the dashboard Add Time modal.</p>
+          <div class="sub-label">Request Body <small style="text-transform:none;font-weight:400;color:var(--text-dim)">(application/json)</small></div>
+          <table class="pt">
+            <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            <tr><td><code>pc_number</code></td><td>int</td><td><span class="req">required</span></td><td>Target PC number</td></tr>
+            <tr><td><code>minutes</code></td><td>int</td><td><span class="req">required</span></td><td>Minutes to add</td></tr>
+          </table>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"pc_number": 1, "minutes_added": 30, "total_minutes": 90}</pre></div>
+        </div>
+      </div>
+
+      <div class="endpoint" id="ep-dash-lock">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/dashboard/api/pc/{pc_number}/lock</span>
+          <span class="ep-brief">Lock PC from dashboard</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"status": "locked", "pc_number": 1}</pre></div>
+        </div>
+      </div>
+
+      <div class="endpoint" id="ep-dash-rename">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-post">POST</span>
+          <span class="ep-path">/dashboard/api/pc/{pc_number}/rename</span>
+          <span class="ep-brief">Rename a PC</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <div class="sub-label">Request Body <small style="text-transform:none;font-weight:400;color:var(--text-dim)">(application/json)</small></div>
+          <table class="pt">
+            <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            <tr><td><code>name</code></td><td>string</td><td><span class="req">required</span></td><td>New display name</td></tr>
+          </table>
+          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
+          <div class="cb"><pre class="json-block">{"pc_number": 1, "name": "Gaming PC 1"}</pre></div>
+        </div>
+      </div>
+
+      <div class="endpoint" id="ep-screenshot-serve">
+        <div class="ep-header" onclick="toggleEp(this)">
+          <span class="mb mb-get">GET</span>
+          <span class="ep-path">/dashboard/api/pc/{pc_number}/screenshot</span>
+          <span class="ep-brief">Serve latest PC screenshot</span>
+          <span class="ep-chevron">▶</span>
+        </div>
+        <div class="ep-body">
+          <p class="ep-note">Returns the latest in-memory JPEG for a PC. Headers: <code>Content-Type: image/jpeg</code>, <code>Cache-Control: no-store</code>.</p>
+          <div class="ex-label">Response <span class="status-badge s404">404</span> — No screenshot yet</div>
+          <div class="cb"><pre class="json-block">{"detail": "No screenshot available"}</pre></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ ERRORS ═══════════════ -->
+    <div class="docs-section" id="s-errors">
+      <div class="section-head"><span class="section-icon">❌</span> HTTP Error Codes</div>
+      <div class="card" style="padding:0">
+        <table class="pt" style="margin:0">
+          <tr><th style="width:80px">Status</th><th>Meaning</th><th>Example Cause</th></tr>
+          <tr><td><span class="status-badge s200" style="font-size:.82rem">200</span></td><td>Success</td><td>Normal response</td></tr>
+          <tr><td><span class="status-badge s400" style="font-size:.82rem">400</span></td><td>Bad Request</td><td>No coin rate for the pesos amount</td></tr>
+          <tr><td><span class="status-badge s401" style="font-size:.82rem">401</span></td><td>Unauthorized</td><td>Missing or expired JWT / session cookie</td></tr>
+          <tr><td><span class="status-badge s404" style="font-size:.82rem">404</span></td><td>Not Found</td><td>PC number not registered</td></tr>
+          <tr><td><span class="status-badge s400" style="font-size:.82rem">413</span></td><td>Payload Too Large</td><td>Screenshot exceeds 2 MB</td></tr>
+          <tr><td><span class="status-badge s400" style="font-size:.82rem">422</span></td><td>Validation Error</td><td>Wrong field type or constraint violated</td></tr>
+          <tr><td><span class="status-badge s400" style="font-size:.82rem">500</span></td><td>Internal Server Error</td><td>Unhandled exception in server code</td></tr>
+        </table>
+      </div>
+      <p class="ep-note" style="margin-top:.75rem">All error responses follow: <code>{"detail": "Human-readable message"}</code></p>
+    </div>
+
+    <!-- ═══════════════ INTERACTIVE ═══════════════ -->
+    <div class="docs-section" id="s-interactive">
+      <div class="section-head"><span class="section-icon">🧪</span> Interactive Docs</div>
+      <div class="card" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
+        <div>
+          <div style="font-size:.85rem;color:var(--text-dim);margin-bottom:.4rem">FastAPI auto-generates interactive docs. Open in browser while the server is running:</div>
+          <a id="swaggerLink" href="http://192.168.1.100:8000/docs" target="_blank" class="btn btn-primary btn-sm" style="margin-right:.5rem">⚡ Swagger UI</a>
+          <a id="redocLink"   href="http://192.168.1.100:8000/redoc" target="_blank" class="btn btn-default btn-sm">📖 ReDoc</a>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /docsContent -->
+</div><!-- /docs-wrap -->
+
+<script>
+// ── Accordion ─────────────────────────────────────────────────────
+function toggleEp(header) {
+  const ep = header.closest('.endpoint');
+  ep.classList.toggle('open');
+}
+
+function scrollAndOpen(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!el.classList.contains('open')) el.querySelector('.ep-header').click();
+}
+
+// ── Copy to clipboard ─────────────────────────────────────────────
+function copyCode(btn) {
+  const pre = btn.nextElementSibling;
+  navigator.clipboard.writeText(pre.innerText).then(() => {
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1800);
+  });
+}
+
+// ── JSON syntax highlight ─────────────────────────────────────────
+function highlightJson(el) {
+  const raw = el.innerText;
+  try {
+    const pretty = JSON.stringify(JSON.parse(raw), null, 2);
+    el.innerHTML = pretty.replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+      m => {
+        if (/^"/.test(m)) return /:$/.test(m)
+          ? `<span class="j-key">${m}</span>`
+          : `<span class="j-str">${m}</span>`;
+        if (/true|false/.test(m)) return `<span class="j-bool">${m}</span>`;
+        if (/null/.test(m)) return `<span class="j-null">${m}</span>`;
+        return `<span class="j-num">${m}</span>`;
+      }
+    );
+  } catch(e) { /* leave as-is if not valid JSON */ }
+}
+document.querySelectorAll('.json-block').forEach(highlightJson);
+
+// ── Base URL update ───────────────────────────────────────────────
+function updateBaseUrl(val) {
+  const v = val.trim() || 'http://192.168.1.100:8000';
+  document.querySelectorAll('.base-url-placeholder').forEach(s => s.textContent = v);
+  document.getElementById('swaggerLink').href = v + '/docs';
+  document.getElementById('redocLink').href   = v + '/redoc';
+}
+
+// ── Search / filter ───────────────────────────────────────────────
+function filterEndpoints(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('.endpoint').forEach(ep => {
+    const path  = ep.querySelector('.ep-path')?.innerText.toLowerCase()  || '';
+    const brief = ep.querySelector('.ep-brief')?.innerText.toLowerCase() || '';
+    const meth  = ep.querySelector('.mb')?.innerText.toLowerCase()       || '';
+    ep.classList.toggle('hidden-ep', !!q && !path.includes(q) && !brief.includes(q) && !meth.includes(q));
+  });
+  document.querySelectorAll('.docs-section').forEach(sec => {
+    const visible = [...sec.querySelectorAll('.endpoint')].some(e => !e.classList.contains('hidden-ep'));
+    sec.style.display = (!q || visible) ? '' : 'none';
+  });
+}
+
+// ── TOC active on scroll ──────────────────────────────────────────
+const tocLinks = document.querySelectorAll('.toc-link[href^="#"]');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      tocLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + e.target.id));
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+document.querySelectorAll('.docs-section[id]').forEach(s => observer.observe(s));
+</script>
+
+{% endblock %}
