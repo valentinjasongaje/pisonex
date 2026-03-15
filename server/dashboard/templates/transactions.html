@@ -10,10 +10,10 @@
 </div>
 
 <div class="card" style="margin-bottom:16px">
-  <form method="get" action="/dashboard/transactions" class="filter-bar" style="align-items:flex-end;gap:12px">
+  <form id="tx-filter-form" method="get" action="/dashboard/transactions" class="filter-bar" style="align-items:flex-end;gap:12px">
     <div class="form-group">
       <label>Period</label>
-      <select name="days" onchange="this.form.submit()">
+      <select name="days" onchange="submitTxFilter()">
         <option value="0"  {% if days == 0  %}selected{% endif %}>All Time</option>
         <option value="1"  {% if days == 1  %}selected{% endif %}>Today</option>
         <option value="7"  {% if days == 7  %}selected{% endif %}>Last 7 days</option>
@@ -23,7 +23,7 @@
     </div>
     <div class="form-group">
       <label>PC</label>
-      <select name="pc_id" onchange="this.form.submit()">
+      <select name="pc_id" onchange="submitTxFilter()">
         <option value="">All PCs</option>
         {% for pc in pcs %}
         <option value="{{ pc.pc_number }}" {% if pc_id == pc.pc_number %}selected{% endif %}>
@@ -36,6 +36,16 @@
     <a href="/dashboard/transactions" class="btn btn-default btn-sm" style="align-self:flex-end">Clear</a>
     {% endif %}
   </form>
+  <script>
+  function submitTxFilter() {
+    const form = document.getElementById('tx-filter-form');
+    const url = new URL(form.action);
+    new FormData(form).forEach((val, key) => {
+      if (val !== '') url.searchParams.set(key, val);
+    });
+    window.location.href = url.toString();
+  }
+  </script>
 </div>
 
 <div class="card">

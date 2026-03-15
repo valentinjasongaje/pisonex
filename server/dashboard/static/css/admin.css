@@ -605,6 +605,26 @@ input:focus, select:focus {
     font-size: 12px;
     white-space: nowrap;
   }
+
+  .col-hide-sm { display: none; }
+
+  .log-entry {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .log-msg {
+    width: 100%;
+    word-break: break-word;
+    white-space: normal;
+  }
+
+  .pc-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pc-actions .btn { width: 100%; }
 }
 
 /* Fullscreen modal */
