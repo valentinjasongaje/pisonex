@@ -119,6 +119,23 @@ def all_pc_status(db: Session = Depends(get_db)):
     return result
 
 
+@router.post("/{pc_number}/metrics")
+async def upload_metrics(pc_number: int, request: Request):
+    """
+    Called by PC client every ~10 s with a JSON performance snapshot.
+    Stored in memory for admin monitoring. No auth required (LAN only).
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Expected JSON object")
+    import metrics_store
+    metrics_store.save(pc_number, data)
+    return {"status": "ok"}
+
+
 @router.post("/{pc_number}/screenshot")
 async def upload_screenshot(pc_number: int, request: Request):
     """

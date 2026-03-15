@@ -107,6 +107,24 @@ Namespace Config
             End Get
         End Property
 
+        ' ── Performance metrics ────────────────────────────────────────────
+        ''' <summary>Whether to send CPU/RAM/disk/network metrics to the server.</summary>
+        Public ReadOnly Property MetricsEnabled As Boolean
+            Get
+                Return ReadBool("MetricsEnabled", defaultVal:=True)
+            End Get
+        End Property
+
+        ''' <summary>How often to collect and send metrics, in seconds (5–60).</summary>
+        Public ReadOnly Property MetricsIntervalSec As Integer
+            Get
+                Dim val = ReadReg("MetricsIntervalSec")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 5 AndAlso n <= 60 Then Return n
+                Return 10
+            End Get
+        End Property
+
         ' ── Screen monitoring ──────────────────────────────────────────────
         ''' <summary>Whether to upload screenshots for remote admin monitoring.</summary>
         Public ReadOnly Property ScreenCaptureEnabled As Boolean
@@ -360,6 +378,12 @@ Namespace Config
         End Sub
         Public Sub SaveIsConfigured(v As Boolean)
             WriteReg("IsConfigured", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveMetricsEnabled(v As Boolean)
+            WriteReg("MetricsEnabled", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveMetricsIntervalSec(n As Integer)
+            WriteReg("MetricsIntervalSec", n.ToString())
         End Sub
         Public Sub SaveScreenCaptureEnabled(v As Boolean)
             WriteReg("ScreenCaptureEnabled", If(v, "1", "0"))

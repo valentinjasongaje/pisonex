@@ -484,6 +484,31 @@ def docs_wiring_page(
     return templates.TemplateResponse("docs_wiring.html", {"request": request})
 
 
+# ── PC Metrics partial (HTMX polling) ────────────────────────────────────────
+
+@router.get("/monitor/metrics/{pc_number}", response_class=HTMLResponse)
+def monitor_metrics(
+    pc_number: int,
+    request: Request,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """HTMX partial — live performance metrics panel for one PC."""
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    import metrics_store
+    data = metrics_store.get(pc_number)
+    updated = metrics_store.get_time(pc_number)
+    age_sec = (
+        int((datetime.utcnow() - updated).total_seconds()) if updated else None
+    )
+    return templates.TemplateResponse("partials/pc_metrics.html", {
+        "request": request,
+        "pc_number": pc_number,
+        "m": data,
+        "age_sec": age_sec,
+    })
+
+
 # ── PC Management page ────────────────────────────────────────────────────────
 
 @router.get("/pcs", response_class=HTMLResponse)

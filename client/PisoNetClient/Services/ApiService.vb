@@ -65,6 +65,25 @@ Namespace Services
         End Function
 
         ''' <summary>
+        ''' Sends a JSON performance metrics snapshot to the server.
+        ''' Fire-and-forget — returns False silently on failure.
+        ''' </summary>
+        Public Async Function SendMetricsAsync(metrics As Object) As Task(Of Boolean)
+            Try
+                Dim options = New JsonSerializerOptions() With {
+                    .PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+                }
+                Dim json = JsonSerializer.Serialize(metrics, options)
+                Dim content = New StringContent(json, Encoding.UTF8, "application/json")
+                Dim url = $"{_baseUrl}/api/pc/{_pcNumber}/metrics"
+                Dim response = Await _client.PostAsync(url, content)
+                Return response.IsSuccessStatusCode
+            Catch
+                Return False
+            End Try
+        End Function
+
+        ''' <summary>
         ''' Uploads a JPEG screenshot to the server for remote monitoring.
         ''' Fire-and-forget — returns False silently on failure.
         ''' </summary>

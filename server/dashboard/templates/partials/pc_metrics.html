@@ -1,0 +1,139 @@
+{% if not m %}
+<div class="metrics-empty">
+  <span>No metrics received yet.</span>
+  <span style="color:var(--gray);font-size:11px">Client must have MetricsEnabled = true</span>
+</div>
+{% else %}
+
+{# ── Header row ── #}
+<div class="metrics-age">
+  {% if age_sec is not none %}
+    {% if age_sec < 30 %}
+    <span style="color:var(--green)">● Live</span>
+    {% elif age_sec < 120 %}
+    <span style="color:var(--yellow)">● {{ age_sec }}s ago</span>
+    {% else %}
+    <span style="color:var(--red)">● Stale ({{ age_sec }}s)</span>
+    {% endif %}
+  {% endif %}
+  <span style="color:var(--gray)">Uptime:
+    {% set u = m.get('uptime_seconds', 0) | int %}
+    {% set uh = u // 3600 %}{% set um = (u % 3600) // 60 %}
+    {{ uh }}h {{ um }}m
+  </span>
+</div>
+
+{# ── CPU ── #}
+{% set cpu = m.get('cpu_percent', 0) | float %}
+{% set temp = m.get('cpu_temp_c') %}
+<div class="metrics-row">
+  <div class="metrics-label">
+    CPU
+    <span class="metrics-sub">{{ m.get('cpu_cores', '?') }} cores</span>
+    {% if temp is not none %}
+    <span class="metrics-temp {% if temp | float > 80 %}temp-hot{% elif temp | float > 65 %}temp-warm{% else %}temp-ok{% endif %}">
+      {{ temp }}°C
+    </span>
+    {% endif %}
+  </div>
+  <div class="metrics-bar-wrap">
+    <div class="metrics-bar">
+      <div class="metrics-bar-fill {% if cpu > 85 %}bar-red{% elif cpu > 60 %}bar-yellow{% else %}bar-green{% endif %}"
+           style="width:{{ [cpu, 100] | min }}%"></div>
+    </div>
+    <span class="metrics-pct">{{ cpu }}%</span>
+  </div>
+</div>
+
+{# ── RAM ── #}
+{% set ram_pct = m.get('ram_percent', 0) | float %}
+{% set ram_used = m.get('ram_used_mb', 0) | int %}
+{% set ram_total = m.get('ram_total_mb', 0) | int %}
+<div class="metrics-row">
+  <div class="metrics-label">
+    RAM
+    <span class="metrics-sub">{{ (ram_used / 1024) | round(1) }} / {{ (ram_total / 1024) | round(1) }} GB</span>
+  </div>
+  <div class="metrics-bar-wrap">
+    <div class="metrics-bar">
+      <div class="metrics-bar-fill {% if ram_pct > 85 %}bar-red{% elif ram_pct > 65 %}bar-yellow{% else %}bar-green{% endif %}"
+           style="width:{{ [ram_pct, 100] | min }}%"></div>
+    </div>
+    <span class="metrics-pct">{{ ram_pct }}%</span>
+  </div>
+</div>
+
+{# ── GPU (if available) ── #}
+{% set gpu = m.get('gpu_percent') %}
+{% if gpu is not none %}
+{% set gpu_f = gpu | float %}
+<div class="metrics-row">
+  <div class="metrics-label">GPU</div>
+  <div class="metrics-bar-wrap">
+    <div class="metrics-bar">
+      <div class="metrics-bar-fill {% if gpu_f > 85 %}bar-red{% elif gpu_f > 60 %}bar-yellow{% else %}bar-green{% endif %}"
+           style="width:{{ [gpu_f, 100] | min }}%"></div>
+    </div>
+    <span class="metrics-pct">{{ gpu_f }}%</span>
+  </div>
+</div>
+{% endif %}
+
+{# ── Disk drives ── #}
+{% for disk in m.get('disk_drives', []) %}
+{% set dp = disk.get('percent', 0) | float %}
+<div class="metrics-row">
+  <div class="metrics-label">
+    {{ disk.get('drive', '?') }}
+    <span class="metrics-sub">{{ disk.get('used_gb', 0) | round(1) }} / {{ disk.get('total_gb', 0) | round(1) }} GB</span>
+  </div>
+  <div class="metrics-bar-wrap">
+    <div class="metrics-bar">
+      <div class="metrics-bar-fill {% if dp > 90 %}bar-red{% elif dp > 75 %}bar-yellow{% else %}bar-green{% endif %}"
+           style="width:{{ [dp, 100] | min }}%"></div>
+    </div>
+    <span class="metrics-pct">{{ dp }}%</span>
+  </div>
+</div>
+{% endfor %}
+
+{# ── Network ── #}
+{% set dl = m.get('net_download_kbps', 0) | float %}
+{% set ul = m.get('net_upload_kbps', 0) | float %}
+<div class="metrics-row">
+  <div class="metrics-label">Network</div>
+  <div class="metrics-net">
+    <span class="net-dl">↓ {{ "%.1f" | format(dl) }} KB/s</span>
+    <span class="net-ul">↑ {{ "%.1f" | format(ul) }} KB/s</span>
+  </div>
+</div>
+
+{# ── Active window ── #}
+{% set win = m.get('active_window', '') %}
+{% if win %}
+<div class="metrics-row metrics-window">
+  <div class="metrics-label">Active</div>
+  <div class="metrics-window-text" title="{{ win }}">{{ win | truncate(60, True, '…') }}</div>
+</div>
+{% endif %}
+
+{# ── Top processes ── #}
+{% set procs = m.get('top_processes', []) %}
+{% if procs %}
+<div class="metrics-procs">
+  <div class="metrics-procs-header">
+    <span>Process</span><span>RAM</span><span>CPU</span>
+  </div>
+  {% for p in procs[:8] %}
+  <div class="metrics-proc-row">
+    <span class="proc-name" title="{{ p.get('name', '') }}">{{ p.get('name', '') | truncate(22, True, '…') }}</span>
+    <span class="proc-ram">{{ p.get('ram_mb', 0) | int }} MB</span>
+    <span class="proc-cpu {% if p.get('cpu_pct', 0) | float > 20 %}text-yellow{% endif %}">
+      {{ "%.1f" | format(p.get('cpu_pct', 0) | float) }}%
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endif %}

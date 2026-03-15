@@ -57,6 +57,21 @@
         </span>
         <span style="color:var(--text-dim);font-size:11px">remaining</span>
       {% endif %}
+      <button
+        class="btn btn-sm btn-default metrics-toggle-btn"
+        style="margin-left:auto;font-size:11px;padding:2px 8px"
+        onclick="toggleMetrics({{ pc.pc_number }}, this)"
+        title="Toggle performance stats"
+      >📊 Stats</button>
+    </div>
+
+    {# ── Metrics panel (hidden by default, HTMX-polled when open) ── #}
+    <div class="metrics-panel" id="metrics-{{ pc.pc_number }}" style="display:none"
+         hx-get="/dashboard/monitor/metrics/{{ pc.pc_number }}"
+         hx-trigger="revealed, every 8s"
+         hx-target="this"
+         hx-swap="innerHTML">
+      <div class="metrics-empty"><span>Loading…</span></div>
     </div>
 
   </div>
@@ -192,10 +207,21 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Intervals ───────────────────────────────────────────────────────────────
-// Status (card state) every 5s; screenshots staggered by 2.5s so they don't
-// both hit the server at the same moment.
 setInterval(refreshStatus, 3000);
 setTimeout(() => setInterval(refreshScreenshots, 3000), 2500);
+
+// ── Metrics panel toggle ─────────────────────────────────────────────────────
+function toggleMetrics(pcNumber, btn) {
+  const panel = document.getElementById('metrics-' + pcNumber);
+  if (!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : '';
+  btn.textContent = isOpen ? '📊 Stats' : '📊 Hide';
+  if (!isOpen) {
+    // Trigger HTMX to load on first reveal
+    htmx.trigger(panel, 'revealed');
+  }
+}
 </script>
 
 {% endblock %}

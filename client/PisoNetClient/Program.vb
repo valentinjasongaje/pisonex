@@ -15,6 +15,7 @@ Module Program
     Private _overlay As TimerOverlay
     Private _tray As SystemTray
     Private _capture As ScreenCaptureService
+    Private _metrics As MetricsService
     Private _notifs As NotificationService
     Private _guardTimer As System.Timers.Timer   ' mutual watchdog keeper
 
@@ -88,6 +89,10 @@ Module Program
         ' ── Start screen capture for remote monitoring ────────────────────
         _capture = New ScreenCaptureService(_api, _session)
         _capture.Start()
+
+        ' ── Start performance metrics reporting ───────────────────────────
+        _metrics = New MetricsService(_api)
+        _metrics.Start()
 
         ' ── Lock and enter message loop ───────────────────────────────────
         _lockMgr.LockPC()
@@ -203,6 +208,7 @@ Module Program
         _guardTimer?.Dispose()
         WindowsPolicy.RemoveAll()
         _capture?.Dispose()
+        _metrics?.Dispose()
         _tray?.Dispose()
         _lockMgr.AllowExit()
         Application.Exit()

@@ -534,6 +534,153 @@ input:focus, select:focus {
   color: var(--green);
 }
 
+/* ── PC Metrics panel ──────────────────────────────────────── */
+.metrics-panel {
+  border-top: 1px solid var(--border);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0,0,0,0.2);
+}
+
+.metrics-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+.metrics-age {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.metrics-label {
+  min-width: 60px;
+  font-weight: 600;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.metrics-sub {
+  color: var(--gray);
+  font-weight: 400;
+  font-size: 10px;
+}
+
+.metrics-temp {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.temp-ok   { color: var(--green);  background: rgba(34,197,94,0.12); }
+.temp-warm { color: var(--yellow); background: rgba(245,158,11,0.12); }
+.temp-hot  { color: var(--red);    background: rgba(239,68,68,0.12); }
+
+.metrics-bar-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.metrics-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.metrics-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.bar-green  { background: var(--green); }
+.bar-yellow { background: var(--yellow); }
+.bar-red    { background: var(--red); }
+
+.metrics-pct {
+  min-width: 36px;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.metrics-net {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.net-dl { color: var(--accent); }
+.net-ul { color: var(--green); }
+
+.metrics-window {
+  align-items: flex-start;
+}
+
+.metrics-window-text {
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.metrics-procs {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.metrics-procs-header {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray);
+  margin-bottom: 4px;
+}
+
+.metrics-proc-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  font-size: 11px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.proc-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proc-ram  { color: var(--text-dim); text-align: right; min-width: 52px; }
+.proc-cpu  { color: var(--text-dim); text-align: right; min-width: 40px; }
+.text-yellow { color: var(--yellow) !important; }
+
 /* ── Mobile hamburger & responsive layout ──────────────────── */
 .hamburger {
   display: none;
