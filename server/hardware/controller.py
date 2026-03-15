@@ -31,6 +31,7 @@ class HardwareController:
         PC_SELECTION → AWAITING_COINS : # pressed with valid PC
         AWAITING_COINS → PROCESSING   : coin inserted
         AWAITING_COINS → IDLE         : timeout or * pressed
+        AWAITING_COINS → IDLE         : # pressed (user done inserting)
         PROCESSING → AWAITING_COINS   : coin processed successfully
         PROCESSING → IDLE             : error during processing
     """
@@ -42,6 +43,9 @@ class HardwareController:
         self._selected_pc: int | None = None
         self._lock = threading.Lock()
         self._idle_timer: threading.Timer | None = None
+        self._countdown_timer: threading.Timer | None = None
+        self._countdown_remaining: int = 0
+        self._coins_inserted: bool = False  # tracks if any coin was inserted this session
 
         self._lcd = LCD()
         self._coin = CoinSlot(
@@ -63,9 +67,11 @@ class HardwareController:
     def _show_idle(self):
         """Reset everything and show the idle/welcome screen."""
         self._cancel_idle_timer()
+        self._cancel_countdown()
         self._coin.disable()
         self._digits = ""
         self._selected_pc = None
+        self._coins_inserted = False
         self._transition(State.IDLE)
         self._lcd.show(Screen.idle())
 
@@ -79,10 +85,44 @@ class HardwareController:
         self._idle_timer.daemon = True
         self._idle_timer.start()
 
+        # Start the visual countdown on the LCD
+        self._start_countdown(settings.PC_IDLE_TIMEOUT)
+
     def _cancel_idle_timer(self):
         if self._idle_timer:
             self._idle_timer.cancel()
             self._idle_timer = None
+
+    def _start_countdown(self, seconds: int):
+        """Start a 1-second countdown that updates the LCD."""
+        self._cancel_countdown()
+        self._countdown_remaining = seconds
+        self._tick_countdown()
+
+    def _cancel_countdown(self):
+        self._countdown_remaining = 0
+        if self._countdown_timer:
+            self._countdown_timer.cancel()
+            self._countdown_timer = None
+
+    def _tick_countdown(self):
+        """Called every second to refresh the LCD with the countdown."""
+        if self._countdown_remaining <= 0:
+            return
+
+        with self._lock:
+            if self._state == State.AWAITING_COINS and self._selected_pc is not None:
+                self._lcd.show(Screen.pc_selected(
+                    self._selected_pc,
+                    self._countdown_remaining
+                ))
+
+        self._countdown_remaining -= 1
+
+        if self._countdown_remaining >= 0:
+            self._countdown_timer = threading.Timer(1.0, self._tick_countdown)
+            self._countdown_timer.daemon = True
+            self._countdown_timer.start()
 
     def _on_timeout(self):
         with self._lock:
@@ -108,7 +148,7 @@ class HardwareController:
             elif self._state == State.PC_SELECTION:
                 self._handle_selection_key(key)
             elif self._state == State.AWAITING_COINS:
-                pass  # Only * is meaningful here (handled above)
+                self._handle_awaiting_key(key)
 
     def _handle_clear(self):
         if self._state in (State.PC_SELECTION, State.AWAITING_COINS):
@@ -131,6 +171,34 @@ class HardwareController:
         elif key == CONFIRM_KEY:
             self._confirm_pc()
 
+    def _handle_awaiting_key(self, key: str):
+        """Handle # press while awaiting coins — user is done inserting."""
+        if key == CONFIRM_KEY:
+            self._confirm_done()
+
+    def _confirm_done(self):
+        """User pressed # to signal they are done inserting coins."""
+        pc = self._selected_pc
+        if not pc:
+            return
+
+        self._cancel_idle_timer()
+        self._cancel_countdown()
+        self._coin.disable()
+
+        if self._coins_inserted:
+            # Show confirmation with total time
+            session = self._service.get_active_session(pc)
+            total_min = session.minutes_granted if session else 0
+            self._lcd.show(Screen.confirmed(pc, total_min))
+            logger.info("PC %02d: user confirmed done (total %d min)", pc, total_min)
+        else:
+            self._lcd.show(Screen.timeout())
+            logger.info("PC %02d: user pressed # with no coins — cancelling", pc)
+
+        time.sleep(2)
+        self._show_idle()
+
     def _confirm_pc(self):
         if not self._digits:
             self._lcd.show(Screen.error("No PC entered"))
@@ -151,6 +219,7 @@ class HardwareController:
             return
 
         self._selected_pc = pc_number
+        self._coins_inserted = False
         self._transition(State.AWAITING_COINS)
 
         if not command_store.is_coins_allowed(pc_number):
@@ -160,7 +229,7 @@ class HardwareController:
             return
 
         self._coin.enable()
-        self._lcd.show(Screen.pc_selected(pc_number))
+        self._lcd.show(Screen.pc_selected(pc_number, settings.PC_IDLE_TIMEOUT))
         self._reset_idle_timer()
         logger.info("PC %02d selected — awaiting coins", pc_number)
 
@@ -175,7 +244,9 @@ class HardwareController:
         if not command_store.is_coins_allowed(pc):
             return  # discard pulse — coin slot was disabled mid-session
         minutes_preview = (pesos // settings.DEFAULT_RATE_PESOS) * settings.DEFAULT_RATE_MINUTES
-        self._lcd.show(Screen.inserting_coins(pc, pesos, minutes_preview))
+        self._lcd.show(Screen.inserting_coins(
+            pc, pesos, minutes_preview, self._countdown_remaining
+        ))
 
     def _on_coin(self, pesos: int):
         with self._lock:
@@ -193,6 +264,8 @@ class HardwareController:
                 return
             self._transition(State.PROCESSING)
             self._cancel_idle_timer()
+            self._cancel_countdown()
+            self._coins_inserted = True
 
         # Run in a separate thread so GPIO ISR isn't blocked
         threading.Thread(
@@ -214,7 +287,9 @@ class HardwareController:
 
             with self._lock:
                 self._transition(State.AWAITING_COINS)
-                self._lcd.show(Screen.pc_selected(self._selected_pc))
+                self._lcd.show(Screen.pc_selected(
+                    self._selected_pc, settings.PC_IDLE_TIMEOUT
+                ))
                 self._reset_idle_timer()
 
         except Exception as e:
@@ -239,6 +314,7 @@ class HardwareController:
 
     def cleanup(self):
         self._cancel_idle_timer()
+        self._cancel_countdown()
         self._keypad.cleanup()
         self._coin.cleanup()
         self._lcd.cleanup()

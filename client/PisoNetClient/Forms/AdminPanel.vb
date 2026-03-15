@@ -80,7 +80,7 @@ Namespace Forms
         ' Layout constants
         Private Const SIDEBAR_W As Integer = 200
         Private Const FORM_W    As Integer = 900
-        Private Const FORM_H    As Integer = 680
+        Private Const FORM_H    As Integer = 780
         Private Const CONTENT_W As Integer = FORM_W - SIDEBAR_W - 14
         Private Const IW        As Integer = CONTENT_W - 48
         Private Const LM        As Integer = 20
@@ -106,11 +106,11 @@ Namespace Forms
         ' Nav item definitions
         Private Shared ReadOnly NavLabels() As String = {
             "Connection", "Lock Screen", "Restrictions",
-            "Security", "Notifications", "Appearance"
+            "Security", "Notifications"
         }
         Private Shared ReadOnly NavIcons() As String = {
             ChrW(&H26A1), Char.ConvertFromUtf32(&H1F512), Char.ConvertFromUtf32(&H1F6E1),
-            Char.ConvertFromUtf32(&H1F511), Char.ConvertFromUtf32(&H1F514), Char.ConvertFromUtf32(&H1F3A8)
+            Char.ConvertFromUtf32(&H1F511), Char.ConvertFromUtf32(&H1F514)
         }
 
         Public Sub New()
@@ -295,8 +295,7 @@ Namespace Forms
                 AddressOf BuildLockScreenPage,
                 AddressOf BuildRestrictionsPage,
                 AddressOf BuildSecurityPage,
-                AddressOf BuildNotificationsPage,
-                AddressOf BuildAppearancePage
+                AddressOf BuildNotificationsPage
             }
             For i = 0 To builders.Length - 1
                 Dim page = builders(i)()
@@ -471,6 +470,102 @@ Namespace Forms
             prevCard.Controls.Add(_lockTabPreview)
 
             page.Controls.Add(prevCard) : y += 210
+
+            ' ── Timer overlay card ───────────────────────────────────────────
+            Dim timerCard = CardPanel(New Point(LM, y), New Size(IW, 220))
+            cy = 14
+            timerCard.Controls.Add(SectionLabel("Timer Overlay", New Point(14, cy))) : cy += 26
+
+            _chkTimerDot = DarkCheck("Show connection dot", New Point(14, cy), AppConfig.TimerShowConnDot)
+            timerCard.Controls.Add(_chkTimerDot) : cy += 28
+
+            _chkTimerPcLabel = DarkCheck("Show PC number label", New Point(14, cy), AppConfig.TimerShowPcLabel)
+            timerCard.Controls.Add(_chkTimerPcLabel) : cy += 28
+
+            timerCard.Controls.Add(SmallLabel("PC Label Position:", New Point(14, cy + 2)))
+            _cmbTimerPcPos = DarkCombo(New Point(140, cy), 80, {"Above", "Side"},
+                                       If(AppConfig.TimerPcLabelPosition = "Side", "Side", "Above"))
+            timerCard.Controls.Add(_cmbTimerPcPos) : cy += 32
+
+            ' Timer colors
+            timerCard.Controls.Add(SmallLabel("Normal Color:", New Point(14, cy + 4)))
+            _picTimerTimeColor = ColorSwatch(New Point(110, cy), _currentTimerTimeColor)
+            AddHandler _picTimerTimeColor.Click, AddressOf OnPickTimerTimeColor
+            timerCard.Controls.Add(_picTimerTimeColor)
+
+            timerCard.Controls.Add(SmallLabel("Low Time:", New Point(180, cy + 4)))
+            _picTimerLowColor = ColorSwatch(New Point(250, cy), _currentTimerLowColor)
+            AddHandler _picTimerLowColor.Click, AddressOf OnPickTimerLowColor
+            timerCard.Controls.Add(_picTimerLowColor) : cy += 32
+
+            ' Timer preview
+            _timerPreview = New Panel() With {
+                .Location    = New Point(14, cy),
+                .Size        = New Size(160, 56),
+                .BackColor   = Color.FromArgb(18, 22, 38),
+                .BorderStyle = BorderStyle.FixedSingle
+            }
+            AddHandler _timerPreview.Paint, AddressOf OnPaintTimerPreview
+            timerCard.Controls.Add(_timerPreview)
+
+            page.Controls.Add(timerCard) : y += 230
+
+            ' ── Lock screen text card ────────────────────────────────────────
+            Dim textCard = CardPanel(New Point(LM, y), New Size(IW, 170))
+            cy = 14
+            textCard.Controls.Add(SectionLabel("Lock Screen Text", New Point(14, cy))) : cy += 24
+
+            ' Column headers
+            textCard.Controls.Add(SmallLabel("Element",   New Point(14,  cy)))
+            textCard.Controls.Add(SmallLabel("Color",     New Point(130, cy)))
+            textCard.Controls.Add(SmallLabel("Size",      New Point(200, cy)))
+            textCard.Controls.Add(SmallLabel("Center X",  New Point(270, cy)))
+            textCard.Controls.Add(SmallLabel("Y Pos %",   New Point(350, cy))) : cy += 18
+
+            ' Main message row
+            textCard.Controls.Add(SmallLabel("Main Message", New Point(14, cy + 4)))
+            _picMsgColor = ColorSwatch(New Point(130, cy), _currentMsgColor)
+            AddHandler _picMsgColor.Click, AddressOf OnPickMsgColor
+            textCard.Controls.Add(_picMsgColor)
+            _nudMsgSize = DarkNud(New Point(200, cy), 60, AppConfig.LockMsgSize, 18, 72)
+            textCard.Controls.Add(_nudMsgSize)
+            _chkMsgCenterX = DarkCheck("", New Point(280, cy + 2), AppConfig.LockMsgCenterX)
+            textCard.Controls.Add(_chkMsgCenterX)
+            _nudMsgY = DarkNud(New Point(350, cy), 60, AppConfig.LockMsgYPct, 0, 100)
+            textCard.Controls.Add(_nudMsgY) : cy += 30
+
+            ' PC label row
+            textCard.Controls.Add(SmallLabel("PC Label", New Point(14, cy + 4)))
+            _picPcLblColor = ColorSwatch(New Point(130, cy), _currentPcLblColor)
+            AddHandler _picPcLblColor.Click, AddressOf OnPickPcLblColor
+            textCard.Controls.Add(_picPcLblColor)
+            _nudPcLblSize = DarkNud(New Point(200, cy), 60, AppConfig.LockPcLabelSize, 8, 72)
+            textCard.Controls.Add(_nudPcLblSize)
+            _chkPcLblCenterX = DarkCheck("", New Point(280, cy + 2), AppConfig.LockPcLabelCenterX)
+            textCard.Controls.Add(_chkPcLblCenterX)
+            _nudPcLblY = DarkNud(New Point(350, cy), 60, AppConfig.LockPcLabelYPct, 0, 100)
+            textCard.Controls.Add(_nudPcLblY) : cy += 36
+
+            textCard.Controls.Add(InfoLabel(
+                "Y: 0=top, 50=center, 100=bottom. Center X auto-centers based on text width.",
+                New Point(14, cy)))
+
+            page.Controls.Add(textCard) : y += 180
+
+            ' Wire live-preview change handlers
+            Dim timerRefresh = New EventHandler(AddressOf InvalidateTimerPreview)
+            AddHandler _chkTimerDot.CheckedChanged,         timerRefresh
+            AddHandler _chkTimerPcLabel.CheckedChanged,     timerRefresh
+            AddHandler _cmbTimerPcPos.SelectedIndexChanged, timerRefresh
+
+            Dim lockRefresh = New EventHandler(AddressOf InvalidateLockPreview)
+            AddHandler _nudMsgSize.ValueChanged,        lockRefresh
+            AddHandler _chkMsgCenterX.CheckedChanged,   lockRefresh
+            AddHandler _nudMsgY.ValueChanged,           lockRefresh
+            AddHandler _nudPcLblSize.ValueChanged,      lockRefresh
+            AddHandler _chkPcLblCenterX.CheckedChanged, lockRefresh
+            AddHandler _nudPcLblY.ValueChanged,         lockRefresh
+            If _txtMsg IsNot Nothing Then AddHandler _txtMsg.TextChanged, lockRefresh
 
             page.AutoScrollMinSize = New Size(0, y + 10)
             Return page
@@ -688,128 +783,6 @@ Namespace Forms
                 "Voice works even when toasts are disabled -- ideal for full-screen games.",
                 New Point(14, 10)))
             page.Controls.Add(noteCard)
-
-            Return page
-        End Function
-
-        Private Function BuildAppearancePage() As Panel
-            Dim page = ScrollPage()
-            Dim y = 16
-
-            page.Controls.Add(PageTitle("Appearance", New Point(LM, y))) : y += 34
-
-            ' ── Timer overlay card ───────────────────────────────────────────
-            Dim timerCard = CardPanel(New Point(LM, y), New Size(IW, 220))
-            Dim cy = 14
-            timerCard.Controls.Add(SectionLabel("Timer Overlay", New Point(14, cy))) : cy += 26
-
-            _chkTimerDot = DarkCheck("Show connection dot", New Point(14, cy), AppConfig.TimerShowConnDot)
-            timerCard.Controls.Add(_chkTimerDot) : cy += 28
-
-            _chkTimerPcLabel = DarkCheck("Show PC number label", New Point(14, cy), AppConfig.TimerShowPcLabel)
-            timerCard.Controls.Add(_chkTimerPcLabel) : cy += 28
-
-            timerCard.Controls.Add(SmallLabel("PC Label Position:", New Point(14, cy + 2)))
-            _cmbTimerPcPos = DarkCombo(New Point(140, cy), 80, {"Above", "Side"},
-                                       If(AppConfig.TimerPcLabelPosition = "Side", "Side", "Above"))
-            timerCard.Controls.Add(_cmbTimerPcPos) : cy += 32
-
-            ' Timer colors
-            timerCard.Controls.Add(SmallLabel("Normal Color:", New Point(14, cy + 4)))
-            _picTimerTimeColor = ColorSwatch(New Point(110, cy), _currentTimerTimeColor)
-            AddHandler _picTimerTimeColor.Click, AddressOf OnPickTimerTimeColor
-            timerCard.Controls.Add(_picTimerTimeColor)
-
-            timerCard.Controls.Add(SmallLabel("Low Time:", New Point(180, cy + 4)))
-            _picTimerLowColor = ColorSwatch(New Point(250, cy), _currentTimerLowColor)
-            AddHandler _picTimerLowColor.Click, AddressOf OnPickTimerLowColor
-            timerCard.Controls.Add(_picTimerLowColor) : cy += 32
-
-            ' Timer preview
-            _timerPreview = New Panel() With {
-                .Location    = New Point(14, cy),
-                .Size        = New Size(160, 56),
-                .BackColor   = Color.FromArgb(18, 22, 38),
-                .BorderStyle = BorderStyle.FixedSingle
-            }
-            AddHandler _timerPreview.Paint, AddressOf OnPaintTimerPreview
-            timerCard.Controls.Add(_timerPreview)
-
-            page.Controls.Add(timerCard) : y += 230
-
-            ' ── Lock screen text card ────────────────────────────────────────
-            Dim textCard = CardPanel(New Point(LM, y), New Size(IW, 170))
-            cy = 14
-            textCard.Controls.Add(SectionLabel("Lock Screen Text", New Point(14, cy))) : cy += 24
-
-            ' Column headers
-            textCard.Controls.Add(SmallLabel("Element",   New Point(14,  cy)))
-            textCard.Controls.Add(SmallLabel("Color",     New Point(130, cy)))
-            textCard.Controls.Add(SmallLabel("Size",      New Point(200, cy)))
-            textCard.Controls.Add(SmallLabel("Center X",  New Point(270, cy)))
-            textCard.Controls.Add(SmallLabel("Y Pos %",   New Point(350, cy))) : cy += 18
-
-            ' Main message row
-            textCard.Controls.Add(SmallLabel("Main Message", New Point(14, cy + 4)))
-            _picMsgColor = ColorSwatch(New Point(130, cy), _currentMsgColor)
-            AddHandler _picMsgColor.Click, AddressOf OnPickMsgColor
-            textCard.Controls.Add(_picMsgColor)
-            _nudMsgSize = DarkNud(New Point(200, cy), 60, AppConfig.LockMsgSize, 18, 72)
-            textCard.Controls.Add(_nudMsgSize)
-            _chkMsgCenterX = DarkCheck("", New Point(280, cy + 2), AppConfig.LockMsgCenterX)
-            textCard.Controls.Add(_chkMsgCenterX)
-            _nudMsgY = DarkNud(New Point(350, cy), 60, AppConfig.LockMsgYPct, 0, 100)
-            textCard.Controls.Add(_nudMsgY) : cy += 30
-
-            ' PC label row
-            textCard.Controls.Add(SmallLabel("PC Label", New Point(14, cy + 4)))
-            _picPcLblColor = ColorSwatch(New Point(130, cy), _currentPcLblColor)
-            AddHandler _picPcLblColor.Click, AddressOf OnPickPcLblColor
-            textCard.Controls.Add(_picPcLblColor)
-            _nudPcLblSize = DarkNud(New Point(200, cy), 60, AppConfig.LockPcLabelSize, 8, 72)
-            textCard.Controls.Add(_nudPcLblSize)
-            _chkPcLblCenterX = DarkCheck("", New Point(280, cy + 2), AppConfig.LockPcLabelCenterX)
-            textCard.Controls.Add(_chkPcLblCenterX)
-            _nudPcLblY = DarkNud(New Point(350, cy), 60, AppConfig.LockPcLabelYPct, 0, 100)
-            textCard.Controls.Add(_nudPcLblY) : cy += 36
-
-            textCard.Controls.Add(InfoLabel(
-                "Y: 0=top, 50=center, 100=bottom. Center X auto-centers based on text width.",
-                New Point(14, cy)))
-
-            page.Controls.Add(textCard) : y += 180
-
-            ' ── Lock preview card ────────────────────────────────────────────
-            Dim prevCard = CardPanel(New Point(LM, y), New Size(IW, 190))
-            cy = 14
-            prevCard.Controls.Add(SectionLabel("Lock Screen Preview", New Point(14, cy))) : cy += 22
-
-            _lockPreview = New Panel() With {
-                .Location    = New Point(14, cy),
-                .Size        = New Size(IW - 32, 150),
-                .BorderStyle = BorderStyle.FixedSingle
-            }
-            AddHandler _lockPreview.Paint, AddressOf OnPaintLockPreview
-            prevCard.Controls.Add(_lockPreview)
-
-            page.Controls.Add(prevCard) : y += 200
-
-            page.AutoScrollMinSize = New Size(0, y + 10)
-
-            ' Wire live-preview change handlers
-            Dim timerRefresh = New EventHandler(AddressOf InvalidateTimerPreview)
-            AddHandler _chkTimerDot.CheckedChanged,         timerRefresh
-            AddHandler _chkTimerPcLabel.CheckedChanged,     timerRefresh
-            AddHandler _cmbTimerPcPos.SelectedIndexChanged, timerRefresh
-
-            Dim lockRefresh = New EventHandler(AddressOf InvalidateLockPreview)
-            AddHandler _nudMsgSize.ValueChanged,        lockRefresh
-            AddHandler _chkMsgCenterX.CheckedChanged,   lockRefresh
-            AddHandler _nudMsgY.ValueChanged,           lockRefresh
-            AddHandler _nudPcLblSize.ValueChanged,      lockRefresh
-            AddHandler _chkPcLblCenterX.CheckedChanged, lockRefresh
-            AddHandler _nudPcLblY.ValueChanged,         lockRefresh
-            If _txtMsg IsNot Nothing Then AddHandler _txtMsg.TextChanged, lockRefresh
 
             Return page
         End Function
@@ -1104,14 +1077,14 @@ Namespace Forms
                                    _cmbVoice.SelectedItem?.ToString())
             AppConfig.SaveVoiceName(If(selectedVoice, ""))
 
-            ' Appearance: timer overlay
+            ' Lock screen: timer overlay
             AppConfig.SaveTimerTimeArgb(_currentTimerTimeColor.ToArgb())
             AppConfig.SaveTimerLowTimeArgb(_currentTimerLowColor.ToArgb())
             AppConfig.SaveTimerShowConnDot(_chkTimerDot.Checked)
             AppConfig.SaveTimerShowPcLabel(_chkTimerPcLabel.Checked)
             AppConfig.SaveTimerPcLabelPosition(If(_cmbTimerPcPos.SelectedItem?.ToString(), "Above"))
 
-            ' Appearance: lock screen text
+            ' Lock screen: text styling
             AppConfig.SaveLockMsgForeArgb(_currentMsgColor.ToArgb())
             AppConfig.SaveLockMsgSize(CInt(_nudMsgSize.Value))
             AppConfig.SaveLockMsgCenterX(_chkMsgCenterX.Checked)

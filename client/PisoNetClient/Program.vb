@@ -82,24 +82,35 @@ Module Program
         AddHandler _tray.AdminPanelRequested, AddressOf OnAdminPanelRequested
         AddHandler _tray.TimerToggleRequested, AddressOf OnTimerToggleRequested
 
-        ' ── Register PC with server ────────────────────────────────────────
-        Task.Run(Async Function()
-                     Await _api.RegisterAsync()
-                 End Function)
-
-        ' ── Start heartbeat + local countdown ────────────────────────────
-        _session.Start()
-
-        ' ── Start screen capture for remote monitoring ────────────────────
-        _capture = New ScreenCaptureService(_api, _session)
-        _capture.Start()
-
-        ' ── Start performance metrics reporting ───────────────────────────
-        _metrics = New MetricsService(_api)
-        _metrics.Start()
-
-        ' ── Lock and enter message loop ───────────────────────────────────
+        ' ── Lock immediately on startup ──────────────────────────────────
         _lockMgr.LockPC()
+
+        ' ── Defer session start until the message loop is running ────────
+        ' This ensures Invoke works correctly for UnlockPC and other UI
+        ' calls triggered by the first heartbeat response.
+        Dim startTimer = New Timer() With {.Interval = 200}
+        AddHandler startTimer.Tick, Sub(s, ev)
+            startTimer.Stop()
+            startTimer.Dispose()
+
+            ' Register PC with server
+            Task.Run(Async Function()
+                         Await _api.RegisterAsync()
+                     End Function)
+
+            ' Start heartbeat + local countdown
+            _session.Start()
+
+            ' Start screen capture for remote monitoring
+            _capture = New ScreenCaptureService(_api, _session)
+            _capture.Start()
+
+            ' Start performance metrics reporting
+            _metrics = New MetricsService(_api)
+            _metrics.Start()
+        End Sub
+        startTimer.Start()
+
         Application.Run()
     End Sub
 
