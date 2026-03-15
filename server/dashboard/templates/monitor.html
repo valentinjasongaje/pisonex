@@ -57,9 +57,9 @@
 
     </div>{# end monitor-card-body #}
 
-    {# ── Footer: time + mobile stats toggle ── #}
+    {# ── Footer: time, actions, mobile stats toggle ── #}
     <div class="monitor-card-footer" id="footer-{{ pc.pc_number }}">
-      <span id="footer-time-{{ pc.pc_number }}">
+      <span class="monitor-footer-time" id="footer-time-{{ pc.pc_number }}">
         {% if not pc.is_online %}
           <span style="color:var(--gray)">Offline</span>
         {% elif pc.is_locked %}
@@ -73,19 +73,78 @@
           <span style="color:var(--text-dim);font-size:11px">remaining</span>
         {% endif %}
       </span>
-      {# Stats toggle — mobile only (hidden on desktop via CSS) #}
-      <button
-        class="btn btn-sm btn-default metrics-toggle-btn"
-        id="metrics-btn-{{ pc.pc_number }}"
-        onclick="toggleMetrics({{ pc.pc_number }})"
-        title="Toggle performance stats"
-      >📊 Stats</button>
+      <div class="monitor-footer-actions">
+        <button
+          class="btn btn-sm btn-default"
+          onclick="openMessageModal({{ pc.pc_number }})"
+          title="Send message to this PC"
+        >✉</button>
+        <div class="cmd-dropdown">
+          <button
+            class="btn btn-sm btn-default"
+            onclick="toggleCmdDropdown({{ pc.pc_number }})"
+            title="Remote commands"
+          >⚡ ▾</button>
+          <div class="cmd-menu hidden" id="cmd-menu-{{ pc.pc_number }}">
+            <button onclick="sendCommand({{ pc.pc_number }}, 'shutdown')">🔴 Shutdown</button>
+            <button onclick="sendCommand({{ pc.pc_number }}, 'restart')">🔄 Restart</button>
+            <button onclick="sendCommand({{ pc.pc_number }}, 'lock')">🔒 Lock</button>
+            <button onclick="openUrlModal({{ pc.pc_number }})">🌐 Open URL</button>
+          </div>
+        </div>
+        {# Stats toggle — mobile only (hidden on desktop via CSS) #}
+        <button
+          class="btn btn-sm btn-default metrics-toggle-btn"
+          id="metrics-btn-{{ pc.pc_number }}"
+          onclick="toggleMetrics({{ pc.pc_number }})"
+          title="Toggle performance stats"
+        >📊 Stats</button>
+      </div>
     </div>
 
   </div>
   {% endfor %}
 </div>
 {% endif %}
+
+{# ── Send message modal ── #}
+<div id="message-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>✉ Message to <span id="message-pc-label"></span></h2>
+    <form id="message-form">
+      <div class="form-group">
+        <label>Message</label>
+        <textarea id="message-text" name="text" rows="3" maxlength="300"
+          placeholder="Type your message…"
+          style="width:100%;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:14px"
+          required></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeMessageModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Send</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Open URL modal ── #}
+<div id="url-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>🌐 Open URL on <span id="url-pc-label"></span></h2>
+    <form id="url-form">
+      <div class="form-group">
+        <label>URL</label>
+        <input id="url-input" type="url" name="url" maxlength="512"
+          placeholder="https://…" required
+          style="width:100%" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeUrlModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Open</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 {# ── Fullscreen modal ── #}
 <div id="fullscreen-modal" class="modal hidden">

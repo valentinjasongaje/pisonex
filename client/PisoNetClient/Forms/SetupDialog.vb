@@ -15,6 +15,7 @@ Namespace Forms
         Private _nudPcNum As NumericUpDown
         Private _txtPin   As TextBox
         Private _txtPin2  As TextBox
+        Private _txtApiKey As TextBox
 
         Public Sub New()
             InitializeComponent()
@@ -23,7 +24,7 @@ Namespace Forms
         Private Sub InitializeComponent()
             Me.Text            = "PisoNet — First Time Setup"
             Me.FormBorderStyle = FormBorderStyle.FixedDialog
-            Me.Size            = New Size(440, 360)
+            Me.Size            = New Size(440, 420)
             Me.StartPosition   = FormStartPosition.CenterScreen
             Me.MaximizeBox     = False
             Me.MinimizeBox     = False
@@ -74,6 +75,15 @@ Namespace Forms
             AddLabel("↑ Confirm", New Font("Segoe UI", 8), Color.FromArgb(100, 116, 139), New Point(160, y + 28))
             y += 56
 
+            ' ── API Key ────────────────────────────────────────────────────
+            AddLabel("Server API Key  (leave blank if not set)",
+                     New Font("Segoe UI", 9, FontStyle.Bold),
+                     Color.FromArgb(148, 163, 184), New Point(24, y))
+            y += 18
+            _txtApiKey = AddTextBox(New Point(24, y), 384, AppConfig.ApiKey)
+            _txtApiKey.PlaceholderText = "Optional — must match CLIENT_API_KEY in server .env"
+            y += 36
+
             ' ── Save button ────────────────────────────────────────────────
             Dim btnSave = New Button() With {
                 .Text      = "Save & Start",
@@ -111,6 +121,7 @@ Namespace Forms
             AppConfig.SaveServerUrl(url)
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
             AppConfig.SaveAdminPin(pin)
+            AppConfig.SaveApiKey(_txtApiKey.Text.Trim())
             AppConfig.SaveIsConfigured(True)
 
             Me.DialogResult = DialogResult.OK

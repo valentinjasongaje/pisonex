@@ -2,6 +2,7 @@ Imports System.Net.Http
 Imports System.Text
 Imports System.Text.Json
 Imports System.Net.NetworkInformation
+Imports PisoNetClient.Config
 
 Namespace Services
 
@@ -11,6 +12,12 @@ Namespace Services
         Public Property remaining_seconds As Integer
         Public Property session_token As String
         Public Property time_added_minutes As Integer
+        ' Remote control fields — populated by server when admin sends actions
+        Public Property pending_command As String   ' "shutdown"|"restart"|"lock"|"open_url"
+        Public Property command_payload As String   ' URL/path for open_url
+        Public Property admin_message As String     ' per-PC message, shown once
+        Public Property announcement As String      ' shop-wide broadcast (persistent)
+        Public Property coin_slot_enabled As Boolean = True
     End Class
 
     Public Class ApiService
@@ -27,6 +34,11 @@ Namespace Services
             _client = New HttpClient() With {
                 .Timeout = TimeSpan.FromSeconds(8)
             }
+            ' Attach shared API key if configured (matches CLIENT_API_KEY in server .env)
+            Dim key = AppConfig.ApiKey
+            If Not String.IsNullOrEmpty(key) Then
+                _client.DefaultRequestHeaders.Add("X-API-Key", key)
+            End If
         End Sub
 
         ''' <summary>

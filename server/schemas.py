@@ -15,6 +15,12 @@ class PCHeartbeatResponse(BaseModel):
     remaining_seconds: int
     session_token: Optional[str] = None
     time_added_minutes: int = 0
+    # Remote control fields — all optional, ignored by older clients
+    pending_command:  Optional[str] = None   # "shutdown" | "restart" | "lock" | "open_url"
+    command_payload:  Optional[str] = None   # URL / app path for "open_url"
+    admin_message:    Optional[str] = None   # per-PC message (popped on delivery)
+    announcement:     Optional[str] = None   # shop-wide broadcast (persistent)
+    coin_slot_enabled: bool = True           # combined global + per-PC coin slot state
 
 class PCStatusResponse(BaseModel):
     pc_number: int

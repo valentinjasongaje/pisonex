@@ -26,6 +26,7 @@
         <th class="col-hide-sm">MAC Address</th>
         <th>Remaining</th>
         <th class="col-hide-sm">Last Seen</th>
+        <th>Coins</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -57,6 +58,14 @@
         </td>
         <td class="col-hide-sm" style="color: var(--text-dim); font-size: 12px;">
           {{ pc.last_seen.strftime('%b %d %H:%M') if pc.last_seen else "Never" }}
+        </td>
+        <td>
+          <button
+            id="pc-coin-btn-{{ pc.pc_number }}"
+            class="btn btn-sm coin-toggle-btn coin-enabled"
+            onclick="togglePcCoinSlot({{ pc.pc_number }})"
+            title="Toggle coin slot for this PC"
+          >ON</button>
         </td>
         <td>
           <div class="pc-actions">

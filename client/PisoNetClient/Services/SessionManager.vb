@@ -21,6 +21,9 @@ Namespace Services
         Private _warned5Min As Boolean = False
         Private _warned1Min As Boolean = False
 
+        ' Announcement dedup — only fire event when text changes
+        Private _lastAnnouncement As String = Nothing
+
         ' Guards _remainingSeconds from concurrent access
         Private ReadOnly _stateLock As New Object()
 
@@ -34,6 +37,12 @@ Namespace Services
         Public Event LowTimeWarning(minutesLeft As Integer)
         ''' <summary>Fired when the server reports that time was added to this PC's session.</summary>
         Public Event TimeAdded(minutes As Integer)
+        ''' <summary>Fired when the server delivers a one-time message for this PC.</summary>
+        Public Event MessageReceived(text As String)
+        ''' <summary>Fired when the shop-wide announcement text changes (or is cleared with Nothing).</summary>
+        Public Event AnnouncementChanged(text As String)
+        ''' <summary>Fired when the server queues a remote command for this PC.</summary>
+        Public Event CommandReceived(type As String, payload As String)
 
         ' ── Heartbeat interval ───────────────────────────────────────
         ' 1-second poll in all states.  On a local LAN with FastAPI +
@@ -163,6 +172,26 @@ Namespace Services
             ' Notify the user if the server reports that time was added
             If response.time_added_minutes > 0 Then
                 RaiseEvent TimeAdded(response.time_added_minutes)
+            End If
+
+            ' ── Remote control delivery ────────────────────────────────────────
+
+            ' Per-PC message (popped on delivery — show only once)
+            If Not String.IsNullOrEmpty(response.admin_message) Then
+                RaiseEvent MessageReceived(response.admin_message)
+            End If
+
+            ' Shop-wide announcement (persistent — only raise event when text changes)
+            Dim ann = If(String.IsNullOrEmpty(response.announcement), Nothing, response.announcement)
+            If ann <> _lastAnnouncement Then
+                _lastAnnouncement = ann
+                RaiseEvent AnnouncementChanged(ann)
+            End If
+
+            ' Remote command (popped on delivery — execute once)
+            If Not String.IsNullOrEmpty(response.pending_command) Then
+                RaiseEvent CommandReceived(response.pending_command,
+                                           If(response.command_payload, String.Empty))
             End If
         End Function
 

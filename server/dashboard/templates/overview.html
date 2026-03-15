@@ -7,7 +7,15 @@
     <div class="stat-pill online">🟢 <span id="online-count">{{ online_count }}</span> Online</div>
     <div class="stat-pill active">⚡ <span id="active-count">{{ active_count }}</span> Active</div>
     <div class="stat-pill earnings">₱ <span id="today-earnings">{{ today_pesos }}</span> Today</div>
+    <button class="btn btn-sm btn-default" onclick="openAnnouncementModal()">📢 Announce</button>
+    <button id="global-coin-btn" class="btn btn-sm coin-toggle-btn coin-enabled" onclick="toggleGlobalCoinSlot()">🪙 Coins: ON</button>
   </div>
+</div>
+
+<!-- Active announcement banner (hidden until JS populates it) -->
+<div id="announcement-banner" class="announcement-banner" style="display:none">
+  <span></span>
+  <button class="btn btn-sm btn-danger" onclick="clearAnnouncement()" style="flex-shrink:0">✕ Clear</button>
 </div>
 
 <!-- PC Grid — auto-refreshes every 10s via HTMX -->
@@ -21,6 +29,27 @@
   {% for pc in pcs %}
   {% include "partials/pc_card.html" %}
   {% endfor %}
+</div>
+
+<!-- Announcement Modal -->
+<div id="announcement-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>📢 Shop Announcement</h2>
+    <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">Broadcasts to all connected PCs. Stays visible until cleared.</p>
+    <form id="announcement-form">
+      <div class="form-group">
+        <label>Message</label>
+        <textarea id="announcement-text" name="text" rows="3" maxlength="300"
+          placeholder="e.g. Shop closing in 30 minutes…"
+          style="width:100%;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:14px"
+          required></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeAnnouncementModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Send to All PCs</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- Add Time Modal -->

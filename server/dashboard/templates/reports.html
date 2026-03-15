@@ -1,0 +1,107 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Revenue Reports</h1>
+  <div class="header-stats">
+    <form method="get" action="/dashboard/reports" style="display:flex;gap:8px;align-items:center">
+      <select name="days" class="filter-select" onchange="this.form.submit()">
+        <option value="7"  {% if selected_days == 7  %}selected{% endif %}>Last 7 days</option>
+        <option value="30" {% if selected_days == 30 %}selected{% endif %}>Last 30 days</option>
+        <option value="90" {% if selected_days == 90 %}selected{% endif %}>Last 90 days</option>
+      </select>
+    </form>
+    <a href="/dashboard/reports/export.csv?days={{ selected_days }}" class="btn btn-sm btn-default">⬇ Export CSV</a>
+  </div>
+</div>
+
+{# ── Summary cards ── #}
+<div class="report-cards">
+
+  <div class="report-card">
+    <div class="report-card-label">Today</div>
+    <div class="report-card-value">₱{{ today_pesos }}</div>
+    <div class="report-card-sub">{{ today_tx }} transaction{{ 's' if today_tx != 1 }}</div>
+  </div>
+
+  <div class="report-card">
+    <div class="report-card-label">This Week</div>
+    <div class="report-card-value">₱{{ week_pesos }}</div>
+    <div class="report-card-sub">{{ week_tx }} transaction{{ 's' if week_tx != 1 }}</div>
+  </div>
+
+  <div class="report-card">
+    <div class="report-card-label">This Month</div>
+    <div class="report-card-value">₱{{ month_pesos }}</div>
+    <div class="report-card-sub">{{ month_tx }} transaction{{ 's' if month_tx != 1 }}</div>
+  </div>
+
+  <div class="report-card">
+    <div class="report-card-label">All Time</div>
+    <div class="report-card-value">₱{{ total_pesos }}</div>
+    <div class="report-card-sub">{{ total_sessions }} total sessions</div>
+  </div>
+
+</div>
+
+{# ── Daily revenue chart ── #}
+<div class="card">
+  <div class="card-header-row">
+    <h2>Daily Revenue — Last {{ chart_days }} Days</h2>
+    <span class="text-dim" style="font-size:12px">Hover for details</span>
+  </div>
+
+  <div class="bar-chart">
+    {% for day in daily %}
+    {% set pct = ((day.pesos / max_day_pesos) * 100) | round(1) %}
+    <div class="bar-col" title="{{ day.date.strftime('%b %d') }}: ₱{{ day.pesos }} ({{ day.count }} tx)">
+      <div class="bar-fill" style="height:{{ pct }}%"></div>
+      <div class="bar-label">
+        {% if loop.index == 1 or loop.index == loop.length or day.date.day == 1 %}
+          {{ day.date.strftime('%b %d') }}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if total_tx == 0 %}
+  <p style="text-align:center;color:var(--text-dim);padding:24px">No transactions in this period.</p>
+  {% endif %}
+</div>
+
+{# ── Per-PC revenue this month ── #}
+<div class="card">
+  <h2>Revenue by PC — This Month</h2>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>PC</th>
+        <th>Name</th>
+        <th>Revenue</th>
+        <th>Transactions</th>
+        <th style="width:200px">Share</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pc in per_pc %}
+      {% set bar_w = ((pc.pesos / max_pc_pesos) * 100) | round(1) %}
+      <tr>
+        <td>PC {{ "%02d"|format(pc.pc_number) }}</td>
+        <td>{{ pc.name }}</td>
+        <td style="font-weight:600">₱{{ pc.pesos }}</td>
+        <td style="color:var(--text-dim)">{{ pc.tx_count }}</td>
+        <td>
+          <div class="inline-bar">
+            <div class="inline-bar-fill" style="width:{{ bar_w }}%"></div>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="color:var(--text-dim);text-align:center">No PCs registered</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

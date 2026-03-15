@@ -1,8 +1,10 @@
-from datetime import datetime, timedelta
+import csv
+import io
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -12,14 +14,28 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel
 from schemas import AdminAddTimeRequest
 from services.session_service import SessionService
 from config import settings
+import command_store
 
 
 class RenamePcBody(BaseModel):
     name: str
+
+class SendMessageBody(BaseModel):
+    text: str
+
+class SendCommandBody(BaseModel):
+    type: str               # "shutdown" | "restart" | "lock" | "open_url"
+    payload: str = ""       # URL / app path for open_url
+
+class AnnouncementBody(BaseModel):
+    text: str
+
+class CoinSlotBody(BaseModel):
+    enabled: bool
 
 router = APIRouter(prefix="/dashboard")
 templates = Jinja2Templates(directory="dashboard/templates")
@@ -225,6 +241,31 @@ def save_rate(
     db.add(rate)
     db.commit()
 
+    rates = (
+        db.query(CoinRate)
+        .filter(CoinRate.is_active == True)
+        .order_by(CoinRate.pesos.asc())
+        .all()
+    )
+    return templates.TemplateResponse("partials/rates_table.html", {
+        "request": request,
+        "rates": rates,
+    })
+
+
+@router.delete("/rates/{rate_id}", response_class=HTMLResponse)
+def delete_rate(
+    rate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    rate = db.query(CoinRate).filter(CoinRate.id == rate_id).first()
+    if rate:
+        rate.is_active = False
+        db.commit()
     rates = (
         db.query(CoinRate)
         .filter(CoinRate.is_active == True)
@@ -548,3 +589,236 @@ def pcs_page(
         "pcs": pc_data,
         "total": len(pc_data),
     })
+
+
+# ── Reports page ──────────────────────────────────────────────────────────────
+
+def _reports_data(days: int, db):
+    """Shared helper — compute all aggregate data for the reports page/export."""
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start  = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
+
+    def _sum(q):
+        row = q.with_entities(
+            func.coalesce(func.sum(CoinTransaction.amount_pesos), 0).label("pesos"),
+            func.count(CoinTransaction.id).label("count"),
+        ).first()
+        return int(row.pesos), int(row.count)
+
+    base = db.query(CoinTransaction)
+    today_pesos,  today_tx  = _sum(base.filter(CoinTransaction.created_at >= today_start))
+    week_pesos,   week_tx   = _sum(base.filter(CoinTransaction.created_at >= week_start))
+    month_pesos,  month_tx  = _sum(base.filter(CoinTransaction.created_at >= month_start))
+    total_pesos,  total_tx  = _sum(base)
+
+    # Sessions count (all time)
+    total_sessions = db.query(func.count(SessionModel.id)).scalar() or 0
+
+    # Per-PC revenue this month
+    pc_rows = (
+        db.query(
+            PC.pc_number,
+            PC.name,
+            func.coalesce(func.sum(CoinTransaction.amount_pesos), 0).label("pesos"),
+            func.count(CoinTransaction.id).label("tx_count"),
+        )
+        .outerjoin(CoinTransaction, (CoinTransaction.pc_id == PC.id) &
+                   (CoinTransaction.created_at >= month_start))
+        .group_by(PC.id)
+        .order_by(desc("pesos"))
+        .all()
+    )
+    per_pc = [
+        {"pc_number": r.pc_number, "name": r.name,
+         "pesos": int(r.pesos), "tx_count": int(r.tx_count)}
+        for r in pc_rows
+    ]
+    max_pc_pesos = max((r["pesos"] for r in per_pc), default=1) or 1
+
+    # Daily revenue — last 30 days (or custom range)
+    chart_days = days if days and days > 0 else 30
+    chart_since = today_start - timedelta(days=chart_days - 1)
+    daily_rows = (
+        db.query(
+            func.date(CoinTransaction.created_at).label("day"),
+            func.sum(CoinTransaction.amount_pesos).label("pesos"),
+            func.count(CoinTransaction.id).label("count"),
+        )
+        .filter(CoinTransaction.created_at >= chart_since)
+        .group_by(func.date(CoinTransaction.created_at))
+        .order_by("day")
+        .all()
+    )
+    daily_map = {str(r.day): (int(r.pesos), int(r.count)) for r in daily_rows}
+    daily = []
+    for i in range(chart_days):
+        d = (chart_since + timedelta(days=i)).date()
+        pesos, count = daily_map.get(str(d), (0, 0))
+        daily.append({"date": d, "pesos": pesos, "count": count})
+    max_day_pesos = max((d["pesos"] for d in daily), default=1) or 1
+
+    return {
+        "today_pesos": today_pesos, "today_tx": today_tx,
+        "week_pesos":  week_pesos,  "week_tx":  week_tx,
+        "month_pesos": month_pesos, "month_tx": month_tx,
+        "total_pesos": total_pesos, "total_tx": total_tx,
+        "total_sessions": total_sessions,
+        "per_pc": per_pc, "max_pc_pesos": max_pc_pesos,
+        "daily": daily,  "max_day_pesos": max_day_pesos,
+        "chart_days": chart_days,
+    }
+
+
+@router.get("/reports", response_class=HTMLResponse)
+def reports_page(
+    request: Request,
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    ctx = _reports_data(days, db)
+    return templates.TemplateResponse("reports.html", {
+        "request": request,
+        "selected_days": days,
+        **ctx,
+    })
+
+
+@router.get("/reports/export.csv")
+def reports_export_csv(
+    days: int = 0,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+
+    query = (
+        db.query(CoinTransaction)
+        .outerjoin(PC, CoinTransaction.pc_id == PC.id)
+        .add_columns(PC.pc_number, PC.name)
+        .order_by(desc(CoinTransaction.created_at))
+    )
+    if days and days > 0:
+        since = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(CoinTransaction.created_at >= since)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Date", "PC Number", "PC Name", "Amount (₱)", "Minutes Added"])
+    for tx, pc_number, pc_name in query.all():
+        writer.writerow([
+            tx.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            pc_number or "",
+            pc_name or "",
+            tx.amount_pesos,
+            tx.minutes_added,
+        ])
+
+    buf.seek(0)
+    filename = f"pisonet-transactions-{date.today()}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Remote control endpoints ─────────────────────────────────────────────────
+
+@router.post("/api/pc/{pc_number}/message")
+def send_pc_message(
+    pc_number: int,
+    body: SendMessageBody,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="Message text cannot be empty")
+    command_store.push_message(pc_number, body.text.strip())
+    return {"status": "queued", "pc_number": pc_number}
+
+
+@router.post("/api/pc/{pc_number}/command")
+def send_pc_command(
+    pc_number: int,
+    body: SendCommandBody,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    allowed = {"shutdown", "restart", "lock", "open_url"}
+    if body.type not in allowed:
+        raise HTTPException(status_code=422, detail=f"Unknown command type: {body.type}")
+    if body.type == "open_url" and not body.payload.strip():
+        raise HTTPException(status_code=422, detail="open_url requires a payload URL")
+    command_store.push_command(pc_number, body.type, body.payload.strip())
+    return {"status": "queued", "pc_number": pc_number, "command": body.type}
+
+
+@router.post("/api/announcement")
+def set_announcement(
+    body: AnnouncementBody,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="Announcement text cannot be empty")
+    command_store.set_announcement(body.text.strip())
+    return {"status": "set"}
+
+
+@router.delete("/api/announcement")
+def clear_announcement(
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_announcement(None)
+    return {"status": "cleared"}
+
+
+@router.get("/api/hardware/coin-slot")
+def get_coin_slot_state(
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    pcs = db.query(PC).order_by(PC.pc_number).all()
+    return {
+        "global_enabled": command_store.is_coin_slot_enabled(),
+        "announcement": command_store.get_announcement(),
+        "per_pc": {
+            pc.pc_number: command_store.is_pc_coin_enabled(pc.pc_number)
+            for pc in pcs
+        },
+    }
+
+
+@router.post("/api/hardware/coin-slot")
+def set_global_coin_slot(
+    body: CoinSlotBody,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_coin_slot_enabled(body.enabled)
+    return {"status": "ok", "global_enabled": body.enabled}
+
+
+@router.post("/api/pc/{pc_number}/coin-slot")
+def set_pc_coin_slot(
+    pc_number: int,
+    body: CoinSlotBody,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_pc_coin_enabled(pc_number, body.enabled)
+    return {"status": "ok", "pc_number": pc_number, "enabled": body.enabled}

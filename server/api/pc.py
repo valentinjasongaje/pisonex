@@ -8,8 +8,12 @@ from models import PC, Session as SessionModel
 from schemas import PCHeartbeatResponse, PCStatusResponse
 from services.session_service import SessionService
 from config import settings
+from dependencies import verify_client_key
+import command_store
 
 router = APIRouter(prefix="/api/pc", tags=["pc"])
+
+_ClientAuth = Depends(verify_client_key)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -19,7 +23,7 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-@router.post("/register")
+@router.post("/register", dependencies=[_ClientAuth])
 def register_pc(
     pc_number: int,
     mac_address: str,
@@ -45,7 +49,8 @@ def register_pc(
     }
 
 
-@router.post("/heartbeat/{pc_number}", response_model=PCHeartbeatResponse)
+@router.post("/heartbeat/{pc_number}", response_model=PCHeartbeatResponse,
+             dependencies=[_ClientAuth])
 def heartbeat(
     pc_number: int,
     request: Request,
@@ -80,12 +85,23 @@ def heartbeat(
 
     is_locked = pc.is_locked or session is None
 
+    # Remote-control payloads delivered via heartbeat
+    cmd = command_store.pop_command(pc_number)
+    msg = command_store.pop_message(pc_number)
+    ann = command_store.get_announcement()
+    coins_ok = command_store.is_coins_allowed(pc_number)
+
     return PCHeartbeatResponse(
         is_locked=is_locked,
         remaining_minutes=remaining_sec // 60,
         remaining_seconds=remaining_sec % 60,
         session_token=session.session_token if session else None,
         time_added_minutes=time_added,
+        pending_command=cmd["type"] if cmd else None,
+        command_payload=cmd["payload"] if cmd else None,
+        admin_message=msg,
+        announcement=ann,
+        coin_slot_enabled=coins_ok,
     )
 
 
@@ -119,7 +135,7 @@ def all_pc_status(db: Session = Depends(get_db)):
     return result
 
 
-@router.post("/{pc_number}/metrics")
+@router.post("/{pc_number}/metrics", dependencies=[_ClientAuth])
 async def upload_metrics(pc_number: int, request: Request):
     """
     Called by PC client every ~10 s with a JSON performance snapshot.
@@ -136,7 +152,7 @@ async def upload_metrics(pc_number: int, request: Request):
     return {"status": "ok"}
 
 
-@router.post("/{pc_number}/screenshot")
+@router.post("/{pc_number}/screenshot", dependencies=[_ClientAuth])
 async def upload_screenshot(pc_number: int, request: Request):
     """
     Called by PC client every 5 seconds with a JPEG screenshot body.

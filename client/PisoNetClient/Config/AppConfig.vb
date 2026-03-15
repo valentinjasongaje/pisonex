@@ -329,6 +329,15 @@ Namespace Config
             End Get
         End Property
 
+        ' ── API authentication ─────────────────────────────────────────────
+        ''' <summary>Shared API key sent in X-API-Key header on every server request.
+        ''' Must match CLIENT_API_KEY in server .env. Leave empty if auth is disabled.</summary>
+        Public ReadOnly Property ApiKey As String
+            Get
+                Return If(ReadReg("ApiKey"), "")
+            End Get
+        End Property
+
         ' ── First-run flag ─────────────────────────────────────────────────
         Public ReadOnly Property IsConfigured As Boolean
             Get
@@ -450,6 +459,9 @@ Namespace Config
         End Sub
         Public Sub SaveLockPcLabelYPct(n As Integer)
             WriteReg("LockPcLabelYPct", n.ToString())
+        End Sub
+        Public Sub SaveApiKey(value As String)
+            WriteReg("ApiKey", If(value, ""))
         End Sub
         ''' <summary>Saves own exe path so the watchdog can find it after a restart.</summary>
         Public Sub SaveClientExePath(path As String)

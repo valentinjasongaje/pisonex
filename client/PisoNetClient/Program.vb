@@ -72,6 +72,9 @@ Module Program
         AddHandler _session.ServerConnectionRestored, AddressOf OnConnectionRestored
         AddHandler _session.LowTimeWarning, AddressOf OnLowTimeWarning
         AddHandler _session.TimeAdded, AddressOf OnTimeAdded
+        AddHandler _session.MessageReceived, AddressOf OnMessageReceived
+        AddHandler _session.AnnouncementChanged, AddressOf OnAnnouncementChanged
+        AddHandler _session.CommandReceived, AddressOf OnCommandReceived
 
         ' Admin panel from lock form shortcut and from tray menu
         AddHandler _lockMgr.LockFormAdminRequested, AddressOf OnAdminPanelRequested
@@ -165,6 +168,67 @@ Module Program
             $"+{minutes} Minute{If(minutes = 1, "", "s")} Added",
             $"{minutes} minute{If(minutes = 1, "", "s")} {If(minutes = 1, "has", "have")} been added to your session.",
             ToastType.Success)
+    End Sub
+
+    ' ── Remote control handlers ────────────────────────────────────────────
+
+    Private Sub OnMessageReceived(text As String)
+        If _overlay.InvokeRequired Then
+            _overlay.Invoke(Sub() OnMessageReceived(text))
+            Return
+        End If
+        Dim dlg = New MessageOverlay("Message from Admin", text)
+        dlg.Show()
+    End Sub
+
+    ' Tracks the current announcement form so we don't stack duplicates
+    Private _announcementOverlay As MessageOverlay
+
+    Private Sub OnAnnouncementChanged(text As String)
+        If _overlay.InvokeRequired Then
+            _overlay.Invoke(Sub() OnAnnouncementChanged(text))
+            Return
+        End If
+        ' Close the previous announcement overlay if still visible
+        If _announcementOverlay IsNot Nothing AndAlso Not _announcementOverlay.IsDisposed Then
+            _announcementOverlay.Close()
+        End If
+        _announcementOverlay = Nothing
+        If Not String.IsNullOrEmpty(text) Then
+            _announcementOverlay = New MessageOverlay("Shop Announcement", text)
+            _announcementOverlay.Show()
+        End If
+    End Sub
+
+    Private Sub OnCommandReceived(type As String, payload As String)
+        If _overlay.InvokeRequired Then
+            _overlay.Invoke(Sub() OnCommandReceived(type, payload))
+            Return
+        End If
+        Select Case type
+            Case "lock"
+                ' Lock is already handled server-side via is_locked flag on next heartbeat,
+                ' but we also end locally for instant response.
+                _lockMgr.LockPC()
+
+            Case "shutdown"
+                Dim dlg = New MessageOverlay("shutdown")
+                dlg.Show()
+
+            Case "restart"
+                Dim dlg = New MessageOverlay("restart")
+                dlg.Show()
+
+            Case "open_url"
+                If Not String.IsNullOrWhiteSpace(payload) Then
+                    Try
+                        Process.Start(New ProcessStartInfo(payload) With {
+                            .UseShellExecute = True
+                        })
+                    Catch
+                    End Try
+                End If
+        End Select
     End Sub
 
     ' ── Admin panel flow ──────────────────────────────────────────────────

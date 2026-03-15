@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"
 
+    # PC client API key — shared secret sent in X-API-Key header by all clients.
+    # Leave empty ("") to disable auth (default, backward-compatible).
+    # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here
+    CLIENT_API_KEY: str = ""
+
     # GPIO pins (BCM numbering)
     COIN_PIN: int = 4
     RELAY_PIN: int = 6          # BCM 6 (Physical Pin 31) — relay that powers the coin acceptor

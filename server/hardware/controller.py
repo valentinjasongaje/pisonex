@@ -6,6 +6,7 @@ from hardware.coin_slot import CoinSlot
 from hardware.keypad import Keypad
 from hardware.lcd import LCD, Screen
 from config import settings
+import command_store
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,13 @@ class HardwareController:
 
         self._selected_pc = pc_number
         self._transition(State.AWAITING_COINS)
+
+        if not command_store.is_coins_allowed(pc_number):
+            self._lcd.show(Screen.error("Coin slot disabled"))
+            logger.info("PC %02d selected but coin slot is disabled", pc_number)
+            threading.Timer(2, self._show_idle).start()
+            return
+
         self._coin.enable()
         self._lcd.show(Screen.pc_selected(pc_number))
         self._reset_idle_timer()
@@ -164,6 +172,8 @@ class HardwareController:
             if self._state != State.AWAITING_COINS:
                 return
             pc = self._selected_pc
+        if not command_store.is_coins_allowed(pc):
+            return  # discard pulse — coin slot was disabled mid-session
         minutes_preview = (pesos // settings.DEFAULT_RATE_PESOS) * settings.DEFAULT_RATE_MINUTES
         self._lcd.show(Screen.inserting_coins(pc, pesos, minutes_preview))
 
@@ -173,6 +183,12 @@ class HardwareController:
                 logger.warning(
                     "Coin ₱%d received but state is %s — ignoring",
                     pesos, self._state.name,
+                )
+                return
+            if not command_store.is_coins_allowed(self._selected_pc):
+                logger.info(
+                    "Coin ₱%d received for PC %02d but coin slot is disabled — ignoring",
+                    pesos, self._selected_pc,
                 )
                 return
             self._transition(State.PROCESSING)

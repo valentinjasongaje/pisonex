@@ -192,3 +192,235 @@ toastStyle.textContent = `
   .toast-error   { background: #ef4444; color: #fff; }
 `;
 document.head.appendChild(toastStyle);
+
+// ── DELETE helper ─────────────────────────────────────────────────────────────
+async function apiDelete(url) {
+  const res = await fetch(url, { method: 'DELETE' });
+  if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+  return res;
+}
+
+// ── Coin slot state ───────────────────────────────────────────────────────────
+let _coinGlobal = true;
+let _coinPc = {};
+
+async function initCoinSlotStates() {
+  try {
+    const res = await fetch('/dashboard/api/hardware/coin-slot');
+    if (!res.ok) return;
+    const data = await res.json();
+    _coinGlobal = data.global_enabled;
+    _coinPc = data.per_pc || {};
+    _applyGlobalCoinBtn(_coinGlobal);
+    Object.entries(_coinPc).forEach(([pc, on]) => _applyPcCoinBtn(parseInt(pc), on));
+    updateAnnouncementBanner(data.announcement);
+  } catch(e) {}
+}
+
+function _applyGlobalCoinBtn(on) {
+  const btn = document.getElementById('global-coin-btn');
+  if (!btn) return;
+  btn.textContent = `🪙 Coins: ${on ? 'ON' : 'OFF'}`;
+  btn.className = `btn btn-sm coin-toggle-btn ${on ? 'coin-enabled' : 'coin-disabled'}`;
+}
+
+function _applyPcCoinBtn(pcNumber, on) {
+  const btn = document.getElementById(`pc-coin-btn-${pcNumber}`);
+  if (!btn) return;
+  btn.textContent = on ? 'ON' : 'OFF';
+  btn.className = `btn btn-sm coin-toggle-btn ${on ? 'coin-enabled' : 'coin-disabled'}`;
+}
+
+async function toggleGlobalCoinSlot() {
+  const newVal = !_coinGlobal;
+  if (!confirm(`${newVal ? 'Enable' : 'Disable'} coin slot for all PCs?`)) return;
+  const res = await apiPost('/dashboard/api/hardware/coin-slot', { enabled: newVal });
+  if (!res) return;
+  if (res.ok) {
+    _coinGlobal = newVal;
+    _applyGlobalCoinBtn(_coinGlobal);
+    showToast(`Coin slot ${newVal ? 'enabled' : 'disabled'} globally`, 'success');
+  } else {
+    showToast('Failed to update coin slot', 'error');
+  }
+}
+
+async function togglePcCoinSlot(pcNumber) {
+  const current = _coinPc[pcNumber] !== false;
+  const newVal = !current;
+  const res = await apiPost(`/dashboard/api/pc/${pcNumber}/coin-slot`, { enabled: newVal });
+  if (!res) return;
+  if (res.ok) {
+    _coinPc[pcNumber] = newVal;
+    _applyPcCoinBtn(pcNumber, newVal);
+    showToast(`PC ${String(pcNumber).padStart(2,'0')} coins ${newVal ? 'enabled' : 'disabled'}`, 'success');
+  } else {
+    showToast('Failed to update coin slot', 'error');
+  }
+}
+
+// ── Announcement ──────────────────────────────────────────────────────────────
+function openAnnouncementModal() {
+  const inp = document.getElementById('announcement-text');
+  if (inp) inp.value = '';
+  const modal = document.getElementById('announcement-modal');
+  if (modal) { modal.classList.remove('hidden'); if (inp) setTimeout(() => inp.focus(), 50); }
+}
+function closeAnnouncementModal() {
+  const m = document.getElementById('announcement-modal');
+  if (m) m.classList.add('hidden');
+}
+async function clearAnnouncement() {
+  const res = await apiDelete('/dashboard/api/announcement');
+  if (res && res.ok) {
+    showToast('Announcement cleared', 'success');
+    updateAnnouncementBanner(null);
+  }
+}
+function updateAnnouncementBanner(text) {
+  const banner = document.getElementById('announcement-banner');
+  if (!banner) return;
+  if (text) {
+    banner.querySelector('span').textContent = `📢 ${text}`;
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+// ── Message modal ─────────────────────────────────────────────────────────────
+let _msgPc = null;
+function openMessageModal(pcNumber) {
+  _msgPc = pcNumber;
+  const lbl = document.getElementById('message-pc-label');
+  const txt = document.getElementById('message-text');
+  if (lbl) lbl.textContent = `PC ${String(pcNumber).padStart(2,'0')}`;
+  if (txt) { txt.value = ''; setTimeout(() => txt.focus(), 50); }
+  const m = document.getElementById('message-modal');
+  if (m) m.classList.remove('hidden');
+}
+function closeMessageModal() {
+  const m = document.getElementById('message-modal');
+  if (m) m.classList.add('hidden');
+  _msgPc = null;
+}
+
+// ── Open URL modal ────────────────────────────────────────────────────────────
+let _urlPc = null;
+function openUrlModal(pcNumber) {
+  _urlPc = pcNumber;
+  closeAllCmdMenus();
+  const lbl = document.getElementById('url-pc-label');
+  const inp = document.getElementById('url-input');
+  if (lbl) lbl.textContent = `PC ${String(pcNumber).padStart(2,'0')}`;
+  if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+  const m = document.getElementById('url-modal');
+  if (m) m.classList.remove('hidden');
+}
+function closeUrlModal() {
+  const m = document.getElementById('url-modal');
+  if (m) m.classList.add('hidden');
+  _urlPc = null;
+}
+
+// ── Command dropdown ──────────────────────────────────────────────────────────
+function closeAllCmdMenus() {
+  document.querySelectorAll('.cmd-menu').forEach(m => m.classList.add('hidden'));
+}
+function toggleCmdDropdown(pcNumber) {
+  const menu = document.getElementById(`cmd-menu-${pcNumber}`);
+  if (!menu) return;
+  const isOpen = !menu.classList.contains('hidden');
+  closeAllCmdMenus();
+  if (!isOpen) menu.classList.remove('hidden');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.cmd-dropdown')) closeAllCmdMenus();
+});
+
+async function sendCommand(pcNumber, type, payload = '') {
+  closeAllCmdMenus();
+  const labels = { shutdown: 'Shutdown', restart: 'Restart', lock: 'Lock' };
+  const label = labels[type] || type;
+  if (!confirm(`Send "${label}" to PC ${String(pcNumber).padStart(2,'0')}?`)) return;
+  const res = await apiPost(`/dashboard/api/pc/${pcNumber}/command`, { type, payload });
+  if (!res) return;
+  if (res.ok) {
+    showToast(`${label} sent to PC ${String(pcNumber).padStart(2,'0')}`, 'success');
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Failed to send command', 'error');
+  }
+}
+
+// ── Wire forms (no-ops when elements are absent on the current page) ──────────
+document.addEventListener('DOMContentLoaded', () => {
+  initCoinSlotStates();
+
+  // Announcement form
+  const annForm = document.getElementById('announcement-form');
+  if (annForm) {
+    annForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const text = document.getElementById('announcement-text').value.trim();
+      if (!text) return;
+      const res = await apiPost('/dashboard/api/announcement', { text });
+      if (!res) return;
+      if (res.ok) {
+        closeAnnouncementModal();
+        showToast('Announcement sent to all PCs', 'success');
+        updateAnnouncementBanner(text);
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to send announcement', 'error');
+      }
+    });
+    document.getElementById('announcement-modal').addEventListener('click', e => {
+      if (e.target.id === 'announcement-modal') closeAnnouncementModal();
+    });
+  }
+
+  // Message form
+  const msgForm = document.getElementById('message-form');
+  if (msgForm) {
+    msgForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const text = document.getElementById('message-text').value.trim();
+      if (!text || _msgPc === null) return;
+      const res = await apiPost(`/dashboard/api/pc/${_msgPc}/message`, { text });
+      if (!res) return;
+      if (res.ok) {
+        closeMessageModal();
+        showToast(`Message sent to PC ${String(_msgPc).padStart(2,'0')}`, 'success');
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to send message', 'error');
+      }
+    });
+    document.getElementById('message-modal').addEventListener('click', e => {
+      if (e.target.id === 'message-modal') closeMessageModal();
+    });
+  }
+
+  // Open URL form
+  const urlForm = document.getElementById('url-form');
+  if (urlForm) {
+    urlForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const url = document.getElementById('url-input').value.trim();
+      if (!url || _urlPc === null) return;
+      const res = await apiPost(`/dashboard/api/pc/${_urlPc}/command`, { type: 'open_url', payload: url });
+      if (!res) return;
+      if (res.ok) {
+        closeUrlModal();
+        showToast(`Open URL sent to PC ${String(_urlPc).padStart(2,'0')}`, 'success');
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to send URL command', 'error');
+      }
+    });
+    document.getElementById('url-modal').addEventListener('click', e => {
+      if (e.target.id === 'url-modal') closeUrlModal();
+    });
+  }
+});
