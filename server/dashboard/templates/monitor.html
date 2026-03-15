@@ -86,10 +86,11 @@
             title="Remote commands"
           >⚡ ▾</button>
           <div class="cmd-menu hidden" id="cmd-menu-{{ pc.pc_number }}">
-            <button onclick="sendCommand({{ pc.pc_number }}, 'shutdown')">🔴 Shutdown</button>
-            <button onclick="sendCommand({{ pc.pc_number }}, 'restart')">🔄 Restart</button>
             <button onclick="sendCommand({{ pc.pc_number }}, 'lock')">🔒 Lock</button>
             <button onclick="openUrlModal({{ pc.pc_number }})">🌐 Open URL</button>
+            <div class="cmd-menu-divider"></div>
+            <button class="cmd-danger" onclick="sendCommand({{ pc.pc_number }}, 'restart')">🔄 Restart</button>
+            <button class="cmd-danger" onclick="sendCommand({{ pc.pc_number }}, 'shutdown')">🔴 Shutdown</button>
           </div>
         </div>
         {# Stats toggle — mobile only (hidden on desktop via CSS) #}
