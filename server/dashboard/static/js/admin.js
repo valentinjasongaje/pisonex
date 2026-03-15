@@ -30,6 +30,17 @@ function openAddTime(pcNumber) {
 
 function closeModal() {
   document.getElementById('add-time-modal').classList.add('hidden');
+  // Clear preset highlight when closing
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('preset-active'));
+}
+
+function selectPreset(btn, minutes) {
+  // Highlight selected preset
+  btn.closest('.preset-grid').querySelectorAll('.preset-btn').forEach(b => b.classList.remove('preset-active'));
+  btn.classList.add('preset-active');
+  // Set the input value
+  const input = document.getElementById('add-time-input');
+  if (input) input.value = minutes;
 }
 
 // ── Shared auth-aware fetch ───────────────────────────────────────────────────

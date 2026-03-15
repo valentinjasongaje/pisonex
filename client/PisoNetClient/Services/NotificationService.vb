@@ -65,6 +65,9 @@ Namespace Services
                     voice.Volume = AppConfig.VoiceVolume
                     voice.Rate   = -1   ' slightly slower than default → more natural pacing
                     SelectVoice(voice)
+                    ' Prime the audio pipeline with a tiny silence so the first
+                    ' word isn't clipped while SAPI initialises its output stream.
+                    voice.Speak("<silence msec=""300""/>", 8)   ' 8 = SVSFIsXML
                     voice.Speak(text, 0)   ' 0 = synchronous on this thread
                 Catch
                     ' SAPI engine not available — silently skip

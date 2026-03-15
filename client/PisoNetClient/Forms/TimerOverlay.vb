@@ -8,38 +8,45 @@ Imports PisoNetClient.Resources
 Namespace Forms
 
     ''' <summary>
-    ''' Small floating timer shown in the top-right corner when a session is active.
+    ''' Floating session timer overlay with rounded corners, gradient accent,
+    ''' and semi-transparent background.
     ''' • Left-click-drag uses native Win32 caption drag (smooth, zero lag).
     ''' • Right-click shows a context menu to hide or reset position.
-    ''' • Connection indicator: small filled circle (green = connected, amber = offline)
-    '''   drawn in the upper-right corner of the form.
+    ''' • Connection indicator: small filled circle (green = connected, amber = offline).
     ''' • PC label: "PC 01" shown above or beside the time, configurable.
     ''' • Call ApplyConfig() after changing AppConfig timer settings to re-layout.
     ''' </summary>
     Public Class TimerOverlay
         Inherits Form
 
-        Private Shared ReadOnly BgColor  As Color = Color.FromArgb(18, 22, 38)
-        Private Shared ReadOnly DimColor As Color = Color.FromArgb(100, 116, 139)
+        ' ── Colors ───────────────────────────────────────────────────
+        Private Shared ReadOnly BgColor      As Color = Color.FromArgb(14, 17, 30)
+        Private Shared ReadOnly BgSolid      As Color = Color.FromArgb(14, 17, 30)
+        Private Shared ReadOnly BorderColor  As Color = Color.FromArgb(80, 80, 110, 180)
+        Private Shared ReadOnly DimColor     As Color = Color.FromArgb(120, 140, 170)
+        Private Shared ReadOnly AccentBlue   As Color = Color.FromArgb(14, 165, 233)
+        Private Shared ReadOnly AccentPurple As Color = Color.FromArgb(124, 58, 237)
+        Private Shared ReadOnly GreenColor   As Color = Color.FromArgb(34, 197, 94)
 
-        ' Fixed dimensions
-        Private Const FORM_W      As Integer = 260   ' width stays constant
-        Private Const PAD_X       As Integer = 10   ' horizontal inner padding
-        Private Const PAD_Y       As Integer = 8    ' vertical inner padding
-        Private Const FORM_H_SLIM As Integer = 48    ' no PC label / Side label
-        Private Const FORM_H_TALL As Integer = 68    ' PC label Above
+        ' ── Dimensions ───────────────────────────────────────────────
+        Private Const FORM_W      As Integer = 240
+        Private Const CORNER_R    As Integer = 14
+        Private Const ACCENT_H    As Integer = 3
+        Private Const PAD_X       As Integer = 14
+        Private Const PAD_Y       As Integer = 10
+        Private Const FORM_H_SLIM As Integer = 52
+        Private Const FORM_H_TALL As Integer = 72
+        Private Const DOT_SIZE    As Integer = 8
+        Private Const DOT_MARGIN  As Integer = 10
 
-        Private Const DOT_SIZE As Integer = 10   ' connection indicator circle diameter
-        Private Const DOT_MARGIN As Integer = 6  ' gap from right / top edge
-
+        ' ── Controls ─────────────────────────────────────────────────
         Private _lblTime  As Label
-        Private _lblPC    As Label        ' PC number badge — shown/hidden per config
-        Private _dotPanel As Panel        ' connection indicator dot (transparent, Paint-driven)
-        Private _pbLogo   As PictureBox   ' small logo in top-left corner
+        Private _lblPC    As Label
+        Private _pbLogo   As PictureBox
 
         Private _isConnected As Boolean = True
 
-        ' ── Native drag (handled by Windows DWM — zero lag) ──────────────────
+        ' ── Native drag ──────────────────────────────────────────────
         <DllImport("user32.dll", CharSet:=CharSet.Auto)>
         Private Shared Function ReleaseCapture() As Boolean
         End Function
@@ -62,49 +69,41 @@ Namespace Forms
             Me.FormBorderStyle = FormBorderStyle.None
             Me.ShowInTaskbar   = False
             Me.TopMost         = True
-            Me.BackColor       = BgColor
+            Me.BackColor       = BgSolid
             Me.StartPosition   = FormStartPosition.Manual
             Me.Cursor          = Cursors.SizeAll
+            Me.Opacity         = 0.95
 
-            ' ── Time label ───────────────────────────────────────────────────
+            ' ── Time label ───────────────────────────────────────────
             _lblTime = New Label() With {
-                .Font      = New Font("Segoe UI", 16, FontStyle.Bold),
-                .ForeColor = Color.FromArgb(34, 197, 94),
-                .BackColor = BgColor,
+                .Font      = New Font("Segoe UI", 18, FontStyle.Bold),
+                .ForeColor = GreenColor,
+                .BackColor = Color.Transparent,
                 .Text      = "--:--",
                 .AutoSize  = False,
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
-            ' ── PC number label ───────────────────────────────────────────────
+            ' ── PC number label ──────────────────────────────────────
             _lblPC = New Label() With {
                 .Text      = $"PC {AppConfig.PCNumber:D2}",
-                .Font      = New Font("Segoe UI", 8),
+                .Font      = New Font("Segoe UI", 8, FontStyle.Bold),
                 .ForeColor = DimColor,
-                .BackColor = BgColor,
+                .BackColor = Color.Transparent,
                 .AutoSize  = False,
                 .TextAlign = ContentAlignment.MiddleCenter,
                 .Visible   = False
             }
 
-            ' ── Connection dot (transparent panel — drawn in Paint event) ─────
-            _dotPanel = New Panel() With {
-                .BackColor = Color.Transparent,
-                .Size      = New Size(DOT_SIZE, DOT_SIZE),
-                .Visible   = False
-            }
-            AddHandler _dotPanel.Paint, AddressOf OnDotPaint
-
-            ' ── Logo (top-left, 20×20) ────────────────────────────────────────
+            ' ── Logo (top-left, 18x18) ───────────────────────────────
             _pbLogo = New PictureBox() With {
-                .Image    = LogoHelper.GetLogo(20, 20),
-                .Size     = New Size(20, 20),
+                .Image    = LogoHelper.GetLogo(18, 18),
+                .Size     = New Size(18, 18),
                 .SizeMode = PictureBoxSizeMode.Zoom,
-                .BackColor = BgColor,
-                .Location = New Point(PAD_X, PAD_Y)
+                .BackColor = Color.Transparent
             }
 
-            Me.Controls.AddRange({_lblTime, _lblPC, _dotPanel, _pbLogo})
+            Me.Controls.AddRange({_lblTime, _lblPC, _pbLogo})
 
             ' Left-click drag on every visible surface
             Dim drag = New MouseEventHandler(AddressOf HandleMouseDown)
@@ -114,19 +113,62 @@ Namespace Forms
             AddHandler _pbLogo.MouseDown,   drag
         End Sub
 
-        ' ── Connection dot paint ──────────────────────────────────────────────
+        ' ── Custom paint: rounded rect + gradient accent + border + dot ──
+        Protected Overrides Sub OnPaint(e As PaintEventArgs)
+            Dim g = e.Graphics
+            g.SmoothingMode = SmoothingMode.AntiAlias
+            Dim rect = New Rectangle(0, 0, Me.Width - 1, Me.Height - 1)
 
-        Private Sub OnDotPaint(sender As Object, e As PaintEventArgs)
-            Dim clr = If(_isConnected,
-                         Color.FromArgb(34, 197, 94),    ' green
-                         Color.FromArgb(245, 158, 11))   ' amber
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-            Using br = New SolidBrush(clr)
-                e.Graphics.FillEllipse(br, 0, 0, DOT_SIZE - 1, DOT_SIZE - 1)
+            ' Fill background (Region clips to rounded shape)
+            g.Clear(BgSolid)
+
+            ' Border drawn along rounded path
+            Using path = RoundedRect(rect, CORNER_R)
+                Using pen = New Pen(BorderColor, 1)
+                    g.DrawPath(pen, path)
+                End Using
             End Using
+
+            ' Gradient accent bar at top
+            Dim accentRect = New Rectangle(CORNER_R, 0, Me.Width - CORNER_R * 2, ACCENT_H)
+            Using br = New LinearGradientBrush(accentRect, AccentBlue, AccentPurple, 0F)
+                g.FillRectangle(br, accentRect)
+            End Using
+
+            ' Connection dot
+            If AppConfig.TimerShowConnDot Then
+                Dim dotX = Me.Width - DOT_SIZE - DOT_MARGIN
+                Dim dotY = DOT_MARGIN
+                Dim dotClr = If(_isConnected, GreenColor, Color.FromArgb(245, 158, 11))
+                Using br = New SolidBrush(dotClr)
+                    g.FillEllipse(br, dotX, dotY, DOT_SIZE, DOT_SIZE)
+                End Using
+                ' Glow effect
+                Using glowBr = New SolidBrush(Color.FromArgb(40, dotClr))
+                    g.FillEllipse(glowBr, dotX - 2, dotY - 2, DOT_SIZE + 4, DOT_SIZE + 4)
+                End Using
+            End If
+
+            MyBase.OnPaint(e)
         End Sub
 
-        ' ── Layout engine ─────────────────────────────────────────────────────
+        ' ── Rounded rectangle helper ─────────────────────────────────
+        Private Shared Function RoundedRect(rect As Rectangle, r As Integer) As GraphicsPath
+            Dim path = New GraphicsPath()
+            Dim d = r * 2
+            path.AddArc(rect.X, rect.Y, d, d, 180, 90)
+            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+            path.CloseFigure()
+            Return path
+        End Function
+
+        Protected Overrides Sub OnPaintBackground(e As PaintEventArgs)
+            ' Suppress default background — OnPaint handles everything
+        End Sub
+
+        ' ── Layout engine ────────────────────────────────────────────
 
         ''' <summary>
         ''' Re-layouts the overlay according to current AppConfig timer settings.
@@ -138,61 +180,57 @@ Namespace Forms
                 Return
             End If
 
-            Dim showDot  = AppConfig.TimerShowConnDot
-            Dim showPc   = AppConfig.TimerShowPcLabel
-            Dim pcAbove  = (AppConfig.TimerPcLabelPosition = "Above")
+            Dim showPc  = AppConfig.TimerShowPcLabel
+            Dim pcAbove = (AppConfig.TimerPcLabelPosition = "Above")
 
-            _dotPanel.Visible = showDot
-            _lblPC.Visible    = showPc
-            _lblPC.Text       = $"PC {AppConfig.PCNumber:D2}"
+            _lblPC.Visible = showPc
+            _lblPC.Text    = $"PC {AppConfig.PCNumber:D2}"
 
-            ' Logo occupies top-left; offset content horizontally when logo is loaded
+            ' Logo offset
             Dim hasLogo  = (_pbLogo.Image IsNot Nothing)
             Dim contentX = If(hasLogo, PAD_X + _pbLogo.Width + 6, PAD_X)
             Dim contentW = FORM_W - contentX - PAD_X
 
+            _pbLogo.Location = New Point(PAD_X, PAD_Y + ACCENT_H)
+
             If showPc AndAlso pcAbove Then
-                ' ── PC label above time ────────────────────────────────────
+                ' ── PC label above time ──────────────────────────────
                 Me.Size = New Size(FORM_W, FORM_H_TALL)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, FORM_H_TALL), CORNER_R))
 
-                _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
-
-                Dim pcW = If(showDot, FORM_W - DOT_SIZE - DOT_MARGIN - 2, FORM_W) - contentX - PAD_X
-                _lblPC.Location  = New Point(contentX, PAD_Y)
-                _lblPC.Size      = New Size(pcW, 16)
-                _lblPC.Font      = New Font("Segoe UI", 9)
+                _lblPC.Location  = New Point(contentX, PAD_Y + ACCENT_H)
+                _lblPC.Size      = New Size(contentW - DOT_SIZE - DOT_MARGIN, 16)
+                _lblPC.Font      = New Font("Segoe UI", 8, FontStyle.Bold)
                 _lblPC.TextAlign = ContentAlignment.MiddleCenter
 
-                _lblTime.Location = New Point(contentX, PAD_Y + 18)
-                _lblTime.Size     = New Size(contentW, FORM_H_TALL - PAD_Y - 18 - PAD_Y)
+                _lblTime.Location = New Point(contentX, PAD_Y + ACCENT_H + 17)
+                _lblTime.Size     = New Size(contentW, FORM_H_TALL - PAD_Y - ACCENT_H - 17 - PAD_Y)
 
             ElseIf showPc Then
-                ' ── PC label side (right of time, vertically centered) ────
+                ' ── PC label side ────────────────────────────────────
                 Me.Size = New Size(FORM_W, FORM_H_SLIM)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, FORM_H_SLIM), CORNER_R))
 
-                _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
+                Dim timeW = Math.Max(100, contentW - 60)
+                _lblTime.Location = New Point(contentX, PAD_Y + ACCENT_H)
+                _lblTime.Size     = New Size(timeW, FORM_H_SLIM - PAD_Y * 2 - ACCENT_H)
 
-                Dim timeW = Math.Max(100, contentW - 68)
-                _lblTime.Location = New Point(contentX, PAD_Y)
-                _lblTime.Size     = New Size(timeW, FORM_H_SLIM - PAD_Y * 2)
-
-                _lblPC.Location  = New Point(contentX + timeW + 4, (FORM_H_SLIM - 24) \ 2)
-                _lblPC.Size      = New Size(64, 24)
-                _lblPC.Font      = New Font("Segoe UI", 9, FontStyle.Bold)
+                _lblPC.Location  = New Point(contentX + timeW + 4, (FORM_H_SLIM - 20) \ 2)
+                _lblPC.Size      = New Size(56, 20)
+                _lblPC.Font      = New Font("Segoe UI", 8, FontStyle.Bold)
                 _lblPC.TextAlign = ContentAlignment.MiddleLeft
 
             Else
-                ' ── No PC label ───────────────────────────────────────────
+                ' ── No PC label ──────────────────────────────────────
                 Me.Size = New Size(FORM_W, FORM_H_SLIM)
-                _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
-                _lblTime.Location  = New Point(contentX, 6)
-                _lblTime.Size      = New Size(contentW, FORM_H_SLIM - 10)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, FORM_H_SLIM), CORNER_R))
+
+                _lblTime.Location = New Point(contentX, PAD_Y + ACCENT_H)
+                _lblTime.Size     = New Size(contentW, FORM_H_SLIM - PAD_Y * 2 - ACCENT_H)
             End If
 
-            ' Refresh dot and time colours
-            _dotPanel.Invalidate()
-            ' Re-apply time colour in case it changed (next UpdateTime will refine for low-time)
             _lblTime.ForeColor = Color.FromArgb(AppConfig.TimerTimeArgb)
+            Me.Invalidate()
             PositionToCorner()
         End Sub
 
@@ -201,7 +239,7 @@ Namespace Forms
             Me.Location = New Point(wa.Right - Me.Width - 12, wa.Top + 12)
         End Sub
 
-        ' ── Public API ─────────────────────────────────────────────────────────
+        ' ── Public API ────────────────────────────────────────────────
 
         Public Sub UpdateTime(minutes As Integer, seconds As Integer)
             If Me.InvokeRequired Then
@@ -227,7 +265,7 @@ Namespace Forms
                 Return
             End If
             _isConnected = True
-            _dotPanel.Invalidate()
+            Me.Invalidate()
         End Sub
 
         Public Sub ShowOffline()
@@ -236,10 +274,10 @@ Namespace Forms
                 Return
             End If
             _isConnected = False
-            _dotPanel.Invalidate()
+            Me.Invalidate()
         End Sub
 
-        ' ── Mouse handling ─────────────────────────────────────────────────────
+        ' ── Mouse handling ────────────────────────────────────────────
 
         Private Sub HandleMouseDown(sender As Object, e As MouseEventArgs)
             If e.Button = MouseButtons.Left Then
@@ -253,7 +291,7 @@ Namespace Forms
 
         Private Sub ShowContextMenu()
             Dim menu = New ContextMenuStrip() With {
-                .BackColor = Color.FromArgb(26, 30, 46),
+                .BackColor = Color.FromArgb(22, 26, 42),
                 .ForeColor = Color.White,
                 .Font      = New Font("Segoe UI", 9)
             }
@@ -261,12 +299,12 @@ Namespace Forms
             Dim itemHide = New ToolStripMenuItem("Hide Timer") With {
                 .ForeColor = Color.FromArgb(220, 228, 240)
             }
-            AddHandler itemHide.Click, Sub(s, e) Me.Hide()
+            AddHandler itemHide.Click, Sub(s, ev) Me.Hide()
 
             Dim itemReset = New ToolStripMenuItem("Reset Position") With {
                 .ForeColor = Color.FromArgb(220, 228, 240)
             }
-            AddHandler itemReset.Click, Sub(s, e) PositionToCorner()
+            AddHandler itemReset.Click, Sub(s, ev) PositionToCorner()
 
             menu.Items.Add(itemHide)
             menu.Items.Add(New ToolStripSeparator())

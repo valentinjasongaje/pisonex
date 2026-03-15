@@ -28,12 +28,16 @@ Namespace Forms
 
         ' ── UI controls ───────────────────────────────────────────────────────
 
-        Private _lblMessage  As Label
-        Private _lblSub      As Label
-        Private _lblPCNumber As Label
-        Private _lblOffline  As Label
-        Private _bgImage     As Image
-        Private _allowClose  As Boolean = False
+        Private _lblMessage   As Label
+        Private _lblSub       As Label
+        Private _lblPCNumber  As Label
+        Private _lblOffline   As Label
+        Private _pnlStatus    As Panel        ' connection status pill (bottom-center)
+        Private _lblStatusDot As Label        ' colored dot inside pill
+        Private _lblStatusTxt As Label        ' "Connected" / "Disconnected"
+        Private _bgImage      As Image
+        Private _allowClose   As Boolean = False
+        Private _isConnected  As Boolean = True
 
         Public Event AdminPanelRequested()
 
@@ -176,7 +180,7 @@ Namespace Forms
             ' PC number badge — position driven by AppConfig.LockPcLabelX/YPct
             _lblPCNumber = New Label() With {
                 .Text      = $"PC {AppConfig.PCNumber:D2}",
-                .Font      = New Font("Segoe UI", AppConfig.LockPcLabelSize),
+                .Font      = New Font("Segoe UI", AppConfig.LockPcLabelSize, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(AppConfig.LockPcLabelForeArgb),
                 .BackColor = Color.Transparent,
                 .AutoSize  = True,
@@ -185,7 +189,7 @@ Namespace Forms
 
             ' Server-offline indicator — top-right, hidden by default
             _lblOffline = New Label() With {
-                .Text      = "⚠  Server Offline",
+                .Text      = "Server Offline",
                 .Font      = New Font("Segoe UI", 10, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(245, 158, 11),
                 .BackColor = Color.Transparent,
@@ -193,7 +197,7 @@ Namespace Forms
                 .Visible   = False
             }
 
-            ' Main message — font/color/position driven by AppConfig
+            ' Main message — font/color/position driven by AppConfig (editable in admin panel)
             _lblMessage = New Label() With {
                 .Text      = AppConfig.LockMessage,
                 .Font      = New Font("Segoe UI", AppConfig.LockMsgSize, FontStyle.Bold),
@@ -203,17 +207,68 @@ Namespace Forms
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
-            ' Sub-message
+            ' Sub-message — lighter, thinner
             _lblSub = New Label() With {
                 .Text      = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}",
-                .Font      = New Font("Segoe UI", 14),
-                .ForeColor = Color.FromArgb(120, 140, 180),
+                .Font      = New Font("Segoe UI", 13),
+                .ForeColor = Color.FromArgb(140, 160, 200),
                 .BackColor = Color.Transparent,
                 .AutoSize  = True,
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
-            Me.Controls.AddRange({_lblPCNumber, _lblOffline, _lblMessage, _lblSub})
+            ' ── Connection status pill (bottom-center) ───────────────────────────
+            _pnlStatus = New Panel() With {
+                .Size      = New Size(200, 32),
+                .BackColor = Color.FromArgb(100, 16, 20, 36)
+            }
+            AddHandler _pnlStatus.Paint, AddressOf OnStatusPillPaint
+
+            _lblStatusDot = New Label() With {
+                .Text      = "●",
+                .Font      = New Font("Segoe UI", 9),
+                .ForeColor = Color.FromArgb(34, 197, 94),
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Location  = New Point(14, 7)
+            }
+
+            _lblStatusTxt = New Label() With {
+                .Text      = "Connected to server",
+                .Font      = New Font("Segoe UI", 9),
+                .ForeColor = Color.FromArgb(140, 160, 200),
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Location  = New Point(32, 7)
+            }
+
+            _pnlStatus.Controls.AddRange({_lblStatusDot, _lblStatusTxt})
+
+            Me.Controls.AddRange({_lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlStatus})
+        End Sub
+
+        Private Sub OnStatusPillPaint(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g = e.Graphics
+            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+            ' Rounded pill background
+            Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
+            Dim r = pnl.Height \ 2
+            Using path = New Drawing2D.GraphicsPath()
+                Dim d = r * 2
+                path.AddArc(rect.X, rect.Y, d, d, 180, 90)
+                path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+                path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+                path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+                Using br = New SolidBrush(Color.FromArgb(140, 10, 14, 28))
+                    g.FillPath(br, path)
+                End Using
+                Using pen = New Pen(Color.FromArgb(60, 80, 110, 180), 1)
+                    g.DrawPath(pen, path)
+                End Using
+            End Using
         End Sub
 
         ' ── ForceToFront: the Alt-trick ───────────────────────────────────────
@@ -403,6 +458,8 @@ Namespace Forms
         ' ── Background painting ───────────────────────────────────────────────
 
         Protected Overrides Sub OnPaintBackground(e As PaintEventArgs)
+            Dim g = e.Graphics
+
             If _bgImage IsNot Nothing Then
                 Dim w As Integer, h As Integer
                 Select Case AppConfig.LockBgImageFit
@@ -415,13 +472,25 @@ Namespace Forms
                         Dim s = Math.Min(CSng(Me.Width) / _bgImage.Width, CSng(Me.Height) / _bgImage.Height)
                         w = CInt(_bgImage.Width * s) : h = CInt(_bgImage.Height * s)
                 End Select
-                e.Graphics.DrawImage(_bgImage, (Me.Width - w) \ 2, (Me.Height - h) \ 2, w, h)
+                g.DrawImage(_bgImage, (Me.Width - w) \ 2, (Me.Height - h) \ 2, w, h)
+                ' Dark overlay
                 Using br = New SolidBrush(Color.FromArgb(160, 0, 0, 0))
-                    e.Graphics.FillRectangle(br, Me.ClientRectangle)
+                    g.FillRectangle(br, Me.ClientRectangle)
                 End Using
             Else
-                e.Graphics.Clear(Me.BackColor)
+                g.Clear(Me.BackColor)
             End If
+
+            ' Bottom gradient fade (subtle vignette for status pill area)
+            Dim fadeH = 120
+            Dim fadeRect = New Rectangle(0, Me.ClientSize.Height - fadeH, Me.ClientSize.Width, fadeH)
+            Using br = New Drawing2D.LinearGradientBrush(
+                    fadeRect,
+                    Color.FromArgb(0, 0, 0, 0),
+                    Color.FromArgb(100, 0, 0, 0),
+                    Drawing2D.LinearGradientMode.Vertical)
+                g.FillRectangle(br, fadeRect)
+            End Using
         End Sub
 
         ' ── Layout ───────────────────────────────────────────────────────────
@@ -463,19 +532,41 @@ Namespace Forms
             If _lblOffline.Visible Then
                 _lblOffline.Location = New Point(Me.ClientSize.Width - _lblOffline.Width - 24, 24)
             End If
+
+            ' Status pill — bottom center, 48px from bottom
+            _pnlStatus.Location = New Point(
+                (Me.ClientSize.Width - _pnlStatus.Width) \ 2,
+                Me.ClientSize.Height - _pnlStatus.Height - 48)
         End Sub
 
         ' ── Server-status API ─────────────────────────────────────────────────
 
         Public Sub ShowOfflineStatus()
             If Me.InvokeRequired Then Me.Invoke(Sub() ShowOfflineStatus()) : Return
+            _isConnected = False
             _lblOffline.Visible  = True
             _lblOffline.Location = New Point(Me.ClientSize.Width - _lblOffline.Width - 24, 24)
+            UpdateStatusPill()
         End Sub
 
         Public Sub HideOfflineStatus()
             If Me.InvokeRequired Then Me.Invoke(Sub() HideOfflineStatus()) : Return
+            _isConnected = True
             _lblOffline.Visible = False
+            UpdateStatusPill()
+        End Sub
+
+        Private Sub UpdateStatusPill()
+            If _isConnected Then
+                _lblStatusDot.ForeColor = Color.FromArgb(34, 197, 94)    ' green
+                _lblStatusTxt.Text = "Connected to server"
+                _lblStatusTxt.ForeColor = Color.FromArgb(140, 160, 200)
+            Else
+                _lblStatusDot.ForeColor = Color.FromArgb(239, 68, 68)    ' red
+                _lblStatusTxt.Text = "Disconnected"
+                _lblStatusTxt.ForeColor = Color.FromArgb(239, 68, 68)
+            End If
+            _pnlStatus.Invalidate()
         End Sub
 
         Public Sub RefreshAppearance()

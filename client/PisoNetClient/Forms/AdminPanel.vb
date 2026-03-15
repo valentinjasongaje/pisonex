@@ -79,8 +79,8 @@ Namespace Forms
 
         ' Layout constants
         Private Const SIDEBAR_W As Integer = 200
-        Private Const FORM_W    As Integer = 900
-        Private Const FORM_H    As Integer = 780
+        Private Const FORM_W    As Integer = 920
+        Private Const FORM_H    As Integer = 720   ' ClientSize height (excludes title bar)
         Private Const CONTENT_W As Integer = FORM_W - SIDEBAR_W - 14
         Private Const IW        As Integer = CONTENT_W - 48
         Private Const LM        As Integer = 20
@@ -125,7 +125,7 @@ Namespace Forms
         Private Sub InitializeComponent()
             Me.Text            = "PisoNet Admin Panel"
             Me.FormBorderStyle = FormBorderStyle.FixedDialog
-            Me.Size            = New Size(FORM_W, FORM_H)
+            Me.ClientSize      = New Size(FORM_W, FORM_H)
             Me.StartPosition   = FormStartPosition.CenterScreen
             Me.MaximizeBox     = False
             Me.MinimizeBox     = False

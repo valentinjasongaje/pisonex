@@ -555,7 +555,14 @@ html[data-theme="light"] .metrics-proc-row {
   body.sidebar-open .sidebar-overlay { display: block; }
   .main-content { margin-left: 0; padding: 16px; padding-top: 56px; }
   .card { overflow-x: auto; }
-  .pc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .pc-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+  .pc-card { padding: 14px; }
+  .pc-number { font-size: 18px; }
+  .pc-badge { font-size: 11px; padding: 3px 10px; }
+  .pc-timer { font-size: 22px; }
+  .pc-idle, .pc-offline-msg { font-size: 13px; }
+  .stat-pill { padding: 8px 14px; font-size: 14px; }
+  .header-stats { gap: 8px; }
   .monitor-grid { grid-template-columns: 1fr; }
   .monitor-card-body { flex-direction: column; }
   .monitor-screen { flex: none; width: 100%; aspect-ratio: 16/9; }
@@ -649,6 +656,68 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
 .cmd-menu button:hover { background: rgba(14,165,233,0.12); }
 .cmd-menu button.cmd-danger:hover { background: rgba(239,68,68,0.12); color: var(--red); }
 .cmd-menu-divider { height: 1px; background: var(--border); margin: 3px 0; }
+/* ── Preset time buttons ──────────────────────────────────── */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.preset-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 12px 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  font-size: 14px;
+  font-weight: 600;
+}
+.preset-btn:hover {
+  border-color: var(--blue);
+  background: rgba(14, 165, 233, 0.08);
+}
+.preset-btn:active {
+  background: rgba(14, 165, 233, 0.15);
+}
+.preset-btn .preset-min {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.2;
+}
+.preset-btn .preset-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 500;
+  margin-top: 2px;
+}
+.preset-btn.preset-active {
+  border-color: var(--blue);
+  background: rgba(14, 165, 233, 0.12);
+}
+.time-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.time-divider::before, .time-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 .title-text {
   display: block;           /* block */
   font-weight: 700;         /* font-bold */
