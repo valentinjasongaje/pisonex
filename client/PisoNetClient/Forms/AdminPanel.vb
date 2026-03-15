@@ -5,17 +5,18 @@ Imports System.Drawing.Text
 Imports System.IO
 Imports PisoNetClient.Config
 Imports PisoNetClient.Services
+Imports PisoNetClient.Resources
 
 Namespace Forms
 
     ''' <summary>
-    ''' Admin configuration panel — accessible only after entering the correct PIN.
+    ''' Admin configuration panel with sidebar navigation and card-based layout.
+    ''' Accessible only after entering the correct PIN.
     ''' </summary>
     Public Class AdminPanel
         Inherits Form
 
         Public Event ExitRequested()
-        ''' <summary>Raised after a successful Save so callers can refresh live UI (timer overlay, lock screen).</summary>
         Public Event SettingsSaved()
 
         ' ── Controls ──────────────────────────────────────────────────────────
@@ -42,39 +43,75 @@ Namespace Forms
         Private _cmbVoice       As ComboBox
         Private _currentBgColor As Color
 
-        ' ── Appearance tab controls ────────────────────────────────────────────
-        ' Timer overlay
+        ' Appearance tab controls
         Private _chkTimerDot     As CheckBox
         Private _chkTimerPcLabel As CheckBox
         Private _cmbTimerPcPos   As ComboBox
         Private _timerPreview    As Panel
-        ' Lock screen text — main message
         Private _picMsgColor     As PictureBox
         Private _nudMsgSize      As NumericUpDown
         Private _chkMsgCenterX   As CheckBox
         Private _nudMsgY         As NumericUpDown
         Private _currentMsgColor As Color
-        ' Lock screen text — PC number label
         Private _picPcLblColor   As PictureBox
         Private _nudPcLblSize    As NumericUpDown
         Private _chkPcLblCenterX As CheckBox
         Private _nudPcLblY       As NumericUpDown
         Private _currentPcLblColor As Color
-        ' Lock screen preview (Appearance tab)
         Private _lockPreview      As Panel
-        ' Lock screen preview (Lock Screen tab — shows bg + message live)
         Private _lockTabPreview   As Panel
-        ' Timer text colours
         Private _picTimerTimeColor  As PictureBox
         Private _picTimerLowColor   As PictureBox
         Private _currentTimerTimeColor As Color
         Private _currentTimerLowColor  As Color
 
-        ' Layout — wider so all labels have room
-        Private Const W   As Integer = 720
-        Private Const TW  As Integer = 680
-        Private Const IW  As Integer = 644
-        Private Const LM  As Integer = 14
+        ' Wallpaper controls
+        Private _wpPreview     As Panel
+        Private _chkUseLocalWp As CheckBox
+        Private _lblServerWp   As Label
+
+        ' Sidebar navigation
+        Private _sidebar       As Panel
+        Private _contentArea   As Panel
+        Private _pages         As New List(Of Panel)
+        Private _navItems      As New List(Of Panel)
+        Private _activeIndex   As Integer = 0
+
+        ' Layout constants
+        Private Const SIDEBAR_W As Integer = 200
+        Private Const FORM_W    As Integer = 900
+        Private Const FORM_H    As Integer = 680
+        Private Const CONTENT_W As Integer = FORM_W - SIDEBAR_W - 14
+        Private Const IW        As Integer = CONTENT_W - 48
+        Private Const LM        As Integer = 20
+
+        ' Color palette
+        Private Shared ReadOnly ColFormBg     As Color = Color.FromArgb(10, 14, 25)
+        Private Shared ReadOnly ColSidebarBg  As Color = Color.FromArgb(8, 12, 22)
+        Private Shared ReadOnly ColContentBg  As Color = Color.FromArgb(16, 20, 34)
+        Private Shared ReadOnly ColCardBg     As Color = Color.FromArgb(22, 28, 46)
+        Private Shared ReadOnly ColCardBorder As Color = Color.FromArgb(36, 42, 64)
+        Private Shared ReadOnly ColAccent     As Color = Color.FromArgb(59, 130, 246)
+        Private Shared ReadOnly ColAccentHov  As Color = Color.FromArgb(79, 150, 255)
+        Private Shared ReadOnly ColNavHover   As Color = Color.FromArgb(28, 34, 56)
+        Private Shared ReadOnly ColNavActive  As Color = Color.FromArgb(20, 26, 44)
+        Private Shared ReadOnly ColInputBg    As Color = Color.FromArgb(24, 28, 44)
+        Private Shared ReadOnly ColRule       As Color = Color.FromArgb(38, 42, 60)
+        Private Shared ReadOnly ColSection    As Color = Color.FromArgb(99, 162, 255)
+        Private Shared ReadOnly ColInfo       As Color = Color.FromArgb(94, 110, 140)
+        Private Shared ReadOnly ColSmall      As Color = Color.FromArgb(180, 190, 210)
+        Private Shared ReadOnly ColText       As Color = Color.FromArgb(220, 228, 240)
+        Private Shared ReadOnly ColDanger     As Color = Color.FromArgb(239, 68, 68)
+
+        ' Nav item definitions
+        Private Shared ReadOnly NavLabels() As String = {
+            "Connection", "Lock Screen", "Restrictions",
+            "Security", "Notifications", "Appearance"
+        }
+        Private Shared ReadOnly NavIcons() As String = {
+            ChrW(&H26A1), Char.ConvertFromUtf32(&H1F512), Char.ConvertFromUtf32(&H1F6E1),
+            Char.ConvertFromUtf32(&H1F511), Char.ConvertFromUtf32(&H1F514), Char.ConvertFromUtf32(&H1F3A8)
+        }
 
         Public Sub New()
             _currentBgColor        = Color.FromArgb(AppConfig.LockBgArgb)
@@ -88,259 +125,553 @@ Namespace Forms
         Private Sub InitializeComponent()
             Me.Text            = "PisoNet Admin Panel"
             Me.FormBorderStyle = FormBorderStyle.FixedDialog
-            Me.Size            = New Size(W, 660)
+            Me.Size            = New Size(FORM_W, FORM_H)
             Me.StartPosition   = FormStartPosition.CenterScreen
             Me.MaximizeBox     = False
             Me.MinimizeBox     = False
-            Me.BackColor       = Color.FromArgb(12, 16, 28)
+            Me.BackColor       = ColFormBg
             Me.ForeColor       = Color.White
             Me.Font            = New Font("Segoe UI", 9)
+            Me.DoubleBuffered  = True
 
-            Dim tabs = New TabControl() With {
-                .Location   = New Point(14, 14),
-                .Size       = New Size(TW, 540),
-                .Appearance = TabAppearance.Normal,
-                .Font       = New Font("Segoe UI", 9)
+            BuildSidebar()
+            BuildContentArea()
+            BuildFooterButtons()
+        End Sub
+
+        ' ── Sidebar ──────────────────────────────────────────────────────────
+
+        Private Sub BuildSidebar()
+            _sidebar = New Panel() With {
+                .Location  = New Point(0, 0),
+                .Size      = New Size(SIDEBAR_W, FORM_H),
+                .BackColor = ColSidebarBg
             }
-            Me.Controls.Add(tabs)
+            AddHandler _sidebar.Paint, AddressOf OnPaintSidebar
+            Me.Controls.Add(_sidebar)
 
-            tabs.TabPages.Add(BuildConnectionTab())
-            tabs.TabPages.Add(BuildLockScreenTab())
-            tabs.TabPages.Add(BuildRestrictionsTab())
-            tabs.TabPages.Add(BuildSecurityTab())
-            tabs.TabPages.Add(BuildNotificationsTab())
-            tabs.TabPages.Add(BuildAppearanceTab())
+            ' Logo header
+            Dim header = New Panel() With {
+                .Location  = New Point(0, 0),
+                .Size      = New Size(SIDEBAR_W, 64),
+                .BackColor = Color.Transparent
+            }
+            AddHandler header.Paint, AddressOf OnPaintHeader
+            _sidebar.Controls.Add(header)
 
-            Dim btnSave  = MakeBtn("Save & Apply",     New Point(14,  570), Color.FromArgb(59, 130, 246))
-            Dim btnExit  = MakeBtn("Exit Application", New Point(176, 570), Color.FromArgb(220, 38, 38))
-            Dim btnClose = MakeBtn("Close",            New Point(560, 570), Color.FromArgb(42, 46, 64))
+            ' Nav items
+            Dim navY = 72
+            For i = 0 To NavLabels.Length - 1
+                Dim navItem = CreateNavItem(NavIcons(i), NavLabels(i), i, New Point(0, navY))
+                _sidebar.Controls.Add(navItem)
+                _navItems.Add(navItem)
+                navY += 42
+            Next
+            UpdateNavSelection()
+        End Sub
+
+        Private Function CreateNavItem(icon As String, label As String, index As Integer, loc As Point) As Panel
+            Dim pnl = New Panel() With {
+                .Location  = loc,
+                .Size      = New Size(SIDEBAR_W, 40),
+                .BackColor = Color.Transparent,
+                .Cursor    = Cursors.Hand,
+                .Tag       = index
+            }
+            AddHandler pnl.Paint, AddressOf OnPaintNavItem
+            AddHandler pnl.Click, AddressOf OnNavItemClick
+            AddHandler pnl.MouseEnter, Sub(s, e) If CInt(pnl.Tag) <> _activeIndex Then pnl.BackColor = ColNavHover
+            AddHandler pnl.MouseLeave, Sub(s, e) If CInt(pnl.Tag) <> _activeIndex Then pnl.BackColor = Color.Transparent
+            Return pnl
+        End Function
+
+        Private Sub OnPaintHeader(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g = e.Graphics
+            g.SmoothingMode = SmoothingMode.AntiAlias
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit
+
+            ' Gradient background
+            Using br = New LinearGradientBrush(pnl.ClientRectangle,
+                    Color.FromArgb(15, 20, 40), Color.FromArgb(25, 35, 60),
+                    LinearGradientMode.Horizontal)
+                g.FillRectangle(br, pnl.ClientRectangle)
+            End Using
+
+            ' Logo
+            Try
+                Dim logo = LogoHelper.GetLogo()
+                If logo IsNot Nothing Then
+                    g.DrawImage(logo, New Rectangle(14, 14, 36, 36))
+                End If
+            Catch
+            End Try
+
+            ' Title
+            Using f = New Font("Segoe UI", 13, FontStyle.Bold)
+                Using br = New SolidBrush(Color.White)
+                    g.DrawString("Admin Panel", f, br, 56, 20)
+                End Using
+            End Using
+        End Sub
+
+        Private Sub OnPaintSidebar(sender As Object, e As PaintEventArgs)
+            ' Bottom separator line
+            Dim g = e.Graphics
+            Using p = New Pen(ColCardBorder)
+                g.DrawLine(p, SIDEBAR_W - 1, 0, SIDEBAR_W - 1, FORM_H)
+            End Using
+        End Sub
+
+        Private Sub OnPaintNavItem(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g = e.Graphics
+            g.SmoothingMode = SmoothingMode.AntiAlias
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit
+            Dim idx = CInt(pnl.Tag)
+            Dim isActive = (idx = _activeIndex)
+
+            ' Active indicator bar
+            If isActive Then
+                pnl.BackColor = ColNavActive
+                Using br = New SolidBrush(ColAccent)
+                    g.FillRectangle(br, 0, 0, 3, pnl.Height)
+                End Using
+            End If
+
+            ' Icon
+            Dim iconColor = If(isActive, ColAccent, ColInfo)
+            Using f = New Font("Segoe UI", 11)
+                Using br = New SolidBrush(iconColor)
+                    g.DrawString(NavIcons(idx), f, br, 14, 9)
+                End Using
+            End Using
+
+            ' Label
+            Dim labelColor = If(isActive, Color.White, ColSmall)
+            Using f = New Font("Segoe UI", 9.5F, If(isActive, FontStyle.Bold, FontStyle.Regular))
+                Using br = New SolidBrush(labelColor)
+                    g.DrawString(NavLabels(idx), f, br, 44, 11)
+                End Using
+            End Using
+        End Sub
+
+        Private Sub OnNavItemClick(sender As Object, e As EventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim idx = CInt(pnl.Tag)
+            If idx = _activeIndex Then Return
+            _activeIndex = idx
+            UpdateNavSelection()
+            ShowPage(idx)
+        End Sub
+
+        Private Sub UpdateNavSelection()
+            For i = 0 To _navItems.Count - 1
+                _navItems(i).BackColor = If(i = _activeIndex, ColNavActive, Color.Transparent)
+                _navItems(i).Invalidate()
+            Next
+        End Sub
+
+        Private Sub ShowPage(index As Integer)
+            For i = 0 To _pages.Count - 1
+                _pages(i).Visible = (i = index)
+            Next
+        End Sub
+
+        ' ── Content area ──────────────────────────────────────────────────────
+
+        Private Sub BuildContentArea()
+            _contentArea = New Panel() With {
+                .Location  = New Point(SIDEBAR_W, 0),
+                .Size      = New Size(FORM_W - SIDEBAR_W, FORM_H - 60),
+                .BackColor = ColContentBg,
+                .Padding   = New Padding(0)
+            }
+            Me.Controls.Add(_contentArea)
+
+            ' Build all pages
+            Dim builders = New Func(Of Panel)() {
+                AddressOf BuildConnectionPage,
+                AddressOf BuildLockScreenPage,
+                AddressOf BuildRestrictionsPage,
+                AddressOf BuildSecurityPage,
+                AddressOf BuildNotificationsPage,
+                AddressOf BuildAppearancePage
+            }
+            For i = 0 To builders.Length - 1
+                Dim page = builders(i)()
+                page.Location = New Point(0, 0)
+                page.Size = _contentArea.Size
+                page.Visible = (i = 0)
+                _contentArea.Controls.Add(page)
+                _pages.Add(page)
+            Next
+        End Sub
+
+        ' ── Footer ────────────────────────────────────────────────────────────
+
+        Private Sub BuildFooterButtons()
+            Dim footer = New Panel() With {
+                .Location  = New Point(SIDEBAR_W, FORM_H - 60),
+                .Size      = New Size(FORM_W - SIDEBAR_W, 60),
+                .BackColor = Color.FromArgb(12, 16, 28)
+            }
+            ' Top border
+            AddHandler footer.Paint, Sub(s, e)
+                Using p = New Pen(ColCardBorder)
+                    e.Graphics.DrawLine(p, 0, 0, footer.Width, 0)
+                End Using
+            End Sub
+            Me.Controls.Add(footer)
+
+            Dim btnSave  = MakeBtn("Save & Apply",     New Point(16,  12), ColAccent)
+            Dim btnExit  = MakeBtn("Exit Application", New Point(178, 12), ColDanger)
+            Dim btnClose = MakeBtn("Close",            New Point(footer.Width - 168, 12), Color.FromArgb(42, 46, 64))
 
             AddHandler btnSave.Click,  AddressOf OnSave
             AddHandler btnExit.Click,  AddressOf OnExitApp
             AddHandler btnClose.Click, Sub(s, e) Me.Close()
 
-            Me.Controls.AddRange({btnSave, btnExit, btnClose})
+            footer.Controls.AddRange({btnSave, btnExit, btnClose})
         End Sub
 
-        ' ── Tab builders ──────────────────────────────────────────────────────
+        ' ── Page builders ─────────────────────────────────────────────────────
 
-        Private Function BuildConnectionTab() As TabPage
-            Dim tab = DarkTab("  Connection")
-            Dim y = 18
+        Private Function BuildConnectionPage() As Panel
+            Dim page = ScrollPage()
+            Dim y = 16
 
-            tab.Controls.Add(SectionLabel("Server URL", New Point(LM, y))) : y += 22
-            _txtUrl = DarkTextBox(New Point(LM, y), IW, AppConfig.ServerUrl)
-            tab.Controls.Add(_txtUrl) : y += 38
+            page.Controls.Add(PageTitle("Connection Settings", New Point(LM, y))) : y += 34
 
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
+            Dim card = CardPanel(New Point(LM, y), New Size(IW, 160))
+            Dim cy = 14
 
-            tab.Controls.Add(SectionLabel("PC Number", New Point(LM, y))) : y += 22
-            _nudPcNum = DarkNud(New Point(LM, y), 80, AppConfig.PCNumber, 1, 99)
-            tab.Controls.Add(_nudPcNum) : y += 46
+            card.Controls.Add(SectionLabel("Server URL", New Point(14, cy))) : cy += 22
+            _txtUrl = DarkTextBox(New Point(14, cy), IW - 32, AppConfig.ServerUrl)
+            card.Controls.Add(_txtUrl) : cy += 38
 
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-            tab.Controls.Add(InfoLabel(
+            card.Controls.Add(SectionLabel("PC Number", New Point(14, cy))) : cy += 22
+            _nudPcNum = DarkNud(New Point(14, cy), 80, AppConfig.PCNumber, 1, 99)
+            card.Controls.Add(_nudPcNum)
+
+            page.Controls.Add(card) : y += 170
+
+            Dim infoCard = CardPanel(New Point(LM, y), New Size(IW, 48))
+            infoCard.Controls.Add(InfoLabel(
                 "Server URL and PC Number take effect after restarting the client.",
-                New Point(LM, y)))
+                New Point(14, 10)))
+            page.Controls.Add(infoCard)
 
-            Return tab
+            Return page
         End Function
 
-        Private Function BuildLockScreenTab() As TabPage
-            Dim tab = DarkTab("  Lock Screen")
-            Dim y = 18
+        Private Function BuildLockScreenPage() As Panel
+            Dim page = ScrollPage()
+            Dim y = 16
 
-            tab.Controls.Add(SectionLabel("Background Color", New Point(LM, y))) : y += 22
+            page.Controls.Add(PageTitle("Lock Screen", New Point(LM, y))) : y += 34
+
+            ' ── Background card ──────────────────────────────────────────────
+            Dim bgCard = CardPanel(New Point(LM, y), New Size(IW, 180))
+            Dim cy = 14
+
+            bgCard.Controls.Add(SectionLabel("Background Color", New Point(14, cy)))
             _picColor = New PictureBox() With {
-                .Location    = New Point(LM, y),
-                .Size        = New Size(52, 30),
+                .Location    = New Point(140, cy - 2),
+                .Size        = New Size(42, 22),
                 .BackColor   = _currentBgColor,
                 .BorderStyle = BorderStyle.FixedSingle,
                 .Cursor      = Cursors.Hand
             }
             AddHandler _picColor.Click, AddressOf OnPickColor
-            tab.Controls.Add(_picColor)
-            tab.Controls.Add(InfoLabel("← Click swatch to open color picker", New Point(LM + 62, y + 7)))
-            y += 46
+            bgCard.Controls.Add(_picColor) : cy += 32
 
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-
-            tab.Controls.Add(SectionLabel("Background Image", New Point(LM, y)))
-            tab.Controls.Add(InfoLabel("(overrides color when set)", New Point(LM + 148, y + 3)))
-            y += 22
-            _txtImgPath = DarkTextBox(New Point(LM, y), IW - 102, AppConfig.LockBgImagePath)
-            tab.Controls.Add(_txtImgPath)
-
-            Dim btnBrowse = MakeBtn("Browse...", New Point(LM + IW - 96, y - 1), Color.FromArgb(42, 46, 64))
-            btnBrowse.Size = New Size(92, 28)
+            bgCard.Controls.Add(SectionLabel("Background Image", New Point(14, cy))) : cy += 22
+            _txtImgPath = DarkTextBox(New Point(14, cy), IW - 140, AppConfig.LockBgImagePath)
+            bgCard.Controls.Add(_txtImgPath)
+            Dim btnBrowse = MakeSmallBtn("Browse...", New Point(IW - 118, cy - 1))
             AddHandler btnBrowse.Click, AddressOf OnBrowseImage
-            tab.Controls.Add(btnBrowse) : y += 36
+            bgCard.Controls.Add(btnBrowse) : cy += 34
 
-            Dim btnClear = MakeBtn("Clear Image", New Point(LM, y), Color.FromArgb(42, 46, 64))
-            btnClear.Size = New Size(106, 26)
+            Dim btnClear = MakeSmallBtn("Clear", New Point(14, cy))
             AddHandler btnClear.Click, Sub(s, e) _txtImgPath.Text = ""
-            tab.Controls.Add(btnClear)
+            bgCard.Controls.Add(btnClear)
 
-            tab.Controls.Add(SmallLabel("Fit:", New Point(LM + 116, y + 5)))
-            _cmbBgFit = New ComboBox() With {
-                .Location      = New Point(LM + 138, y),
-                .Width         = 110,
-                .DropDownStyle = ComboBoxStyle.DropDownList,
-                .BackColor     = Color.FromArgb(24, 28, 44),
-                .ForeColor     = Color.White,
-                .FlatStyle     = FlatStyle.Flat,
-                .Font          = New Font("Segoe UI", 9)
+            bgCard.Controls.Add(SmallLabel("Fit:", New Point(100, cy + 5)))
+            _cmbBgFit = DarkCombo(New Point(124, cy), 100, {"Contain", "Cover", "Stretch"}, AppConfig.LockBgImageFit)
+            bgCard.Controls.Add(_cmbBgFit) : cy += 32
+
+            bgCard.Controls.Add(SmallLabel("Message:", New Point(14, cy + 4)))
+            _txtMsg = DarkTextBox(New Point(80, cy), IW - 98, AppConfig.LockMessage)
+            bgCard.Controls.Add(_txtMsg)
+
+            page.Controls.Add(bgCard) : y += 190
+
+            ' ── Wallpaper preview with drag-and-drop ─────────────────────────
+            Dim wpCard = CardPanel(New Point(LM, y), New Size(IW, 240))
+            cy = 14
+
+            wpCard.Controls.Add(SectionLabel("Wallpaper Preview", New Point(14, cy)))
+            wpCard.Controls.Add(SmallLabel("(drag & drop images here)", New Point(150, cy + 3))) : cy += 28
+
+            _wpPreview = New Panel() With {
+                .Location    = New Point(14, cy),
+                .Size        = New Size(320, 180),
+                .BackColor   = Color.FromArgb(10, 14, 23),
+                .BorderStyle = BorderStyle.FixedSingle,
+                .AllowDrop   = True
             }
-            _cmbBgFit.Items.AddRange({"Contain", "Cover", "Stretch"})
-            _cmbBgFit.SelectedItem = AppConfig.LockBgImageFit
-            tab.Controls.Add(_cmbBgFit) : y += 44
+            AddHandler _wpPreview.Paint, AddressOf OnPaintWpPreview
+            AddHandler _wpPreview.DragEnter, AddressOf OnWpDragEnter
+            AddHandler _wpPreview.DragDrop, AddressOf OnWpDragDrop
+            AddHandler _wpPreview.DragLeave, Sub(s, e) _wpPreview.BorderStyle = BorderStyle.FixedSingle
+            AddHandler _txtImgPath.TextChanged, Sub(s, e)
+                                                     _wpPreview.Invalidate()
+                                                     _lockTabPreview?.Invalidate()
+                                                 End Sub
+            AddHandler _cmbBgFit.SelectedIndexChanged, Sub(s, e) _wpPreview.Invalidate()
+            wpCard.Controls.Add(_wpPreview)
 
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
+            ' Preset gallery on right side of preview
+            Dim presetsX = 350
+            wpCard.Controls.Add(SmallLabel("Presets:", New Point(presetsX, cy)))
+            cy += 18
+            BuildPresetGallery(wpCard, presetsX, cy)
 
-            tab.Controls.Add(SectionLabel("Lock Screen Message", New Point(LM, y))) : y += 22
-            _txtMsg = DarkTextBox(New Point(LM, y), IW, AppConfig.LockMessage)
-            tab.Controls.Add(_txtMsg) : y += 36
+            page.Controls.Add(wpCard) : y += 250
 
-            ' ── Live lock screen preview ──────────────────────────────────────
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-            tab.Controls.Add(SectionLabel("Preview", New Point(LM, y))) : y += 22
+            ' ── Server wallpaper status ──────────────────────────────────────
+            Dim srvCard = CardPanel(New Point(LM, y), New Size(IW, 80))
+            cy = 14
+
+            srvCard.Controls.Add(SectionLabel("Server Wallpaper", New Point(14, cy)))
+            Dim srvStatus = If(String.IsNullOrEmpty(AppConfig.ServerWallpaperPath), "None", "Active")
+            _lblServerWp = SmallLabel($"Status: {srvStatus}", New Point(140, cy + 3))
+            _lblServerWp.ForeColor = If(srvStatus = "Active", Color.FromArgb(34, 197, 94), ColInfo)
+            srvCard.Controls.Add(_lblServerWp) : cy += 28
+
+            _chkUseLocalWp = DarkCheck("Override server wallpaper with local selection",
+                                       New Point(14, cy), AppConfig.UseLocalWallpaper)
+            srvCard.Controls.Add(_chkUseLocalWp)
+
+            page.Controls.Add(srvCard) : y += 90
+
+            ' ── Lock screen preview ──────────────────────────────────────────
+            Dim prevCard = CardPanel(New Point(LM, y), New Size(IW, 200))
+            cy = 14
+            prevCard.Controls.Add(SectionLabel("Live Preview", New Point(14, cy))) : cy += 24
 
             _lockTabPreview = New Panel() With {
-                .Location    = New Point(LM, y),
-                .Size        = New Size(IW, 220),
+                .Location    = New Point(14, cy),
+                .Size        = New Size(IW - 32, 156),
                 .BorderStyle = BorderStyle.FixedSingle
             }
             AddHandler _lockTabPreview.Paint, AddressOf OnPaintLockPreview
-            tab.Controls.Add(_lockTabPreview)
-
-            ' Wire bg-color and message changes so preview updates live
             AddHandler _txtMsg.TextChanged, Sub(s, e) _lockTabPreview.Invalidate()
+            prevCard.Controls.Add(_lockTabPreview)
 
-            Return tab
+            page.Controls.Add(prevCard) : y += 210
+
+            page.AutoScrollMinSize = New Size(0, y + 10)
+            Return page
         End Function
 
-        Private Function BuildRestrictionsTab() As TabPage
-            Dim tab = DarkTab("  Restrictions")
-            Dim y = 18
-
-            tab.Controls.Add(InfoLabel(
-                "The following restrictions apply to all users on this PC while the client is running." &
-                " They are automatically removed when the client exits.",
-                New Point(LM, y))) : y += 44
-
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-            tab.Controls.Add(SectionLabel("Windows Restrictions", New Point(LM, y))) : y += 26
-
-            _chkTasks = DarkCheck("Disable Task Manager",       New Point(LM, y), AppConfig.DisableTaskManager)   : tab.Controls.Add(_chkTasks) : y += 30
-            _chkCmd   = DarkCheck("Disable Command Prompt",     New Point(LM, y), AppConfig.DisableCmdPrompt)     : tab.Controls.Add(_chkCmd)   : y += 30
-            _chkReg   = DarkCheck("Disable Registry Editor",    New Point(LM, y), AppConfig.DisableRegistryTools) : tab.Controls.Add(_chkReg)   : y += 30
-            _chkRun   = DarkCheck("Disable Run Dialog (Win+R)", New Point(LM, y), AppConfig.DisableRunDialog)     : tab.Controls.Add(_chkRun)   : y += 40
-
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-            tab.Controls.Add(InfoLabel(
-                "Task Manager and Registry Editor changes take effect immediately." &
-                " CMD and Run Dialog require reopening a new shell.",
-                New Point(LM, y)))
-
-            Return tab
-        End Function
-
-        Private Function BuildSecurityTab() As TabPage
-            Dim tab = DarkTab("  Security")
-            Dim y = 18
-
-            ' ── Admin PIN ────────────────────────────────────────────────────
-            tab.Controls.Add(SectionLabel("Change Admin PIN", New Point(LM, y))) : y += 24
-            tab.Controls.Add(InfoLabel("Leave blank to keep the current PIN.", New Point(LM, y))) : y += 26
-
-            Dim col2 = LM + 224
-            tab.Controls.Add(SmallLabel("New PIN",     New Point(LM,   y)))
-            tab.Controls.Add(SmallLabel("Confirm PIN", New Point(col2, y))) : y += 18
-            _txtPin  = DarkTextBox(New Point(LM,   y), 200, "", pwChar:="●"c) : tab.Controls.Add(_txtPin)
-            _txtPin2 = DarkTextBox(New Point(col2, y), 200, "", pwChar:="●"c) : tab.Controls.Add(_txtPin2)
-            y += 42
-
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-
-            ' ── Low-time warnings ────────────────────────────────────────────
-            tab.Controls.Add(SectionLabel("Low-Time Warnings", New Point(LM, y)))
-            tab.Controls.Add(InfoLabel("(tray balloon notification)", New Point(LM + 160, y + 3))) : y += 26
-            _chkWarn5 = DarkCheck("Warn at 5 minutes remaining", New Point(LM, y), AppConfig.WarnAt5Min) : tab.Controls.Add(_chkWarn5) : y += 28
-            _chkWarn1 = DarkCheck("Warn at 1 minute remaining",  New Point(LM, y), AppConfig.WarnAt1Min) : tab.Controls.Add(_chkWarn1) : y += 38
-
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-
-            ' ── Screen monitoring ────────────────────────────────────────────
-            tab.Controls.Add(SectionLabel("Screen Monitoring", New Point(LM, y))) : y += 26
-            _chkCapture = DarkCheck(
-                "Enable remote screen capture (uploads screenshots to admin dashboard)",
-                New Point(LM, y), AppConfig.ScreenCaptureEnabled)
-            tab.Controls.Add(_chkCapture) : y += 32
-
-            Dim col3 = LM + 160
-            tab.Controls.Add(SmallLabel("Interval (sec)",       New Point(LM,   y)))
-            tab.Controls.Add(SmallLabel("JPEG Quality (30–100)", New Point(col3, y))) : y += 18
-
-            _nudInterval = DarkNud(New Point(LM,   y), 80, AppConfig.ScreenCaptureIntervalSec, 3,  60)
-            _nudQuality  = DarkNud(New Point(col3, y), 80, AppConfig.ScreenCaptureQuality,     30, 100)
-            tab.Controls.Add(_nudInterval)
-            tab.Controls.Add(_nudQuality) : y += 30
-
-            tab.Controls.Add(InfoLabel(
-                "Interval takes effect after restart.  Quality applies immediately." &
-                " Higher quality = clearer image but larger upload size.",
-                New Point(LM, y)))
-
-            Return tab
-        End Function
-
-        Private Function BuildNotificationsTab() As TabPage
-            Dim tab = DarkTab("  Notifications")
-            Dim y = 18
-
-            ' ── On-screen toasts ─────────────────────────────────────────────
-            tab.Controls.Add(SectionLabel("On-Screen Notifications", New Point(LM, y))) : y += 26
-            _chkNotifs = DarkCheck(
-                "Show animated toast notifications for time added and low-time warnings",
-                New Point(LM, y), AppConfig.NotificationsEnabled)
-            tab.Controls.Add(_chkNotifs) : y += 32
-            tab.Controls.Add(InfoLabel(
-                "Toasts slide in from the right edge of the screen and auto-dismiss after 4 seconds." &
-                " Click a toast to dismiss it early.",
-                New Point(LM, y))) : y += 44
-
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-
-            ' ── Voice announcements ───────────────────────────────────────────
-            tab.Controls.Add(SectionLabel("Voice Announcements", New Point(LM, y))) : y += 26
-            _chkVoice = DarkCheck(
-                "Read notifications aloud using Windows text-to-speech (SAPI)",
-                New Point(LM, y), AppConfig.VoiceEnabled)
-            tab.Controls.Add(_chkVoice) : y += 32
-
-            ' Volume
-            tab.Controls.Add(SmallLabel("Volume (10–100)", New Point(LM, y))) : y += 18
-            _nudVolume = DarkNud(New Point(LM, y), 80, AppConfig.VoiceVolume, 10, 100)
-            tab.Controls.Add(_nudVolume) : y += 36
-
-            ' Voice selection dropdown
-            tab.Controls.Add(SmallLabel("Voice", New Point(LM, y))) : y += 18
-            _cmbVoice = New ComboBox() With {
-                .Location        = New Point(LM, y),
-                .Width           = IW,
-                .DropDownStyle   = ComboBoxStyle.DropDownList,
-                .BackColor       = Color.FromArgb(26, 30, 45),
-                .ForeColor       = Color.White,
-                .FlatStyle       = FlatStyle.Flat,
-                .Font            = New Font("Segoe UI", 9)
+        Private Sub BuildPresetGallery(parent As Panel, startX As Integer, startY As Integer)
+            Dim presets = {
+                ("Dark Navy", Color.FromArgb(10, 14, 23), Color.FromArgb(25, 35, 60)),
+                ("Blue Ocean", Color.FromArgb(10, 30, 80), Color.FromArgb(30, 100, 200)),
+                ("Gaming Green", Color.FromArgb(5, 30, 20), Color.FromArgb(0, 120, 60)),
+                ("Sunset", Color.FromArgb(80, 20, 50), Color.FromArgb(200, 100, 50)),
+                ("City Night", Color.FromArgb(15, 15, 30), Color.FromArgb(60, 40, 80))
             }
-            ' Populate with installed SAPI voices; "(Auto — prefer female)" = empty name
-            _cmbVoice.Items.Add("(Auto — prefer female voice)")
+
+            Dim px = startX
+            Dim py = startY
+            For i = 0 To presets.Length - 1
+                Dim preset = presets(i)
+                Dim name = preset.Item1
+                Dim col1 = preset.Item2
+                Dim col2 = preset.Item3
+                Dim thumb = New Panel() With {
+                    .Location = New Point(px, py),
+                    .Size = New Size(110, 60),
+                    .Cursor = Cursors.Hand,
+                    .Tag = i
+                }
+                AddHandler thumb.Paint, Sub(s, e)
+                    Dim p = CType(s, Panel)
+                    Using br = New LinearGradientBrush(p.ClientRectangle, col1, col2, 45.0F)
+                        e.Graphics.FillRectangle(br, p.ClientRectangle)
+                    End Using
+                    Using f = New Font("Segoe UI", 7)
+                        Using tb = New SolidBrush(Color.FromArgb(200, 255, 255, 255))
+                            e.Graphics.DrawString(name, f, tb, 4, p.Height - 16)
+                        End Using
+                    End Using
+                    Using pen = New Pen(ColCardBorder)
+                        e.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1)
+                    End Using
+                End Sub
+                AddHandler thumb.Click, Sub(s, e)
+                    ' Generate a gradient wallpaper and save it
+                    Dim cacheDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "PisoNet", "wallpapers")
+                    Directory.CreateDirectory(cacheDir)
+                    Dim savePath = Path.Combine(cacheDir, $"preset-{name.ToLower().Replace(" ", "-")}.png")
+                    Using bmp = New Bitmap(1920, 1080)
+                        Using g = Graphics.FromImage(bmp)
+                            Using br = New LinearGradientBrush(New Rectangle(0, 0, 1920, 1080), col1, col2, 45.0F)
+                                g.FillRectangle(br, 0, 0, 1920, 1080)
+                            End Using
+                        End Using
+                        bmp.Save(savePath, Imaging.ImageFormat.Png)
+                    End Using
+                    _txtImgPath.Text = savePath
+                End Sub
+                AddHandler thumb.MouseEnter, Sub(s, e)
+                    CType(s, Panel).BackColor = ColNavHover
+                End Sub
+                AddHandler thumb.MouseLeave, Sub(s, e)
+                    CType(s, Panel).BackColor = Color.Transparent
+                End Sub
+                parent.Controls.Add(thumb)
+
+                ' Stack vertically in pairs
+                If i Mod 2 = 0 Then
+                    py += 66
+                Else
+                    px += 116
+                    py -= 66
+                End If
+                If i Mod 2 = 1 Then
+                    px -= 116
+                    py += 66
+                End If
+            Next
+        End Sub
+
+        Private Function BuildRestrictionsPage() As Panel
+            Dim page = ScrollPage()
+            Dim y = 16
+
+            page.Controls.Add(PageTitle("Restrictions", New Point(LM, y))) : y += 34
+
+            Dim infoCard = CardPanel(New Point(LM, y), New Size(IW, 44))
+            infoCard.Controls.Add(InfoLabel(
+                "These restrictions apply while the client is running and are removed on exit.",
+                New Point(14, 10)))
+            page.Controls.Add(infoCard) : y += 54
+
+            Dim card = CardPanel(New Point(LM, y), New Size(IW, 180))
+            Dim cy = 14
+            card.Controls.Add(SectionLabel("Windows Restrictions", New Point(14, cy))) : cy += 28
+
+            _chkTasks = DarkCheck("Disable Task Manager",       New Point(14, cy), AppConfig.DisableTaskManager)   : card.Controls.Add(_chkTasks) : cy += 30
+            _chkCmd   = DarkCheck("Disable Command Prompt",     New Point(14, cy), AppConfig.DisableCmdPrompt)     : card.Controls.Add(_chkCmd)   : cy += 30
+            _chkReg   = DarkCheck("Disable Registry Editor",    New Point(14, cy), AppConfig.DisableRegistryTools) : card.Controls.Add(_chkReg)   : cy += 30
+            _chkRun   = DarkCheck("Disable Run Dialog (Win+R)", New Point(14, cy), AppConfig.DisableRunDialog)     : card.Controls.Add(_chkRun)
+
+            page.Controls.Add(card) : y += 190
+
+            Dim noteCard = CardPanel(New Point(LM, y), New Size(IW, 44))
+            noteCard.Controls.Add(InfoLabel(
+                "Task Manager and Registry changes take effect immediately. CMD requires reopening.",
+                New Point(14, 10)))
+            page.Controls.Add(noteCard)
+
+            Return page
+        End Function
+
+        Private Function BuildSecurityPage() As Panel
+            Dim page = ScrollPage()
+            Dim y = 16
+
+            page.Controls.Add(PageTitle("Security", New Point(LM, y))) : y += 34
+
+            ' PIN card
+            Dim pinCard = CardPanel(New Point(LM, y), New Size(IW, 130))
+            Dim cy = 14
+            pinCard.Controls.Add(SectionLabel("Change Admin PIN", New Point(14, cy))) : cy += 22
+            pinCard.Controls.Add(InfoLabel("Leave blank to keep current PIN.", New Point(14, cy))) : cy += 24
+
+            pinCard.Controls.Add(SmallLabel("New PIN", New Point(14, cy)))
+            pinCard.Controls.Add(SmallLabel("Confirm PIN", New Point(224, cy))) : cy += 18
+            _txtPin  = DarkTextBox(New Point(14,  cy), 190, "", pwChar:="●"c) : pinCard.Controls.Add(_txtPin)
+            _txtPin2 = DarkTextBox(New Point(224, cy), 190, "", pwChar:="●"c) : pinCard.Controls.Add(_txtPin2)
+
+            page.Controls.Add(pinCard) : y += 140
+
+            ' Warnings card
+            Dim warnCard = CardPanel(New Point(LM, y), New Size(IW, 100))
+            cy = 14
+            warnCard.Controls.Add(SectionLabel("Low-Time Warnings", New Point(14, cy))) : cy += 26
+            _chkWarn5 = DarkCheck("Warn at 5 minutes remaining", New Point(14, cy), AppConfig.WarnAt5Min) : warnCard.Controls.Add(_chkWarn5) : cy += 28
+            _chkWarn1 = DarkCheck("Warn at 1 minute remaining",  New Point(14, cy), AppConfig.WarnAt1Min) : warnCard.Controls.Add(_chkWarn1)
+
+            page.Controls.Add(warnCard) : y += 110
+
+            ' Screen monitoring card
+            Dim capCard = CardPanel(New Point(LM, y), New Size(IW, 140))
+            cy = 14
+            capCard.Controls.Add(SectionLabel("Screen Monitoring", New Point(14, cy))) : cy += 26
+            _chkCapture = DarkCheck(
+                "Enable remote screen capture",
+                New Point(14, cy), AppConfig.ScreenCaptureEnabled)
+            capCard.Controls.Add(_chkCapture) : cy += 30
+
+            capCard.Controls.Add(SmallLabel("Interval (sec)", New Point(14, cy)))
+            capCard.Controls.Add(SmallLabel("JPEG Quality", New Point(160, cy))) : cy += 18
+            _nudInterval = DarkNud(New Point(14,  cy), 80, AppConfig.ScreenCaptureIntervalSec, 3,  60)
+            _nudQuality  = DarkNud(New Point(160, cy), 80, AppConfig.ScreenCaptureQuality,     30, 100)
+            capCard.Controls.Add(_nudInterval)
+            capCard.Controls.Add(_nudQuality)
+
+            page.Controls.Add(capCard)
+
+            Return page
+        End Function
+
+        Private Function BuildNotificationsPage() As Panel
+            Dim page = ScrollPage()
+            Dim y = 16
+
+            page.Controls.Add(PageTitle("Notifications", New Point(LM, y))) : y += 34
+
+            ' Toast card
+            Dim toastCard = CardPanel(New Point(LM, y), New Size(IW, 100))
+            Dim cy = 14
+            toastCard.Controls.Add(SectionLabel("On-Screen Notifications", New Point(14, cy))) : cy += 26
+            _chkNotifs = DarkCheck(
+                "Show animated toast notifications",
+                New Point(14, cy), AppConfig.NotificationsEnabled)
+            toastCard.Controls.Add(_chkNotifs) : cy += 28
+            toastCard.Controls.Add(InfoLabel(
+                "Toasts slide in from the right edge and auto-dismiss after 4 seconds.",
+                New Point(14, cy)))
+
+            page.Controls.Add(toastCard) : y += 110
+
+            ' Voice card
+            Dim voiceCard = CardPanel(New Point(LM, y), New Size(IW, 170))
+            cy = 14
+            voiceCard.Controls.Add(SectionLabel("Voice Announcements", New Point(14, cy))) : cy += 26
+            _chkVoice = DarkCheck(
+                "Read notifications aloud using Windows TTS",
+                New Point(14, cy), AppConfig.VoiceEnabled)
+            voiceCard.Controls.Add(_chkVoice) : cy += 30
+
+            voiceCard.Controls.Add(SmallLabel("Volume (10-100)", New Point(14, cy))) : cy += 18
+            _nudVolume = DarkNud(New Point(14, cy), 80, AppConfig.VoiceVolume, 10, 100)
+            voiceCard.Controls.Add(_nudVolume) : cy += 34
+
+            voiceCard.Controls.Add(SmallLabel("Voice", New Point(14, cy))) : cy += 18
+            _cmbVoice = DarkCombo(New Point(14, cy), IW - 32, Nothing, "")
+            _cmbVoice.Items.Add("(Auto -- prefer female voice)")
             Dim voiceNames = NotificationService.GetInstalledVoiceNames()
             For Each vn In voiceNames
                 _cmbVoice.Items.Add(vn)
             Next
-            ' Select currently saved voice
             Dim saved = AppConfig.VoiceName.Trim()
             If String.IsNullOrEmpty(saved) OrElse _cmbVoice.Items.Count = 1 Then
                 _cmbVoice.SelectedIndex = 0
@@ -348,187 +679,124 @@ Namespace Forms
                 Dim idx = _cmbVoice.FindStringExact(saved)
                 _cmbVoice.SelectedIndex = If(idx >= 0, idx, 0)
             End If
-            tab.Controls.Add(_cmbVoice) : y += 36
+            voiceCard.Controls.Add(_cmbVoice)
 
-            tab.Controls.Add(InfoLabel(
-                "Voice works even when visual toasts are disabled — ideal for players in" &
-                " full-screen games. Install more voices via Settings → Time & Language → Speech.",
-                New Point(LM, y))) : y += 44
+            page.Controls.Add(voiceCard) : y += 180
 
-            tab.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
+            Dim noteCard = CardPanel(New Point(LM, y), New Size(IW, 44))
+            noteCard.Controls.Add(InfoLabel(
+                "Voice works even when toasts are disabled -- ideal for full-screen games.",
+                New Point(14, 10)))
+            page.Controls.Add(noteCard)
 
-            ' ── Timer overlay hint ────────────────────────────────────────────
-            tab.Controls.Add(SectionLabel("Timer Overlay", New Point(LM, y))) : y += 26
-            tab.Controls.Add(InfoLabel(
-                "Right-click the timer to hide it or reset its position." &
-                " It reappears automatically when a new session starts.",
-                New Point(LM, y)))
-
-            Return tab
+            Return page
         End Function
 
-        Private Function BuildAppearanceTab() As TabPage
-            Dim tab = DarkTab("  Appearance")
+        Private Function BuildAppearancePage() As Panel
+            Dim page = ScrollPage()
+            Dim y = 16
 
-            ' ── Scrollable inner panel — content can exceed the tab's visible height ──
-            Dim inner = New Panel() With {
-                .AutoScroll = True,
-                .Dock       = DockStyle.Fill,
-                .BackColor  = Color.FromArgb(18, 22, 36),
-                .Padding    = New Padding(0)
-            }
-            tab.Controls.Add(inner)
+            page.Controls.Add(PageTitle("Appearance", New Point(LM, y))) : y += 34
 
-            Dim y = 18
+            ' ── Timer overlay card ───────────────────────────────────────────
+            Dim timerCard = CardPanel(New Point(LM, y), New Size(IW, 220))
+            Dim cy = 14
+            timerCard.Controls.Add(SectionLabel("Timer Overlay", New Point(14, cy))) : cy += 26
 
-            ' ═══════════════════════════════════════════════════════════════════
-            ' SECTION 1 — Timer Overlay
-            ' ═══════════════════════════════════════════════════════════════════
-            inner.Controls.Add(SectionLabel("Timer Overlay", New Point(LM, y))) : y += 26
+            _chkTimerDot = DarkCheck("Show connection dot", New Point(14, cy), AppConfig.TimerShowConnDot)
+            timerCard.Controls.Add(_chkTimerDot) : cy += 28
 
-            _chkTimerDot = DarkCheck(
-                "Show connection dot  (green = connected, amber = offline) in upper-right corner",
-                New Point(LM, y), AppConfig.TimerShowConnDot)
-            inner.Controls.Add(_chkTimerDot) : y += 28
+            _chkTimerPcLabel = DarkCheck("Show PC number label", New Point(14, cy), AppConfig.TimerShowPcLabel)
+            timerCard.Controls.Add(_chkTimerPcLabel) : cy += 28
 
-            _chkTimerPcLabel = DarkCheck(
-                "Show PC number label on timer",
-                New Point(LM, y), AppConfig.TimerShowPcLabel)
-            inner.Controls.Add(_chkTimerPcLabel) : y += 32
+            timerCard.Controls.Add(SmallLabel("PC Label Position:", New Point(14, cy + 2)))
+            _cmbTimerPcPos = DarkCombo(New Point(140, cy), 80, {"Above", "Side"},
+                                       If(AppConfig.TimerPcLabelPosition = "Side", "Side", "Above"))
+            timerCard.Controls.Add(_cmbTimerPcPos) : cy += 32
 
-            inner.Controls.Add(SmallLabel("PC Label Position:", New Point(LM, y)))
-            _cmbTimerPcPos = New ComboBox() With {
-                .Location      = New Point(LM + 124, y - 2),
-                .Width         = 90,
-                .DropDownStyle = ComboBoxStyle.DropDownList,
-                .BackColor     = Color.FromArgb(26, 30, 45),
-                .ForeColor     = Color.White,
-                .FlatStyle     = FlatStyle.Flat,
-                .Font          = New Font("Segoe UI", 9)
-            }
-            _cmbTimerPcPos.Items.AddRange({"Above", "Side"})
-            _cmbTimerPcPos.SelectedItem = If(AppConfig.TimerPcLabelPosition = "Side", "Side", "Above")
-            inner.Controls.Add(_cmbTimerPcPos) : y += 36
-
-            ' ── Timer text colours ────────────────────────────────────────────
-            inner.Controls.Add(SmallLabel("Time Color (normal):", New Point(LM, y + 4)))
-            _picTimerTimeColor = New PictureBox() With {
-                .Location    = New Point(LM + 150, y),
-                .Size        = New Size(50, 22),
-                .BackColor   = _currentTimerTimeColor,
-                .BorderStyle = BorderStyle.FixedSingle,
-                .Cursor      = Cursors.Hand
-            }
+            ' Timer colors
+            timerCard.Controls.Add(SmallLabel("Normal Color:", New Point(14, cy + 4)))
+            _picTimerTimeColor = ColorSwatch(New Point(110, cy), _currentTimerTimeColor)
             AddHandler _picTimerTimeColor.Click, AddressOf OnPickTimerTimeColor
-            inner.Controls.Add(_picTimerTimeColor)
+            timerCard.Controls.Add(_picTimerTimeColor)
 
-            inner.Controls.Add(SmallLabel("Low Time (<5 min):", New Point(LM + 220, y + 4)))
-            _picTimerLowColor = New PictureBox() With {
-                .Location    = New Point(LM + 360, y),
-                .Size        = New Size(50, 22),
-                .BackColor   = _currentTimerLowColor,
-                .BorderStyle = BorderStyle.FixedSingle,
-                .Cursor      = Cursors.Hand
-            }
+            timerCard.Controls.Add(SmallLabel("Low Time:", New Point(180, cy + 4)))
+            _picTimerLowColor = ColorSwatch(New Point(250, cy), _currentTimerLowColor)
             AddHandler _picTimerLowColor.Click, AddressOf OnPickTimerLowColor
-            inner.Controls.Add(_picTimerLowColor) : y += 34
+            timerCard.Controls.Add(_picTimerLowColor) : cy += 32
 
-            inner.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-            inner.Controls.Add(SectionLabel("Timer Preview", New Point(LM, y))) : y += 22
-
+            ' Timer preview
             _timerPreview = New Panel() With {
-                .Location    = New Point(LM, y),
-                .Size        = New Size(180, 70),
+                .Location    = New Point(14, cy),
+                .Size        = New Size(160, 56),
                 .BackColor   = Color.FromArgb(18, 22, 38),
                 .BorderStyle = BorderStyle.FixedSingle
             }
             AddHandler _timerPreview.Paint, AddressOf OnPaintTimerPreview
-            inner.Controls.Add(_timerPreview) : y += 82   ' panel (70) + gap (12)
+            timerCard.Controls.Add(_timerPreview)
 
-            inner.Controls.Add(InfoLabel(
-                "Drag the timer to move it. Right-click to hide or reset position.",
-                New Point(LM, y))) : y += 32
+            page.Controls.Add(timerCard) : y += 230
 
-            inner.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
+            ' ── Lock screen text card ────────────────────────────────────────
+            Dim textCard = CardPanel(New Point(LM, y), New Size(IW, 170))
+            cy = 14
+            textCard.Controls.Add(SectionLabel("Lock Screen Text", New Point(14, cy))) : cy += 24
 
-            ' ═══════════════════════════════════════════════════════════════════
-            ' SECTION 2 — Lock Screen Text
-            ' ═══════════════════════════════════════════════════════════════════
-            inner.Controls.Add(SectionLabel("Lock Screen Text", New Point(LM, y))) : y += 24
+            ' Column headers
+            textCard.Controls.Add(SmallLabel("Element",   New Point(14,  cy)))
+            textCard.Controls.Add(SmallLabel("Color",     New Point(130, cy)))
+            textCard.Controls.Add(SmallLabel("Size",      New Point(200, cy)))
+            textCard.Controls.Add(SmallLabel("Center X",  New Point(270, cy)))
+            textCard.Controls.Add(SmallLabel("Y Pos %",   New Point(350, cy))) : cy += 18
 
-            ' ── Column header row ─────────────────────────────────────────────
-            inner.Controls.Add(SmallLabel("Element",      New Point(LM,       y)))
-            inner.Controls.Add(SmallLabel("Color",        New Point(LM + 130, y)))
-            inner.Controls.Add(SmallLabel("Font Size",    New Point(LM + 200, y)))
-            inner.Controls.Add(SmallLabel("Center X",     New Point(LM + 278, y)))
-            inner.Controls.Add(SmallLabel("Y Position %", New Point(LM + 358, y))) : y += 18
-
-            ' ── Main Message row ─────────────────────────────────────────────
-            inner.Controls.Add(SmallLabel("Main Message", New Point(LM, y + 4)))
-
-            _picMsgColor = New PictureBox() With {
-                .Location    = New Point(LM + 130, y),
-                .Size        = New Size(50, 22),
-                .BackColor   = _currentMsgColor,
-                .BorderStyle = BorderStyle.FixedSingle,
-                .Cursor      = Cursors.Hand
-            }
+            ' Main message row
+            textCard.Controls.Add(SmallLabel("Main Message", New Point(14, cy + 4)))
+            _picMsgColor = ColorSwatch(New Point(130, cy), _currentMsgColor)
             AddHandler _picMsgColor.Click, AddressOf OnPickMsgColor
-            inner.Controls.Add(_picMsgColor)
+            textCard.Controls.Add(_picMsgColor)
+            _nudMsgSize = DarkNud(New Point(200, cy), 60, AppConfig.LockMsgSize, 18, 72)
+            textCard.Controls.Add(_nudMsgSize)
+            _chkMsgCenterX = DarkCheck("", New Point(280, cy + 2), AppConfig.LockMsgCenterX)
+            textCard.Controls.Add(_chkMsgCenterX)
+            _nudMsgY = DarkNud(New Point(350, cy), 60, AppConfig.LockMsgYPct, 0, 100)
+            textCard.Controls.Add(_nudMsgY) : cy += 30
 
-            _nudMsgSize = DarkNud(New Point(LM + 200, y), 70, AppConfig.LockMsgSize, 18, 72)
-            inner.Controls.Add(_nudMsgSize)
-
-            _chkMsgCenterX = DarkCheck("Center", New Point(LM + 278, y + 2), AppConfig.LockMsgCenterX)
-            inner.Controls.Add(_chkMsgCenterX)
-
-            _nudMsgY = DarkNud(New Point(LM + 358, y), 70, AppConfig.LockMsgYPct, 0, 100)
-            inner.Controls.Add(_nudMsgY) : y += 30
-
-            ' ── PC Number Label row ───────────────────────────────────────────
-            inner.Controls.Add(SmallLabel("PC Number Label", New Point(LM, y + 4)))
-
-            _picPcLblColor = New PictureBox() With {
-                .Location    = New Point(LM + 130, y),
-                .Size        = New Size(50, 22),
-                .BackColor   = _currentPcLblColor,
-                .BorderStyle = BorderStyle.FixedSingle,
-                .Cursor      = Cursors.Hand
-            }
+            ' PC label row
+            textCard.Controls.Add(SmallLabel("PC Label", New Point(14, cy + 4)))
+            _picPcLblColor = ColorSwatch(New Point(130, cy), _currentPcLblColor)
             AddHandler _picPcLblColor.Click, AddressOf OnPickPcLblColor
-            inner.Controls.Add(_picPcLblColor)
+            textCard.Controls.Add(_picPcLblColor)
+            _nudPcLblSize = DarkNud(New Point(200, cy), 60, AppConfig.LockPcLabelSize, 8, 72)
+            textCard.Controls.Add(_nudPcLblSize)
+            _chkPcLblCenterX = DarkCheck("", New Point(280, cy + 2), AppConfig.LockPcLabelCenterX)
+            textCard.Controls.Add(_chkPcLblCenterX)
+            _nudPcLblY = DarkNud(New Point(350, cy), 60, AppConfig.LockPcLabelYPct, 0, 100)
+            textCard.Controls.Add(_nudPcLblY) : cy += 36
 
-            _nudPcLblSize = DarkNud(New Point(LM + 200, y), 70, AppConfig.LockPcLabelSize, 8, 72)
-            inner.Controls.Add(_nudPcLblSize)
+            textCard.Controls.Add(InfoLabel(
+                "Y: 0=top, 50=center, 100=bottom. Center X auto-centers based on text width.",
+                New Point(14, cy)))
 
-            _chkPcLblCenterX = DarkCheck("Center", New Point(LM + 278, y + 2), AppConfig.LockPcLabelCenterX)
-            inner.Controls.Add(_chkPcLblCenterX)
+            page.Controls.Add(textCard) : y += 180
 
-            _nudPcLblY = DarkNud(New Point(LM + 358, y), 70, AppConfig.LockPcLabelYPct, 0, 100)
-            inner.Controls.Add(_nudPcLblY) : y += 30
-
-            inner.Controls.Add(InfoLabel(
-                "Y: 0 = top edge, 50 = centered, 100 = bottom edge." &
-                " Center X auto-centers the label based on its rendered pixel width.",
-                New Point(LM, y))) : y += 38
-
-            inner.Controls.Add(Rule(New Point(LM, y), IW)) : y += 14
-
-            ' ── Lock screen preview ────────────────────────────────────────────
-            inner.Controls.Add(SectionLabel("Lock Screen Preview", New Point(LM, y))) : y += 22
+            ' ── Lock preview card ────────────────────────────────────────────
+            Dim prevCard = CardPanel(New Point(LM, y), New Size(IW, 190))
+            cy = 14
+            prevCard.Controls.Add(SectionLabel("Lock Screen Preview", New Point(14, cy))) : cy += 22
 
             _lockPreview = New Panel() With {
-                .Location    = New Point(LM, y),
-                .Size        = New Size(IW, 180),   ' taller now that tab scrolls
+                .Location    = New Point(14, cy),
+                .Size        = New Size(IW - 32, 150),
                 .BorderStyle = BorderStyle.FixedSingle
             }
             AddHandler _lockPreview.Paint, AddressOf OnPaintLockPreview
-            inner.Controls.Add(_lockPreview) : y += 192   ' panel (180) + gap (12)
+            prevCard.Controls.Add(_lockPreview)
 
-            ' Explicit AutoScrollMinSize so the scrollbar appears at the right moment
-            inner.AutoScrollMinSize = New Size(0, y)
+            page.Controls.Add(prevCard) : y += 200
 
-            ' ── Wire live-preview change handlers ─────────────────────────────
+            page.AutoScrollMinSize = New Size(0, y + 10)
+
+            ' Wire live-preview change handlers
             Dim timerRefresh = New EventHandler(AddressOf InvalidateTimerPreview)
             AddHandler _chkTimerDot.CheckedChanged,         timerRefresh
             AddHandler _chkTimerPcLabel.CheckedChanged,     timerRefresh
@@ -541,13 +809,9 @@ Namespace Forms
             AddHandler _nudPcLblSize.ValueChanged,      lockRefresh
             AddHandler _chkPcLblCenterX.CheckedChanged, lockRefresh
             AddHandler _nudPcLblY.ValueChanged,         lockRefresh
+            If _txtMsg IsNot Nothing Then AddHandler _txtMsg.TextChanged, lockRefresh
 
-            ' Sync lock preview when the message text is edited on the Lock Screen tab
-            If _txtMsg IsNot Nothing Then
-                AddHandler _txtMsg.TextChanged, lockRefresh
-            End If
-
-            Return tab
+            Return page
         End Function
 
         ' ── Preview paint handlers ─────────────────────────────────────────────
@@ -561,130 +825,177 @@ Namespace Forms
             _lockTabPreview?.Invalidate()
         End Sub
 
-        ''' <summary>Paints a scaled-down visual of the timer overlay based on current form settings.</summary>
+        Private Sub OnPaintWpPreview(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            e.Graphics.Clear(Color.FromArgb(10, 14, 23))
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+            e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit
+
+            Dim path = _txtImgPath?.Text
+            If Not String.IsNullOrEmpty(path) AndAlso File.Exists(path) Then
+                Try
+                    Using img = Image.FromFile(path)
+                        Dim fit = If(_cmbBgFit?.SelectedItem?.ToString(), "Contain")
+                        Dim w, h As Integer
+                        Select Case fit
+                            Case "Cover"
+                                Dim s = Math.Max(CSng(pnl.Width) / img.Width, CSng(pnl.Height) / img.Height)
+                                w = CInt(img.Width * s) : h = CInt(img.Height * s)
+                            Case "Stretch"
+                                w = pnl.Width : h = pnl.Height
+                            Case Else
+                                Dim s = Math.Min(CSng(pnl.Width) / img.Width, CSng(pnl.Height) / img.Height)
+                                w = CInt(img.Width * s) : h = CInt(img.Height * s)
+                        End Select
+                        e.Graphics.DrawImage(img, (pnl.Width - w) \ 2, (pnl.Height - h) \ 2, w, h)
+                    End Using
+                Catch
+                End Try
+            Else
+                ' Show placeholder
+                Using f = New Font("Segoe UI", 9)
+                    Using br = New SolidBrush(ColInfo)
+                        Dim sf = New StringFormat() With {
+                            .Alignment = StringAlignment.Center,
+                            .LineAlignment = StringAlignment.Center
+                        }
+                        e.Graphics.DrawString("No image selected" & vbCrLf & "Drop an image here",
+                            f, br, New RectangleF(0, 0, pnl.Width, pnl.Height), sf)
+                    End Using
+                End Using
+            End If
+        End Sub
+
+        Private Sub OnWpDragEnter(sender As Object, e As DragEventArgs)
+            If e.Data.GetDataPresent(DataFormats.FileDrop) Then
+                Dim files = CType(e.Data.GetData(DataFormats.FileDrop), String())
+                If files IsNot Nothing AndAlso files.Length > 0 Then
+                    Dim ext = Path.GetExtension(files(0)).ToLower()
+                    If ext = ".jpg" OrElse ext = ".jpeg" OrElse ext = ".png" OrElse ext = ".bmp" OrElse ext = ".webp" Then
+                        e.Effect = DragDropEffects.Copy
+                        _wpPreview.BorderStyle = BorderStyle.Fixed3D
+                        Return
+                    End If
+                End If
+            End If
+            e.Effect = DragDropEffects.None
+        End Sub
+
+        Private Sub OnWpDragDrop(sender As Object, e As DragEventArgs)
+            _wpPreview.BorderStyle = BorderStyle.FixedSingle
+            If e.Data.GetDataPresent(DataFormats.FileDrop) Then
+                Dim files = CType(e.Data.GetData(DataFormats.FileDrop), String())
+                If files IsNot Nothing AndAlso files.Length > 0 Then
+                    _txtImgPath.Text = files(0)
+                End If
+            End If
+        End Sub
+
         Private Sub OnPaintTimerPreview(sender As Object, e As PaintEventArgs)
             Dim pnl = CType(sender, Panel)
-            Dim bg       = Color.FromArgb(18, 22, 38)
-            Dim greenClr = _currentTimerTimeColor   ' respects the configured normal time colour
-            Dim dimClr   = Color.FromArgb(100, 116, 139)
+            Dim greenClr = _currentTimerTimeColor
+            Dim dimClr = Color.FromArgb(100, 116, 139)
 
-            e.Graphics.Clear(bg)
-            e.Graphics.SmoothingMode      = SmoothingMode.AntiAlias
-            e.Graphics.TextRenderingHint  = TextRenderingHint.ClearTypeGridFit
+            e.Graphics.Clear(Color.FromArgb(18, 22, 38))
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+            e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit
 
             Dim showDot = _chkTimerDot.Checked
-            Dim showPc  = _chkTimerPcLabel.Checked
+            Dim showPc = _chkTimerPcLabel.Checked
             Dim pcAbove = (If(_cmbTimerPcPos.SelectedItem?.ToString(), "Above") = "Above")
 
             Dim pw = pnl.Width
             Dim ph = pnl.Height
 
-            ' Connection dot
             If showDot Then
-                Dim dotX = pw - 13
                 Using br = New SolidBrush(greenClr)
-                    e.Graphics.FillEllipse(br, dotX, 5, 9, 9)
+                    e.Graphics.FillEllipse(br, pw - 13, 5, 9, 9)
                 End Using
             End If
 
-            Dim dotReserve = If(showDot, 16, 0)
-
             Dim sfC = New StringFormat() With {
-                .Alignment     = StringAlignment.Center,
-                .LineAlignment = StringAlignment.Center
-            }
-            Dim sfL = New StringFormat() With {
-                .Alignment     = StringAlignment.Near,
+                .Alignment = StringAlignment.Center,
                 .LineAlignment = StringAlignment.Center
             }
 
             Dim pcText = $"PC {AppConfig.PCNumber:D2}"
 
             If showPc AndAlso pcAbove Then
-                ' PC label above time
                 Using pcBr = New SolidBrush(dimClr)
-                    e.Graphics.DrawString(pcText, New Font("Segoe UI", 7),
-                        pcBr, New RectangleF(2, 4, pw - dotReserve - 2, 14), sfC)
+                    e.Graphics.DrawString(pcText, New Font("Segoe UI", 7), pcBr,
+                        New RectangleF(2, 4, pw - 16, 14), sfC)
                 End Using
                 Using timeBr = New SolidBrush(greenClr)
-                    e.Graphics.DrawString("12:34", New Font("Segoe UI", 17, FontStyle.Bold),
-                        timeBr, New RectangleF(0, 18, pw, ph - 18), sfC)
+                    e.Graphics.DrawString("12:34", New Font("Segoe UI", 15, FontStyle.Bold), timeBr,
+                        New RectangleF(0, 16, pw, ph - 16), sfC)
                 End Using
-
             ElseIf showPc Then
-                ' PC label side
-                Dim timeW = pw - 44
                 Using timeBr = New SolidBrush(greenClr)
-                    e.Graphics.DrawString("12:34", New Font("Segoe UI", 17, FontStyle.Bold),
-                        timeBr, New RectangleF(0, 4, timeW, ph - 8), sfC)
+                    e.Graphics.DrawString("12:34", New Font("Segoe UI", 15, FontStyle.Bold), timeBr,
+                        New RectangleF(0, 4, pw - 44, ph - 8), sfC)
                 End Using
                 Using pcBr = New SolidBrush(dimClr)
-                    e.Graphics.DrawString(pcText, New Font("Segoe UI", 6.5F),
-                        pcBr, New RectangleF(timeW + 2, (ph - 14) \ 2, 38, 14), sfL)
+                    e.Graphics.DrawString(pcText, New Font("Segoe UI", 6.5F), pcBr,
+                        New RectangleF(pw - 42, (ph - 14) \ 2, 38, 14), New StringFormat() With {
+                            .Alignment = StringAlignment.Near, .LineAlignment = StringAlignment.Center
+                        })
                 End Using
-
             Else
-                ' Time only
                 Using timeBr = New SolidBrush(greenClr)
-                    e.Graphics.DrawString("12:34", New Font("Segoe UI", 17, FontStyle.Bold),
-                        timeBr, New RectangleF(0, 4, pw, ph - 8), sfC)
+                    e.Graphics.DrawString("12:34", New Font("Segoe UI", 15, FontStyle.Bold), timeBr,
+                        New RectangleF(0, 4, pw, ph - 8), sfC)
                 End Using
             End If
         End Sub
 
-        ''' <summary>Paints a proportional miniature of the lock screen based on current form settings.</summary>
         Private Sub OnPaintLockPreview(sender As Object, e As PaintEventArgs)
             Dim pnl = CType(sender, Panel)
             Dim pw = pnl.Width
             Dim ph = pnl.Height
 
             e.Graphics.Clear(_currentBgColor)
-            e.Graphics.SmoothingMode     = SmoothingMode.AntiAlias
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
             e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit
 
-            ' Scale fonts relative to a 1080p reference height so the preview is proportional
             Const REF_H As Single = 1080.0F
             Dim scale = ph / REF_H
 
-            ' ── Main message ─────────────────────────────────────────────────
             Dim msgText = If(String.IsNullOrWhiteSpace(_txtMsg?.Text), "Insert Coins to Start", _txtMsg.Text)
-            Dim msgPt   = Math.Max(4.0F, CInt(_nudMsgSize.Value) * scale)
+            Dim msgPt = Math.Max(4.0F, CInt(_nudMsgSize.Value) * scale)
             Dim msgYPct = CInt(_nudMsgY.Value) / 100.0F
 
             Using msgFont = New Font("Segoe UI", msgPt, FontStyle.Bold)
                 Dim msgSz = e.Graphics.MeasureString(msgText, msgFont)
-                Dim msgX  = If(_chkMsgCenterX.Checked,
+                Dim msgX = If(_chkMsgCenterX.Checked,
                                (pw - msgSz.Width) / 2.0F,
                                (pw - msgSz.Width) * CSng(AppConfig.LockMsgXPct) / 100.0F)
-                Dim msgY  = (ph - msgSz.Height) * msgYPct
+                Dim msgY = (ph - msgSz.Height) * msgYPct
                 Using msgBr = New SolidBrush(_currentMsgColor)
                     e.Graphics.DrawString(msgText, msgFont, msgBr, msgX, msgY)
                 End Using
 
-                ' Sub-text sits just below, always centered, dimmed
                 Dim subText = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
-                Dim subPt   = Math.Max(3.0F, 14 * scale)
+                Dim subPt = Math.Max(3.0F, 14 * scale)
                 Using subFont = New Font("Segoe UI", subPt)
                     Dim subSz = e.Graphics.MeasureString(subText, subFont)
-                    Dim subX  = (pw - subSz.Width) / 2.0F
-                    Dim subY  = msgY + msgSz.Height + 2 * scale
+                    Dim subX = (pw - subSz.Width) / 2.0F
+                    Dim subY = msgY + msgSz.Height + 2 * scale
                     Using subBr = New SolidBrush(Color.FromArgb(120, 140, 180))
                         e.Graphics.DrawString(subText, subFont, subBr, subX, subY)
                     End Using
                 End Using
             End Using
 
-            ' ── PC number label ───────────────────────────────────────────────
             Dim pcText = $"PC {AppConfig.PCNumber:D2}"
-            Dim pcPt   = Math.Max(3.0F, CInt(_nudPcLblSize.Value) * scale)
+            Dim pcPt = Math.Max(3.0F, CInt(_nudPcLblSize.Value) * scale)
             Dim pcYPct = CInt(_nudPcLblY.Value) / 100.0F
 
             Using pcFont = New Font("Segoe UI", pcPt)
                 Dim pcSz = e.Graphics.MeasureString(pcText, pcFont)
-                Dim pcX  = If(_chkPcLblCenterX.Checked,
+                Dim pcX = If(_chkPcLblCenterX.Checked,
                               (pw - pcSz.Width) / 2.0F,
                               pw * CSng(AppConfig.LockPcLabelXPct) / 100.0F)
-                Dim pcY  = ph * pcYPct
+                Dim pcY = ph * pcYPct
                 Using pcBr = New SolidBrush(_currentPcLblColor)
                     e.Graphics.DrawString(pcText, pcFont, pcBr, pcX, pcY)
                 End Using
@@ -789,19 +1100,18 @@ Namespace Forms
             AppConfig.SaveNotificationsEnabled(_chkNotifs.Checked)
             AppConfig.SaveVoiceEnabled(_chkVoice.Checked)
             AppConfig.SaveVoiceVolume(CInt(_nudVolume.Value))
-            ' Index 0 = Auto; any other = specific voice name
             Dim selectedVoice = If(_cmbVoice.SelectedIndex <= 0, "",
                                    _cmbVoice.SelectedItem?.ToString())
             AppConfig.SaveVoiceName(If(selectedVoice, ""))
 
-            ' ── Appearance: timer overlay ──────────────────────────────────────
+            ' Appearance: timer overlay
             AppConfig.SaveTimerTimeArgb(_currentTimerTimeColor.ToArgb())
             AppConfig.SaveTimerLowTimeArgb(_currentTimerLowColor.ToArgb())
             AppConfig.SaveTimerShowConnDot(_chkTimerDot.Checked)
             AppConfig.SaveTimerShowPcLabel(_chkTimerPcLabel.Checked)
             AppConfig.SaveTimerPcLabelPosition(If(_cmbTimerPcPos.SelectedItem?.ToString(), "Above"))
 
-            ' ── Appearance: lock screen text ───────────────────────────────────
+            ' Appearance: lock screen text
             AppConfig.SaveLockMsgForeArgb(_currentMsgColor.ToArgb())
             AppConfig.SaveLockMsgSize(CInt(_nudMsgSize.Value))
             AppConfig.SaveLockMsgCenterX(_chkMsgCenterX.Checked)
@@ -811,8 +1121,10 @@ Namespace Forms
             AppConfig.SaveLockPcLabelCenterX(_chkPcLblCenterX.Checked)
             AppConfig.SaveLockPcLabelYPct(CInt(_nudPcLblY.Value))
 
-            WindowsPolicy.Apply()
+            ' Wallpaper
+            AppConfig.SaveUseLocalWallpaper(_chkUseLocalWp.Checked)
 
+            WindowsPolicy.Apply()
             RaiseEvent SettingsSaved()
 
             MessageBox.Show("Settings saved." & vbCrLf &
@@ -830,11 +1142,46 @@ Namespace Forms
 
         ' ── UI factory helpers ────────────────────────────────────────────────
 
-        Private Shared Function DarkTab(title As String) As TabPage
-            Return New TabPage(title) With {
-                .BackColor = Color.FromArgb(18, 22, 36),
+        Private Shared Function ScrollPage() As Panel
+            Return New Panel() With {
+                .AutoScroll = True,
+                .BackColor  = ColContentBg,
+                .Padding    = New Padding(0)
+            }
+        End Function
+
+        Private Shared Function PageTitle(text As String, loc As Point) As Label
+            Return New Label() With {
+                .Text      = text,
+                .AutoSize  = True,
+                .Location  = loc,
+                .Font      = New Font("Segoe UI", 14, FontStyle.Bold),
                 .ForeColor = Color.White
             }
+        End Function
+
+        Private Shared Function CardPanel(loc As Point, sz As Size) As Panel
+            Dim pnl = New Panel() With {
+                .Location  = loc,
+                .Size      = sz,
+                .BackColor = ColCardBg
+            }
+            AddHandler pnl.Paint, Sub(s, e)
+                Dim p = CType(s, Panel)
+                Using gp = New GraphicsPath()
+                    Dim r = 8
+                    gp.AddArc(0, 0, r, r, 180, 90)
+                    gp.AddArc(p.Width - r - 1, 0, r, r, 270, 90)
+                    gp.AddArc(p.Width - r - 1, p.Height - r - 1, r, r, 0, 90)
+                    gp.AddArc(0, p.Height - r - 1, r, r, 90, 90)
+                    gp.CloseFigure()
+                    Using pen = New Pen(ColCardBorder)
+                        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                        e.Graphics.DrawPath(pen, gp)
+                    End Using
+                End Using
+            End Sub
+            Return pnl
         End Function
 
         Private Shared Function SectionLabel(text As String, loc As Point) As Label
@@ -843,7 +1190,7 @@ Namespace Forms
                 .AutoSize  = True,
                 .Location  = loc,
                 .Font      = New Font("Segoe UI", 9, FontStyle.Bold),
-                .ForeColor = Color.FromArgb(99, 162, 255)
+                .ForeColor = ColSection
             }
         End Function
 
@@ -851,10 +1198,10 @@ Namespace Forms
             Return New Label() With {
                 .Text      = text,
                 .AutoSize  = False,
-                .Size      = New Size(IW, 40),
+                .Size      = New Size(IW - 32, 30),
                 .Location  = loc,
                 .Font      = New Font("Segoe UI", 8),
-                .ForeColor = Color.FromArgb(94, 110, 140)
+                .ForeColor = ColInfo
             }
         End Function
 
@@ -864,15 +1211,7 @@ Namespace Forms
                 .AutoSize  = True,
                 .Location  = loc,
                 .Font      = New Font("Segoe UI", 8),
-                .ForeColor = Color.FromArgb(180, 190, 210)
-            }
-        End Function
-
-        Private Shared Function Rule(loc As Point, width As Integer) As Panel
-            Return New Panel() With {
-                .Location  = loc,
-                .Size      = New Size(width, 1),
-                .BackColor = Color.FromArgb(38, 42, 60)
+                .ForeColor = ColSmall
             }
         End Function
 
@@ -882,7 +1221,7 @@ Namespace Forms
                 .Text        = text,
                 .Location    = loc,
                 .Width       = width,
-                .BackColor   = Color.FromArgb(24, 28, 44),
+                .BackColor   = ColInputBg,
                 .ForeColor   = Color.White,
                 .BorderStyle = BorderStyle.FixedSingle,
                 .Font        = New Font("Segoe UI", 9)
@@ -899,7 +1238,7 @@ Namespace Forms
                 .Value     = Math.Max(min, Math.Min(max, value)),
                 .Location  = loc,
                 .Width     = width,
-                .BackColor = Color.FromArgb(24, 28, 44),
+                .BackColor = ColInputBg,
                 .ForeColor = Color.White,
                 .Font      = New Font("Segoe UI", 9)
             }
@@ -911,9 +1250,37 @@ Namespace Forms
                 .Checked   = isChecked,
                 .Location  = loc,
                 .AutoSize  = True,
-                .ForeColor = Color.FromArgb(220, 228, 240),
+                .ForeColor = ColText,
                 .FlatStyle = FlatStyle.Flat,
                 .Font      = New Font("Segoe UI", 9)
+            }
+        End Function
+
+        Private Shared Function DarkCombo(loc As Point, width As Integer,
+                                          items() As String, selected As String) As ComboBox
+            Dim cmb = New ComboBox() With {
+                .Location      = loc,
+                .Width         = width,
+                .DropDownStyle = ComboBoxStyle.DropDownList,
+                .BackColor     = ColInputBg,
+                .ForeColor     = Color.White,
+                .FlatStyle     = FlatStyle.Flat,
+                .Font          = New Font("Segoe UI", 9)
+            }
+            If items IsNot Nothing Then
+                cmb.Items.AddRange(items)
+                If Not String.IsNullOrEmpty(selected) Then cmb.SelectedItem = selected
+            End If
+            Return cmb
+        End Function
+
+        Private Shared Function ColorSwatch(loc As Point, color As Color) As PictureBox
+            Return New PictureBox() With {
+                .Location    = loc,
+                .Size        = New Size(42, 22),
+                .BackColor   = color,
+                .BorderStyle = BorderStyle.FixedSingle,
+                .Cursor      = Cursors.Hand
             }
         End Function
 
@@ -929,6 +1296,52 @@ Namespace Forms
                 .Cursor    = Cursors.Hand
             }
             b.FlatAppearance.BorderSize = 0
+
+            ' Hover effect
+            Dim origColor = bgColor
+            AddHandler b.MouseEnter, Sub(s, e)
+                b.BackColor = Color.FromArgb(
+                    Math.Min(255, origColor.R + 20),
+                    Math.Min(255, origColor.G + 20),
+                    Math.Min(255, origColor.B + 20))
+            End Sub
+            AddHandler b.MouseLeave, Sub(s, e) b.BackColor = origColor
+
+            ' Rounded corners
+            Try
+                Dim gp = New GraphicsPath()
+                Dim r = 6
+                gp.AddArc(0, 0, r, r, 180, 90)
+                gp.AddArc(b.Width - r - 1, 0, r, r, 270, 90)
+                gp.AddArc(b.Width - r - 1, b.Height - r - 1, r, r, 0, 90)
+                gp.AddArc(0, b.Height - r - 1, r, r, 90, 90)
+                gp.CloseFigure()
+                b.Region = New Region(gp)
+            Catch
+            End Try
+
+            Return b
+        End Function
+
+        Private Shared Function MakeSmallBtn(text As String, loc As Point) As Button
+            Dim b = New Button() With {
+                .Text      = text,
+                .Location  = loc,
+                .Size      = New Size(88, 26),
+                .BackColor = Color.FromArgb(42, 46, 64),
+                .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat,
+                .Font      = New Font("Segoe UI", 8),
+                .Cursor    = Cursors.Hand
+            }
+            b.FlatAppearance.BorderSize = 0
+
+            Dim origColor = b.BackColor
+            AddHandler b.MouseEnter, Sub(s, e)
+                b.BackColor = Color.FromArgb(62, 66, 84)
+            End Sub
+            AddHandler b.MouseLeave, Sub(s, e) b.BackColor = origColor
+
             Return b
         End Function
 

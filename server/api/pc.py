@@ -91,6 +91,14 @@ def heartbeat(
     ann = command_store.get_announcement()
     coins_ok = command_store.is_coins_allowed(pc_number)
 
+    # Server-pushed wallpaper (persistent, not popped)
+    wp_url, wp_hash = command_store.get_pc_wallpaper(pc_number)
+    # Build absolute URL so client can download directly
+    if wp_url:
+        host = request.headers.get("host", "localhost:8000")
+        scheme = request.url.scheme
+        wp_url = f"{scheme}://{host}{wp_url}"
+
     return PCHeartbeatResponse(
         is_locked=is_locked,
         remaining_minutes=remaining_sec // 60,
@@ -102,6 +110,8 @@ def heartbeat(
         admin_message=msg,
         announcement=ann,
         coin_slot_enabled=coins_ok,
+        wallpaper_url=wp_url,
+        wallpaper_hash=wp_hash,
     )
 
 

@@ -1,9 +1,11 @@
 import csv
+import hashlib
 import io
+import os
 from datetime import datetime, date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException
+from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -822,3 +824,164 @@ def set_pc_coin_slot(
         raise HTTPException(status_code=401, detail="Not authenticated")
     command_store.set_pc_coin_enabled(pc_number, body.enabled)
     return {"status": "ok", "pc_number": pc_number, "enabled": body.enabled}
+
+
+# ── Wallpaper management ─────────────────────────────────────────────────────
+
+_WALLPAPER_DIR = os.path.join("dashboard", "static", "wallpapers")
+_ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+_MAX_WALLPAPER_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+@router.get("/wallpaper", response_class=HTMLResponse)
+def wallpaper_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+
+    wallpapers = _list_wallpaper_files()
+    wp_url, wp_hash = command_store.get_wallpaper()
+    pcs = db.query(PC).order_by(PC.pc_number).all()
+
+    return templates.TemplateResponse("wallpaper.html", {
+        "request": request,
+        "wallpapers": wallpapers,
+        "active_url": wp_url,
+        "active_hash": wp_hash,
+        "pcs": pcs,
+    })
+
+
+@router.post("/api/wallpaper/upload")
+async def upload_wallpaper(
+    file: UploadFile = File(...),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_IMAGE_EXTS:
+        raise HTTPException(status_code=422, detail=f"Invalid file type: {ext}")
+
+    data = await file.read()
+    if len(data) > _MAX_WALLPAPER_SIZE:
+        raise HTTPException(status_code=413, detail="File too large (max 5 MB)")
+
+    file_hash = hashlib.md5(data).hexdigest()
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    filename = f"wallpaper-{timestamp}{ext}"
+    filepath = os.path.join(_WALLPAPER_DIR, filename)
+
+    os.makedirs(_WALLPAPER_DIR, exist_ok=True)
+    with open(filepath, "wb") as f:
+        f.write(data)
+
+    url = f"/static/wallpapers/{filename}"
+    command_store.set_wallpaper(url, file_hash)
+
+    return {"status": "ok", "url": url, "hash": file_hash, "filename": filename}
+
+
+class SetWallpaperBody(BaseModel):
+    filename: str
+    pc_number: Optional[int] = None  # None = global, number = per-PC
+
+
+@router.post("/api/wallpaper/set")
+def set_wallpaper(
+    body: SetWallpaperBody,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    filepath = os.path.join(_WALLPAPER_DIR, body.filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="Wallpaper file not found")
+
+    with open(filepath, "rb") as f:
+        file_hash = hashlib.md5(f.read()).hexdigest()
+    url = f"/static/wallpapers/{body.filename}"
+
+    if body.pc_number is not None:
+        command_store.set_pc_wallpaper(body.pc_number, url, file_hash)
+    else:
+        command_store.set_wallpaper(url, file_hash)
+
+    return {"status": "ok", "url": url, "hash": file_hash}
+
+
+@router.delete("/api/wallpaper")
+def clear_wallpaper(
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_wallpaper(None, None)
+    return {"status": "cleared"}
+
+
+@router.delete("/api/wallpaper/pc/{pc_number}")
+def clear_pc_wallpaper(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.clear_pc_wallpaper(pc_number)
+    return {"status": "cleared", "pc_number": pc_number}
+
+
+@router.get("/api/wallpaper/list")
+def list_wallpapers(
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return _list_wallpaper_files()
+
+
+@router.delete("/api/wallpaper/file/{filename}")
+def delete_wallpaper_file(
+    filename: str,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Sanitize filename to prevent path traversal
+    safe = os.path.basename(filename)
+    filepath = os.path.join(_WALLPAPER_DIR, safe)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # If this file is the active wallpaper, clear it
+    wp_url, _ = command_store.get_wallpaper()
+    if wp_url and wp_url.endswith(f"/{safe}"):
+        command_store.set_wallpaper(None, None)
+
+    os.remove(filepath)
+    return {"status": "deleted", "filename": safe}
+
+
+def _list_wallpaper_files() -> list[dict]:
+    """List all image files in the wallpapers directory."""
+    if not os.path.isdir(_WALLPAPER_DIR):
+        return []
+    files = []
+    for f in sorted(os.listdir(_WALLPAPER_DIR), reverse=True):
+        ext = os.path.splitext(f)[1].lower()
+        if ext in _ALLOWED_IMAGE_EXTS:
+            fpath = os.path.join(_WALLPAPER_DIR, f)
+            stat = os.stat(fpath)
+            files.append({
+                "filename": f,
+                "url": f"/static/wallpapers/{f}",
+                "size_kb": round(stat.st_size / 1024, 1),
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+    return files

@@ -84,7 +84,6 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-
 .sidebar-nav {
   list-style: none;
   padding: 10px 0;
@@ -650,3 +649,13 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
 .cmd-menu button:hover { background: rgba(14,165,233,0.12); }
 .cmd-menu button.cmd-danger:hover { background: rgba(239,68,68,0.12); color: var(--red); }
 .cmd-menu-divider { height: 1px; background: var(--border); margin: 3px 0; }
+.title-text {
+  display: block;           /* block */
+  font-weight: 700;         /* font-bold */
+  letter-spacing: -0.025em; /* tracking-tight */
+
+  /* gradient-text (typical implementation) */
+  background: linear-gradient(90deg, #6366f1, #ec4899);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

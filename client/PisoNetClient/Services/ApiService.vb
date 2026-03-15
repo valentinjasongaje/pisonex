@@ -18,6 +18,9 @@ Namespace Services
         Public Property admin_message As String     ' per-PC message, shown once
         Public Property announcement As String      ' shop-wide broadcast (persistent)
         Public Property coin_slot_enabled As Boolean = True
+        ' Server-pushed wallpaper
+        Public Property wallpaper_url As String
+        Public Property wallpaper_hash As String
     End Class
 
     Public Class ApiService
@@ -107,6 +110,24 @@ Namespace Services
                 Dim url = $"{_baseUrl}/api/pc/{_pcNumber}/screenshot"
                 Dim response = Await _client.PostAsync(url, content)
                 Return response.IsSuccessStatusCode
+            Catch
+                Return False
+            End Try
+        End Function
+
+        ''' <summary>
+        ''' Downloads a wallpaper image from the server and saves it to a local path.
+        ''' Returns True on success, False on any failure (fire-and-forget safe).
+        ''' </summary>
+        Public Async Function DownloadWallpaperAsync(url As String, savePath As String) As Task(Of Boolean)
+            Try
+                Dim response = Await _client.GetAsync(url)
+                If Not response.IsSuccessStatusCode Then Return False
+                Dim bytes = Await response.Content.ReadAsByteArrayAsync()
+                Dim dir = IO.Path.GetDirectoryName(savePath)
+                If Not String.IsNullOrEmpty(dir) Then IO.Directory.CreateDirectory(dir)
+                IO.File.WriteAllBytes(savePath, bytes)
+                Return True
             Catch
                 Return False
             End Try

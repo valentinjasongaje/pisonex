@@ -1,4 +1,4 @@
-# PisoNet — Centralized Internet Café Management System
+# PISONEX — Centralized Internet Café Management System
 
 A Raspberry Pi-based PisoNet system with coin slot, keypad, LCD, and VB.NET PC clients.
 

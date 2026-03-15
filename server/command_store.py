@@ -1,12 +1,13 @@
 """
 In-memory store for admin-to-client commands, messages, announcements,
-and coin slot control flags.
+coin slot control flags, and wallpaper state.
 
 All state resets to safe defaults on server restart:
   - No pending commands or messages
   - No active announcement
   - Coin slot globally enabled (coins accepted)
   - All per-PC coin slot overrides cleared (coins accepted)
+  - No wallpaper set (restored from disk on startup via main.py)
 """
 
 from threading import Lock
@@ -107,3 +108,48 @@ def get_all_pc_coin_states() -> dict[int, bool]:
     """Return a copy of all per-PC coin overrides."""
     with _lock:
         return dict(_pc_coin_enabled)
+
+
+# ── Wallpaper ─────────────────────────────────────────────────────────────────
+
+_wallpaper_url: str | None = None       # relative URL e.g. "/static/wallpapers/bg.jpg"
+_wallpaper_hash: str | None = None      # MD5 hex digest of the file
+_pc_wallpaper: dict[int, dict] = {}     # pc_number → {"url": str, "hash": str}
+
+
+def set_wallpaper(url: str | None, hash: str | None) -> None:
+    """Set (or clear) the global wallpaper pushed to all PCs."""
+    global _wallpaper_url, _wallpaper_hash
+    with _lock:
+        _wallpaper_url = url
+        _wallpaper_hash = hash
+
+
+def get_wallpaper() -> tuple[str | None, str | None]:
+    """Return the global (url, hash) tuple."""
+    with _lock:
+        return _wallpaper_url, _wallpaper_hash
+
+
+def set_pc_wallpaper(pc_number: int, url: str | None, hash: str | None) -> None:
+    """Set a per-PC wallpaper override."""
+    with _lock:
+        if url is None:
+            _pc_wallpaper.pop(pc_number, None)
+        else:
+            _pc_wallpaper[pc_number] = {"url": url, "hash": hash}
+
+
+def clear_pc_wallpaper(pc_number: int) -> None:
+    """Remove per-PC override so it falls back to global."""
+    with _lock:
+        _pc_wallpaper.pop(pc_number, None)
+
+
+def get_pc_wallpaper(pc_number: int) -> tuple[str | None, str | None]:
+    """Return (url, hash) for a PC — per-PC override first, then global fallback."""
+    with _lock:
+        override = _pc_wallpaper.get(pc_number)
+        if override:
+            return override["url"], override["hash"]
+        return _wallpaper_url, _wallpaper_hash

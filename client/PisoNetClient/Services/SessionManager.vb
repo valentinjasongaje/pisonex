@@ -24,6 +24,9 @@ Namespace Services
         ' Announcement dedup — only fire event when text changes
         Private _lastAnnouncement As String = Nothing
 
+        ' Wallpaper dedup — only fire event when hash changes
+        Private _lastWallpaperHash As String = Nothing
+
         ' Guards _remainingSeconds from concurrent access
         Private ReadOnly _stateLock As New Object()
 
@@ -43,6 +46,8 @@ Namespace Services
         Public Event AnnouncementChanged(text As String)
         ''' <summary>Fired when the server queues a remote command for this PC.</summary>
         Public Event CommandReceived(type As String, payload As String)
+        ''' <summary>Fired when the server-pushed wallpaper changes (or is cleared with empty strings).</summary>
+        Public Event WallpaperChanged(url As String, hash As String)
 
         ' ── Heartbeat interval ───────────────────────────────────────
         ' 1-second poll in all states.  On a local LAN with FastAPI +
@@ -192,6 +197,15 @@ Namespace Services
             If Not String.IsNullOrEmpty(response.pending_command) Then
                 RaiseEvent CommandReceived(response.pending_command,
                                            If(response.command_payload, String.Empty))
+            End If
+
+            ' Server-pushed wallpaper — only fire event when hash changes
+            Dim wpHash = If(String.IsNullOrEmpty(response.wallpaper_hash), Nothing, response.wallpaper_hash)
+            If wpHash <> _lastWallpaperHash Then
+                _lastWallpaperHash = wpHash
+                RaiseEvent WallpaperChanged(
+                    If(response.wallpaper_url, String.Empty),
+                    If(wpHash, String.Empty))
             End If
         End Function
 

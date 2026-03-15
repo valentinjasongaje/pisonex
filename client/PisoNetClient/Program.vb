@@ -75,6 +75,7 @@ Module Program
         AddHandler _session.MessageReceived, AddressOf OnMessageReceived
         AddHandler _session.AnnouncementChanged, AddressOf OnAnnouncementChanged
         AddHandler _session.CommandReceived, AddressOf OnCommandReceived
+        AddHandler _session.WallpaperChanged, AddressOf OnWallpaperChanged
 
         ' Admin panel from lock form shortcut and from tray menu
         AddHandler _lockMgr.LockFormAdminRequested, AddressOf OnAdminPanelRequested
@@ -229,6 +230,49 @@ Module Program
                     End Try
                 End If
         End Select
+    End Sub
+
+    ' ── Wallpaper handler ─────────────────────────────────────────────────
+
+    Private Sub OnWallpaperChanged(url As String, hash As String)
+        ' Skip if local admin panel override is active
+        If AppConfig.UseLocalWallpaper AndAlso Not String.IsNullOrEmpty(AppConfig.LockBgImagePath) Then
+            Return
+        End If
+
+        ' Server cleared wallpaper — remove cached file reference
+        If String.IsNullOrEmpty(url) OrElse String.IsNullOrEmpty(hash) Then
+            AppConfig.SaveServerWallpaperHash("")
+            AppConfig.SaveServerWallpaperPath("")
+            _lockMgr.RefreshLockAppearance()
+            Return
+        End If
+
+        ' Same hash as cached — already downloaded
+        If hash = AppConfig.ServerWallpaperHash Then Return
+
+        ' Download in background (never blocks heartbeat or UI)
+        Task.Run(Async Function()
+            Dim cacheDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PisoNet", "wallpapers")
+            Directory.CreateDirectory(cacheDir)
+
+            Dim ext = ".jpg"
+            Try
+                ext = Path.GetExtension(New Uri(url).AbsolutePath)
+                If String.IsNullOrEmpty(ext) Then ext = ".jpg"
+            Catch
+            End Try
+            Dim savePath = Path.Combine(cacheDir, $"server-wallpaper{ext}")
+
+            Dim ok = Await _api.DownloadWallpaperAsync(url, savePath)
+            If ok Then
+                AppConfig.SaveServerWallpaperHash(hash)
+                AppConfig.SaveServerWallpaperPath(savePath)
+                _lockMgr.RefreshLockAppearance()
+            End If
+        End Function)
     End Sub
 
     ' ── Admin panel flow ──────────────────────────────────────────────────

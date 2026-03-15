@@ -62,6 +62,9 @@ async def lifespan(app: FastAPI):
         logger.warning("Hardware controller not started: %s", e)
         hw_controller = None
 
+    # Ensure wallpapers directory exists and restore last active wallpaper
+    _init_wallpapers()
+
     # Background task: expire sessions every 30 seconds
     expire_task = asyncio.create_task(_session_expiry_loop())
 
@@ -98,6 +101,37 @@ def _seed_defaults(db):
         )
 
     db.commit()
+
+
+def _init_wallpapers():
+    """Create wallpapers directory and restore last active wallpaper from disk."""
+    import os
+    import hashlib
+    import command_store
+
+    wp_dir = os.path.join("dashboard", "static", "wallpapers")
+    os.makedirs(wp_dir, exist_ok=True)
+
+    # Find the most recently modified image and set it as global wallpaper
+    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    best_file = None
+    best_mtime = 0
+    for f in os.listdir(wp_dir):
+        ext = os.path.splitext(f)[1].lower()
+        if ext in image_exts:
+            fpath = os.path.join(wp_dir, f)
+            mtime = os.path.getmtime(fpath)
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best_file = (f, fpath)
+
+    if best_file:
+        filename, filepath = best_file
+        with open(filepath, "rb") as fh:
+            file_hash = hashlib.md5(fh.read()).hexdigest()
+        url = f"/static/wallpapers/{filename}"
+        command_store.set_wallpaper(url, file_hash)
+        logger.info("Restored wallpaper: %s", filename)
 
 
 async def _session_expiry_loop():

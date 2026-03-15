@@ -140,7 +140,17 @@ Namespace Forms
         End Sub
 
         Private Sub LoadBackground()
-            Dim path = AppConfig.LockBgImagePath
+            ' Priority: local admin override > server-pushed wallpaper > local fallback
+            Dim path As String = Nothing
+
+            If AppConfig.UseLocalWallpaper AndAlso Not String.IsNullOrEmpty(AppConfig.LockBgImagePath) Then
+                path = AppConfig.LockBgImagePath
+            ElseIf Not String.IsNullOrEmpty(AppConfig.ServerWallpaperPath) Then
+                path = AppConfig.ServerWallpaperPath
+            Else
+                path = AppConfig.LockBgImagePath
+            End If
+
             If Not String.IsNullOrEmpty(path) AndAlso File.Exists(path) Then
                 Try
                     _bgImage = Image.FromFile(path)

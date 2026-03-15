@@ -329,6 +329,28 @@ Namespace Config
             End Get
         End Property
 
+        ' ── Server wallpaper cache ────────────────────────────────────────
+        ''' <summary>MD5 hash of the last downloaded server wallpaper.</summary>
+        Public ReadOnly Property ServerWallpaperHash As String
+            Get
+                Return If(ReadReg("ServerWallpaperHash"), "")
+            End Get
+        End Property
+
+        ''' <summary>Local file path of the cached server wallpaper image.</summary>
+        Public ReadOnly Property ServerWallpaperPath As String
+            Get
+                Return If(ReadReg("ServerWallpaperPath"), "")
+            End Get
+        End Property
+
+        ''' <summary>When True, local admin panel wallpaper overrides server-pushed wallpaper.</summary>
+        Public ReadOnly Property UseLocalWallpaper As Boolean
+            Get
+                Return ReadBool("UseLocalWallpaper", defaultVal:=False)
+            End Get
+        End Property
+
         ' ── API authentication ─────────────────────────────────────────────
         ''' <summary>Shared API key sent in X-API-Key header on every server request.
         ''' Must match CLIENT_API_KEY in server .env. Leave empty if auth is disabled.</summary>
@@ -459,6 +481,15 @@ Namespace Config
         End Sub
         Public Sub SaveLockPcLabelYPct(n As Integer)
             WriteReg("LockPcLabelYPct", n.ToString())
+        End Sub
+        Public Sub SaveServerWallpaperHash(hash As String)
+            WriteReg("ServerWallpaperHash", If(hash, ""))
+        End Sub
+        Public Sub SaveServerWallpaperPath(path As String)
+            WriteReg("ServerWallpaperPath", If(path, ""))
+        End Sub
+        Public Sub SaveUseLocalWallpaper(v As Boolean)
+            WriteReg("UseLocalWallpaper", If(v, "1", "0"))
         End Sub
         Public Sub SaveApiKey(value As String)
             WriteReg("ApiKey", If(value, ""))
