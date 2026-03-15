@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(if not exist \"C:\\\\Users\\\\JasonDev\\\\Documents\\\\Web Development\\\\www\\\\pisonex\\\\docs\" mkdir \"C:\\\\Users\\\\JasonDev\\\\Documents\\\\Web Development\\\\www\\\\pisonex\\\\docs\")",
-      "Bash(xargs cat:*)"
+      "Bash(xargs cat:*)",
+      "Bash(npm --version)"
     ]
   }
 }

@@ -3,6 +3,7 @@ Imports System.Drawing.Drawing2D
 Imports System.Runtime.InteropServices
 Imports System.Windows.Forms
 Imports PisoNetClient.Config
+Imports PisoNetClient.Resources
 
 Namespace Forms
 
@@ -31,9 +32,10 @@ Namespace Forms
         Private Const DOT_SIZE As Integer = 10   ' connection indicator circle diameter
         Private Const DOT_MARGIN As Integer = 6  ' gap from right / top edge
 
-        Private _lblTime As Label
-        Private _lblPC   As Label    ' PC number badge — shown/hidden per config
-        Private _dotPanel As Panel   ' connection indicator dot (transparent, Paint-driven)
+        Private _lblTime  As Label
+        Private _lblPC    As Label        ' PC number badge — shown/hidden per config
+        Private _dotPanel As Panel        ' connection indicator dot (transparent, Paint-driven)
+        Private _pbLogo   As PictureBox   ' small logo in top-left corner
 
         Private _isConnected As Boolean = True
 
@@ -93,13 +95,23 @@ Namespace Forms
             }
             AddHandler _dotPanel.Paint, AddressOf OnDotPaint
 
-            Me.Controls.AddRange({_lblTime, _lblPC, _dotPanel})
+            ' ── Logo (top-left, 20×20) ────────────────────────────────────────
+            _pbLogo = New PictureBox() With {
+                .Image    = LogoHelper.GetLogo(20, 20),
+                .Size     = New Size(20, 20),
+                .SizeMode = PictureBoxSizeMode.Zoom,
+                .BackColor = BgColor,
+                .Location = New Point(PAD_X, PAD_Y)
+            }
+
+            Me.Controls.AddRange({_lblTime, _lblPC, _dotPanel, _pbLogo})
 
             ' Left-click drag on every visible surface
-            Dim drag = New MouseEventHandler(AddressOf OnMouseDown)
-            AddHandler Me.MouseDown,       drag
-            AddHandler _lblTime.MouseDown, drag
-            AddHandler _lblPC.MouseDown,   drag
+            Dim drag = New MouseEventHandler(AddressOf HandleMouseDown)
+            AddHandler Me.MouseDown,        drag
+            AddHandler _lblTime.MouseDown,  drag
+            AddHandler _lblPC.MouseDown,    drag
+            AddHandler _pbLogo.MouseDown,   drag
         End Sub
 
         ' ── Connection dot paint ──────────────────────────────────────────────
@@ -134,20 +146,25 @@ Namespace Forms
             _lblPC.Visible    = showPc
             _lblPC.Text       = $"PC {AppConfig.PCNumber:D2}"
 
+            ' Logo occupies top-left; offset content horizontally when logo is loaded
+            Dim hasLogo  = (_pbLogo.Image IsNot Nothing)
+            Dim contentX = If(hasLogo, PAD_X + _pbLogo.Width + 6, PAD_X)
+            Dim contentW = FORM_W - contentX - PAD_X
+
             If showPc AndAlso pcAbove Then
                 ' ── PC label above time ────────────────────────────────────
                 Me.Size = New Size(FORM_W, FORM_H_TALL)
 
                 _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
 
-                Dim pcW = If(showDot, FORM_W - DOT_SIZE - DOT_MARGIN - 2, FORM_W) - PAD_X * 2
-                _lblPC.Location  = New Point(PAD_X, PAD_Y)
+                Dim pcW = If(showDot, FORM_W - DOT_SIZE - DOT_MARGIN - 2, FORM_W) - contentX - PAD_X
+                _lblPC.Location  = New Point(contentX, PAD_Y)
                 _lblPC.Size      = New Size(pcW, 16)
                 _lblPC.Font      = New Font("Segoe UI", 9)
                 _lblPC.TextAlign = ContentAlignment.MiddleCenter
 
-                _lblTime.Location = New Point(PAD_X, PAD_Y + 18)
-                _lblTime.Size     = New Size(FORM_W - PAD_X * 2, FORM_H_TALL - PAD_Y - 18 - PAD_Y)
+                _lblTime.Location = New Point(contentX, PAD_Y + 18)
+                _lblTime.Size     = New Size(contentW, FORM_H_TALL - PAD_Y - 18 - PAD_Y)
 
             ElseIf showPc Then
                 ' ── PC label side (right of time, vertically centered) ────
@@ -155,11 +172,11 @@ Namespace Forms
 
                 _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
 
-                ' Time gets padded left, PC label sits right of it
-                _lblTime.Location = New Point(PAD_X, PAD_Y)
-                _lblTime.Size     = New Size(170, FORM_H_SLIM - PAD_Y * 2)
+                Dim timeW = Math.Max(100, contentW - 68)
+                _lblTime.Location = New Point(contentX, PAD_Y)
+                _lblTime.Size     = New Size(timeW, FORM_H_SLIM - PAD_Y * 2)
 
-                _lblPC.Location  = New Point(PAD_X + 170 + 4, (FORM_H_SLIM - 24) \ 2)
+                _lblPC.Location  = New Point(contentX + timeW + 4, (FORM_H_SLIM - 24) \ 2)
                 _lblPC.Size      = New Size(64, 24)
                 _lblPC.Font      = New Font("Segoe UI", 9, FontStyle.Bold)
                 _lblPC.TextAlign = ContentAlignment.MiddleLeft
@@ -168,8 +185,8 @@ Namespace Forms
                 ' ── No PC label ───────────────────────────────────────────
                 Me.Size = New Size(FORM_W, FORM_H_SLIM)
                 _dotPanel.Location = New Point(FORM_W - DOT_SIZE - DOT_MARGIN, DOT_MARGIN)
-                _lblTime.Location  = New Point(PAD_X, 6)
-                _lblTime.Size      = New Size(FORM_W - PAD_X * 2, FORM_H_SLIM - 10)
+                _lblTime.Location  = New Point(contentX, 6)
+                _lblTime.Size      = New Size(contentW, FORM_H_SLIM - 10)
             End If
 
             ' Refresh dot and time colours
@@ -224,7 +241,7 @@ Namespace Forms
 
         ' ── Mouse handling ─────────────────────────────────────────────────────
 
-        Private Sub OnMouseDown(sender As Object, e As MouseEventArgs)
+        Private Sub HandleMouseDown(sender As Object, e As MouseEventArgs)
             If e.Button = MouseButtons.Left Then
                 ReleaseCapture()
                 SendMessage(Me.Handle, WM_NCLBUTTONDOWN, New IntPtr(HTCAPTION), IntPtr.Zero)
