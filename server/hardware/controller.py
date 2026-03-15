@@ -97,7 +97,11 @@ class HardwareController:
         """Start a 1-second countdown that updates the LCD."""
         self._cancel_countdown()
         self._countdown_remaining = seconds
-        self._tick_countdown()
+        # Schedule first tick via timer — calling _tick_countdown() directly
+        # here would deadlock because _on_key already holds self._lock.
+        self._countdown_timer = threading.Timer(1.0, self._tick_countdown)
+        self._countdown_timer.daemon = True
+        self._countdown_timer.start()
 
     def _cancel_countdown(self):
         self._countdown_remaining = 0
