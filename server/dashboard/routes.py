@@ -240,26 +240,36 @@ def save_rate(
 @router.get("/transactions", response_class=HTMLResponse)
 def transactions_page(
     request: Request,
-    days: int = 30,
+    days: int = 0,
+    pc_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: Optional[str] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
-    since = datetime.utcnow() - timedelta(days=days)
+
+    query = db.query(CoinTransaction)
+    if days and days > 0:
+        since = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(CoinTransaction.created_at >= since)
+    if pc_id:
+        query = query.filter(CoinTransaction.pc_id == pc_id)
+
     transactions = (
-        db.query(CoinTransaction)
-        .filter(CoinTransaction.created_at >= since)
+        query
         .order_by(desc(CoinTransaction.created_at))
-        .limit(500)
+        .limit(1000)
         .all()
     )
     total_pesos = sum(t.amount_pesos for t in transactions)
+    pcs = db.query(PC).order_by(PC.pc_number).all()
     return templates.TemplateResponse("transactions.html", {
         "request": request,
         "transactions": transactions,
         "total_pesos": total_pesos,
         "days": days,
+        "pc_id": pc_id,
+        "pcs": pcs,
     })
 
 

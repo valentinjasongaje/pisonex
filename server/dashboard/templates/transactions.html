@@ -4,33 +4,71 @@
 <div class="page-header">
   <h1>Transactions</h1>
   <div class="header-stats">
-    <div class="stat-pill earnings">₱ {{ total_pesos }} total ({{ days }} days)</div>
+    <div class="stat-pill earnings">₱ {{ total_pesos }} total</div>
+    <div class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">{{ transactions|length }} record{{ 's' if transactions|length != 1 else '' }}</div>
   </div>
 </div>
 
+<div class="card" style="margin-bottom:16px">
+  <form method="get" action="/dashboard/transactions" class="filter-bar" style="align-items:flex-end;gap:12px">
+    <div class="form-group">
+      <label>Period</label>
+      <select name="days" onchange="this.form.submit()">
+        <option value="0"  {% if days == 0  %}selected{% endif %}>All Time</option>
+        <option value="1"  {% if days == 1  %}selected{% endif %}>Today</option>
+        <option value="7"  {% if days == 7  %}selected{% endif %}>Last 7 days</option>
+        <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+        <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>PC</label>
+      <select name="pc_id" onchange="this.form.submit()">
+        <option value="">All PCs</option>
+        {% for pc in pcs %}
+        <option value="{{ pc.pc_number }}" {% if pc_id == pc.pc_number %}selected{% endif %}>
+          PC {{ "%02d" | format(pc.pc_number) }}{% if pc.name and pc.name != "PC " ~ "%02d" | format(pc.pc_number) %} — {{ pc.name }}{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if days or pc_id %}
+    <a href="/dashboard/transactions" class="btn btn-default btn-sm" style="align-self:flex-end">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
 <div class="card">
+  {% if transactions %}
   <table class="data-table">
     <thead>
       <tr>
         <th>#</th>
         <th>PC</th>
         <th>Amount</th>
-        <th>Minutes Added</th>
+        <th>Time Added</th>
         <th>Date / Time</th>
       </tr>
     </thead>
     <tbody>
       {% for tx in transactions %}
       <tr>
-        <td>{{ tx.id }}</td>
+        <td style="color:var(--gray)">{{ tx.id }}</td>
         <td>PC {{ "%02d" | format(tx.pc_id) if tx.pc_id else "—" }}</td>
         <td class="money">₱{{ tx.amount_pesos }}</td>
-        <td>{{ tx.minutes_added }} min</td>
-        <td>{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td>
+          {% set _tsec = tx.minutes_added * 60 %}
+          {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}
+          {% if _h > 0 %}{{ _h }}h {{ _m }}m{% else %}{{ tx.minutes_added }}m{% endif %}
+        </td>
+        <td style="color:var(--text-dim)">{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p style="text-align:center;padding:32px;color:var(--text-dim)">No transactions found for the selected filters.</p>
+  {% endif %}
 </div>
 
 {% endblock %}

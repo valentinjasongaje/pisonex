@@ -50,8 +50,10 @@
       {% elif pc.is_locked %}
         <span style="color:var(--gray)">Locked</span>
       {% else %}
-        <span class="monitor-time" data-remaining-sec="{{ pc.remaining_minutes * 60 + pc.remaining_seconds }}">
-          {{ "%02d"|format(pc.remaining_minutes) }}:{{ "%02d"|format(pc.remaining_seconds) }}
+        {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
+        {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
+        <span class="monitor-time" data-remaining-sec="{{ _tsec }}">
+          {{ _h }}h {{ _m }}m {{ "%02d"|format(_s) }}s
         </span>
         <span style="color:var(--text-dim);font-size:11px">remaining</span>
       {% endif %}
@@ -77,7 +79,12 @@
 const PC_NUMBERS = [{% for pc in pcs %}{{ pc.pc_number }}{% if not loop.last %},{% endif %}{% endfor %}];
 let _fullscreenPc = null;
 
-function pad(n) { return String(n).padStart(2, '0'); }
+function fmtHMS(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${h}h ${m}m ${String(s).padStart(2,'0')}s`;
+}
 
 // ── Screenshot refresh ──────────────────────────────────────────────────────
 
@@ -137,7 +144,7 @@ function updateCard(pc, t) {
   } else {
     const totalSec = pc.remaining_total_sec;
     footer.innerHTML =
-      `<span class="monitor-time" data-remaining-sec="${totalSec}">${pad(pc.remaining_minutes)}:${pad(pc.remaining_seconds)}</span>` +
+      `<span class="monitor-time" data-remaining-sec="${totalSec}">${fmtHMS(totalSec)}</span>` +
       `<span style="color:var(--text-dim);font-size:11px">remaining</span>`;
   }
 

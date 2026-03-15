@@ -1,5 +1,15 @@
 /* PisoNet Admin Dashboard — client-side logic */
 
+// ── Mobile sidebar toggle ─────────────────────────────────────────────────────
+(function initSidebar() {
+  const btn     = document.getElementById('hamburger-btn');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!btn) return;
+  function closeSidebar() { document.body.classList.remove('sidebar-open'); }
+  btn.addEventListener('click', () => document.body.classList.toggle('sidebar-open'));
+  overlay.addEventListener('click', closeSidebar);
+})();
+
 // ── Active nav link ───────────────────────────────────────────────────────────
 (function markActiveNav() {
   const path = window.location.pathname;
@@ -133,17 +143,22 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Real-time countdown ───────────────────────────────────────────────────────
-(function startTimerCountdown() {
-  function pad(n) { return String(n).padStart(2, '0'); }
+function formatTimeHMS(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${h}h ${m}m ${String(s).padStart(2, '0')}s`;
+}
 
+(function startTimerCountdown() {
   setInterval(() => {
-    if (document.hidden) return; // don't tick while tab is in background
+    if (document.hidden) return;
     document.querySelectorAll('[data-remaining-sec]').forEach(el => {
       let sec = parseInt(el.dataset.remainingSec, 10);
       if (isNaN(sec) || sec <= 0) return;
       sec -= 1;
       el.dataset.remainingSec = sec;
-      el.textContent = `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
+      el.textContent = formatTimeHMS(sec);
     });
   }, 1000);
 })();
