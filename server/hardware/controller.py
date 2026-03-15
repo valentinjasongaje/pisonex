@@ -46,6 +46,8 @@ class HardwareController:
         self._countdown_timer: threading.Timer | None = None
         self._countdown_remaining: int = 0
         self._coins_inserted: bool = False  # tracks if any coin was inserted this session
+        self._total_pesos: int = 0          # running total pesos this session
+        self._total_minutes: int = 0        # running total minutes this session
 
         self._lcd = LCD()
         self._coin = CoinSlot(
@@ -72,6 +74,8 @@ class HardwareController:
         self._digits = ""
         self._selected_pc = None
         self._coins_inserted = False
+        self._total_pesos = 0
+        self._total_minutes = 0
         self._transition(State.IDLE)
         self._lcd.show(Screen.idle())
 
@@ -116,10 +120,18 @@ class HardwareController:
 
         with self._lock:
             if self._state == State.AWAITING_COINS and self._selected_pc is not None:
-                self._lcd.show(Screen.pc_selected(
-                    self._selected_pc,
-                    self._countdown_remaining
-                ))
+                if self._coins_inserted:
+                    self._lcd.show(Screen.inserting_coins(
+                        self._selected_pc,
+                        self._total_pesos,
+                        self._total_minutes,
+                        self._countdown_remaining,
+                    ))
+                else:
+                    self._lcd.show(Screen.pc_selected(
+                        self._selected_pc,
+                        self._countdown_remaining,
+                    ))
 
         self._countdown_remaining -= 1
 
@@ -290,9 +302,14 @@ class HardwareController:
             time.sleep(settings.DISPLAY_CONFIRM_DELAY)
 
             with self._lock:
+                self._total_pesos += pesos
+                self._total_minutes = total_min
                 self._transition(State.AWAITING_COINS)
-                self._lcd.show(Screen.pc_selected(
-                    self._selected_pc, settings.PC_IDLE_TIMEOUT
+                self._lcd.show(Screen.inserting_coins(
+                    self._selected_pc,
+                    self._total_pesos,
+                    self._total_minutes,
+                    settings.PC_IDLE_TIMEOUT,
                 ))
                 self._reset_idle_timer()
 
