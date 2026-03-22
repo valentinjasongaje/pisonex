@@ -52,6 +52,14 @@ Namespace Forms
         Private _membershipEnabled As Boolean = False
         Private _memberLoggedIn    As Boolean = False
 
+        ' Receiving-coins indicator
+        Private _pnlReceivingCoins As Panel
+        Private _lblCoinIcon       As Label
+        Private _lblCoinText       As Label
+        Private _coinPulseTimer    As System.Windows.Forms.Timer
+        Private _coinPulseAlpha    As Integer = 255
+        Private _coinPulseUp       As Boolean = False
+
         ' Membership colors
         Private Shared ReadOnly MemberAccent As Color = Color.FromArgb(79, 142, 247)
         Private Shared ReadOnly MemberBg     As Color = Color.FromArgb(220, 8, 12, 24)
@@ -361,7 +369,39 @@ Namespace Forms
 
             _pnlMember.Controls.AddRange({_lblMemberTitle, _btnLogin, _btnRegister, _lblMemberInfo, _lblMemberTime, _btnLogout})
 
-            Me.Controls.AddRange({_lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlStatus, _lblLicenseWarn})
+            ' ── Receiving-coins indicator (shown when hardware controller is accepting coins for this PC) ──
+            _pnlReceivingCoins = New Panel() With {
+                .Size      = New Size(280, 44),
+                .BackColor = Color.Transparent,
+                .Visible   = False
+            }
+            AddHandler _pnlReceivingCoins.Paint, AddressOf OnReceivingCoinsPaint
+
+            _lblCoinIcon = New Label() With {
+                .Text      = "●",
+                .Font      = New Font("Segoe UI", 14, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(250, 204, 21),
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Location  = New Point(16, 10)
+            }
+
+            _lblCoinText = New Label() With {
+                .Text      = "Receiving Coins…",
+                .Font      = New Font("Segoe UI", 12, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(250, 204, 21),
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Location  = New Point(42, 11)
+            }
+
+            _pnlReceivingCoins.Controls.AddRange({_lblCoinIcon, _lblCoinText})
+
+            ' Pulse animation timer — coin icon gently fades in/out
+            _coinPulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
+            AddHandler _coinPulseTimer.Tick, AddressOf OnCoinPulseTick
+
+            Me.Controls.AddRange({_lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlStatus, _lblLicenseWarn})
         End Sub
 
         Private Sub OnStatusPillPaint(sender As Object, e As PaintEventArgs)
@@ -655,7 +695,14 @@ Namespace Forms
                 (Me.ClientSize.Width - _pnlStatus.Width) \ 2,
                 Me.ClientSize.Height - _pnlStatus.Height - 48)
 
-            ' Membership panel — centered, below sub-message
+            ' Receiving-coins indicator — centered, below sub-message
+            If _pnlReceivingCoins.Visible Then
+                _pnlReceivingCoins.Location = New Point(
+                    (Me.ClientSize.Width - _pnlReceivingCoins.Width) \ 2,
+                    _lblSub.Bottom + 20)
+            End If
+
+            ' Membership panel — centered, below sub-message (or below receiving-coins)
             If _pnlMember.Visible Then
                 _pnlMember.Location = New Point(
                     (Me.ClientSize.Width - _pnlMember.Width) \ 2,
@@ -1005,6 +1052,68 @@ Namespace Forms
             End If
 
             _pnlMember.Invalidate()
+            CenterLabels()
+        End Sub
+
+        ' ── Receiving-coins indicator ──────────────────────────────────────────
+
+        Private Sub OnReceivingCoinsPaint(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g = e.Graphics
+            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+            Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
+            Dim r = pnl.Height \ 2
+            Using path = New Drawing2D.GraphicsPath()
+                Dim d = r * 2
+                path.AddArc(rect.X, rect.Y, d, d, 180, 90)
+                path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+                path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+                path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+                ' Semi-transparent dark bg with gold tint
+                Using br = New SolidBrush(Color.FromArgb(200, 20, 18, 8))
+                    g.FillPath(br, path)
+                End Using
+                Using pen = New Pen(Color.FromArgb(100, 250, 204, 21), 1.5F)
+                    g.DrawPath(pen, path)
+                End Using
+            End Using
+        End Sub
+
+        Private Sub OnCoinPulseTick(sender As Object, e As EventArgs)
+            If _coinPulseUp Then
+                _coinPulseAlpha += 8
+                If _coinPulseAlpha >= 255 Then
+                    _coinPulseAlpha = 255 : _coinPulseUp = False
+                End If
+            Else
+                _coinPulseAlpha -= 8
+                If _coinPulseAlpha <= 80 Then
+                    _coinPulseAlpha = 80 : _coinPulseUp = True
+                End If
+            End If
+            _lblCoinIcon.ForeColor = Color.FromArgb(_coinPulseAlpha, 250, 204, 21)
+        End Sub
+
+        Public Sub ShowReceivingCoins(isReceiving As Boolean)
+            If Me.InvokeRequired Then Me.Invoke(Sub() ShowReceivingCoins(isReceiving)) : Return
+
+            _pnlReceivingCoins.Visible = isReceiving
+            If isReceiving Then
+                _coinPulseAlpha = 255
+                _coinPulseUp = False
+                _coinPulseTimer.Start()
+                ' Update sub-message to indicate coins are being loaded
+                _lblSub.Text = "Coins are being loaded to this PC…"
+                _lblSub.ForeColor = Color.FromArgb(250, 204, 21)
+            Else
+                _coinPulseTimer.Stop()
+                ' Restore default sub-message (unless overridden by membership UI)
+                If Not _memberLoggedIn Then
+                    _lblSub.Text = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
+                    _lblSub.ForeColor = Color.FromArgb(140, 160, 200)
+                End If
+            End If
             CenterLabels()
         End Sub
 

@@ -155,6 +155,25 @@ def get_pc_wallpaper(pc_number: int) -> tuple[str | None, str | None]:
         return _wallpaper_url, _wallpaper_hash
 
 
+# ── Receiving coins flag (set by hardware controller when PC is selected) ─────
+_receiving_coins: dict[int, bool] = {}      # pc_number → True when coins are being inserted
+
+
+def set_receiving_coins(pc_number: int, active: bool) -> None:
+    """Mark whether the hardware controller is currently accepting coins for this PC."""
+    with _lock:
+        if active:
+            _receiving_coins[pc_number] = True
+        else:
+            _receiving_coins.pop(pc_number, None)
+
+
+def is_receiving_coins(pc_number: int) -> bool:
+    """Return True if the hardware controller is currently accepting coins for this PC."""
+    with _lock:
+        return _receiving_coins.get(pc_number, False)
+
+
 # ── Member-PC binding (volatile, rebuilt from DB on startup) ──────────────────
 
 _member_pc_binding: dict[int, int] = {}     # pc_number → user_id

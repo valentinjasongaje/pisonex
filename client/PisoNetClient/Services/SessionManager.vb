@@ -27,6 +27,9 @@ Namespace Services
         ' Wallpaper dedup — only fire event when hash changes
         Private _lastWallpaperHash As String = Nothing
 
+        ' Receiving-coins dedup — only fire event when state changes
+        Private _lastReceivingCoins As Boolean = False
+
         ' Guards _remainingSeconds from concurrent access
         Private ReadOnly _stateLock As New Object()
 
@@ -48,6 +51,8 @@ Namespace Services
         Public Event CommandReceived(type As String, payload As String)
         ''' <summary>Fired when the server-pushed wallpaper changes (or is cleared with empty strings).</summary>
         Public Event WallpaperChanged(url As String, hash As String)
+        ''' <summary>Fired when the server signals that the hardware controller is accepting coins for this PC.</summary>
+        Public Event ReceivingCoinsChanged(isReceiving As Boolean)
         ''' <summary>Fired when membership state changes in heartbeat (enabled, username, balance, etc.).</summary>
         Public Event MembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                         balanceSeconds As Integer, canLogout As Boolean,
@@ -209,6 +214,12 @@ Namespace Services
                 RaiseEvent WallpaperChanged(
                     If(response.wallpaper_url, String.Empty),
                     If(wpHash, String.Empty))
+            End If
+
+            ' Receiving-coins state — only fire event when state changes
+            If response.receiving_coins <> _lastReceivingCoins Then
+                _lastReceivingCoins = response.receiving_coins
+                RaiseEvent ReceivingCoinsChanged(response.receiving_coins)
             End If
 
             ' Membership state — always fire so the UI can update

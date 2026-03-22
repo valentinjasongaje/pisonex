@@ -155,6 +155,9 @@ def heartbeat(
     else:
         command_store.clear_idle_since(pc_number)
 
+    # Is the hardware controller currently accepting coins for this PC?
+    receiving_coins = command_store.is_receiving_coins(pc_number)
+
     return PCHeartbeatResponse(
         is_locked=is_locked,
         remaining_seconds=remaining_sec,
@@ -175,6 +178,7 @@ def heartbeat(
         member_can_logout=member_can_logout,
         zero_time_logout_seconds=zero_time_logout_seconds,
         idle_shutdown_seconds=idle_shutdown_seconds,
+        receiving_coins=receiving_coins,
     )
 
 

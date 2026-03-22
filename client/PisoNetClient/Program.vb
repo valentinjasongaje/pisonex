@@ -85,6 +85,7 @@ Module Program
         AddHandler _session.AnnouncementChanged, AddressOf OnAnnouncementChanged
         AddHandler _session.CommandReceived, AddressOf OnCommandReceived
         AddHandler _session.WallpaperChanged, AddressOf OnWallpaperChanged
+        AddHandler _session.ReceivingCoinsChanged, AddressOf OnReceivingCoinsChanged
         AddHandler _session.MembershipUpdated, AddressOf OnMembershipUpdated
 
         ' Membership events from lock form and overlay
@@ -211,6 +212,10 @@ Module Program
             ToastType.Success)
     End Sub
 
+    Private Sub OnReceivingCoinsChanged(isReceiving As Boolean)
+        _lockMgr.ShowReceivingCoins(isReceiving)
+    End Sub
+
     ' ── Remote control handlers ────────────────────────────────────────────
 
     Private Sub OnMessageReceived(text As String)
@@ -223,7 +228,7 @@ Module Program
     End Sub
 
     ' Tracks the current announcement form so we don't stack duplicates
-    Private _announcementOverlay As MessageOverlay
+    Private _announcementOverlay As AnnouncementOverlay
 
     Private Sub OnAnnouncementChanged(text As String)
         If _overlay.InvokeRequired Then
@@ -236,7 +241,7 @@ Module Program
         End If
         _announcementOverlay = Nothing
         If Not String.IsNullOrEmpty(text) Then
-            _announcementOverlay = New MessageOverlay("Shop Announcement", text)
+            _announcementOverlay = New AnnouncementOverlay(text)
             _announcementOverlay.Show()
         End If
     End Sub

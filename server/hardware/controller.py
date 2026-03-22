@@ -71,6 +71,9 @@ class HardwareController:
         self._cancel_idle_timer()
         self._cancel_countdown()
         self._coin.disable()
+        # Clear receiving-coins flag for the previously selected PC
+        if self._selected_pc is not None:
+            command_store.set_receiving_coins(self._selected_pc, False)
         self._digits = ""
         self._selected_pc = None
         self._coins_inserted = False
@@ -234,6 +237,24 @@ class HardwareController:
             threading.Timer(2, self._show_idle).start()
             return
 
+        # Real-time reachability check: verify that the PC's last heartbeat
+        # is within the timeout window. The is_online flag can be stale if the
+        # heartbeat updater hasn't run yet, so we double-check last_seen.
+        if pc.last_seen:
+            from datetime import datetime, timedelta
+            cutoff = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+            if pc.last_seen < cutoff:
+                self._lcd.show(Screen.offline(pc_number))
+                logger.info("PC %02d last_seen %s is stale (cutoff %s) — unreachable",
+                            pc_number, pc.last_seen, cutoff)
+                threading.Timer(2, self._show_idle).start()
+                return
+        else:
+            # Never seen — treat as unreachable
+            self._lcd.show(Screen.offline(pc_number))
+            threading.Timer(2, self._show_idle).start()
+            return
+
         self._selected_pc = pc_number
         self._coins_inserted = False
         self._transition(State.AWAITING_COINS)
@@ -243,6 +264,9 @@ class HardwareController:
             logger.info("PC %02d selected but coin slot is disabled", pc_number)
             threading.Timer(2, self._show_idle).start()
             return
+
+        # Signal that this PC is now receiving coins (shown on client lock screen)
+        command_store.set_receiving_coins(pc_number, True)
 
         self._coin.enable()
         self._lcd.show(Screen.pc_selected(pc_number, settings.PC_IDLE_TIMEOUT))
@@ -297,6 +321,10 @@ class HardwareController:
                 pc_number=self._selected_pc,
                 pesos=pesos,
             )
+            # Reset idle/zero-time auto-shutdown timers — the PC is receiving time
+            command_store.clear_idle_since(self._selected_pc)
+            command_store.clear_zero_time_since(self._selected_pc)
+
             total_sec = session.granted_seconds
             self._lcd.show(Screen.coin_inserted(pesos, seconds_added, total_sec))
             time.sleep(settings.DISPLAY_CONFIRM_DELAY)

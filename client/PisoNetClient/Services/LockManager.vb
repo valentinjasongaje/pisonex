@@ -68,6 +68,10 @@ Namespace Services
                                           canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds)
         End Sub
 
+        Public Sub ShowReceivingCoins(isReceiving As Boolean)
+            _lockForm.ShowReceivingCoins(isReceiving)
+        End Sub
+
         Public Sub ShowMemberError(message As String)
             _lockForm.ShowMemberError(message)
         End Sub
