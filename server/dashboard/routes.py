@@ -307,12 +307,12 @@ def transactions_page(
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
 
-    query = db.query(CoinTransaction)
+    query = db.query(CoinTransaction).join(PC, CoinTransaction.pc_id == PC.id, isouter=True)
     if days and days > 0:
         since = datetime.utcnow() - timedelta(days=days)
         query = query.filter(CoinTransaction.created_at >= since)
     if pc_id:
-        query = query.filter(CoinTransaction.pc_id == pc_id)
+        query = query.filter(PC.pc_number == pc_id)
 
     transactions = (
         query

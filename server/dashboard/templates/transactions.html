@@ -64,12 +64,11 @@
       {% for tx in transactions %}
       <tr>
         <td style="color:var(--gray)">{{ tx.id }}</td>
-        <td>PC {{ "%02d" | format(tx.pc_id) if tx.pc_id else "—" }}</td>
-        <td class="money">₱{{ tx.amount_pesos }}</td>
+        <td>{% if tx.pc %}PC {{ "%02d" | format(tx.pc.pc_number) }}{% else %}&mdash;{% endif %}</td>
+        <td class="money">₱{{ tx.amount_php }}</td>
         <td>
-          {% set _tsec = tx.minutes_added * 60 %}
-          {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}
-          {% if _h > 0 %}{{ _h }}h {{ _m }}m{% else %}{{ tx.minutes_added }}m{% endif %}
+          {% set _h = tx.seconds_added // 3600 %}{% set _m = (tx.seconds_added % 3600) // 60 %}{% set _s = tx.seconds_added % 60 %}
+          {% if _h > 0 %}{{ _h }}h {{ _m }}m{% elif _m > 0 %}{{ _m }}m {{ _s }}s{% else %}{{ _s }}s{% endif %}
         </td>
         <td style="color:var(--text-dim)">{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
       </tr>
