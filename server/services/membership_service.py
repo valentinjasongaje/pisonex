@@ -404,6 +404,14 @@ class MembershipService:
             if now - since < timeout:
                 continue
 
+            # Guard: if the member now has an active session (coins inserted after zero-time
+            # started), they are no longer in zero-time state — cancel the auto-logout.
+            svc_check = SessionService(self._db)
+            active = svc_check.get_active_session(pc_number)
+            if active and svc_check.remaining_seconds(active) > 0:
+                command_store.clear_zero_time_since(pc_number)
+                continue
+
             # Zero-time expired — logout member
             user = self._db.query(User).filter(User.id == user_id).first()
             if not user:

@@ -324,9 +324,11 @@ Module Program
 
     Private Sub OnMembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                      balanceSeconds As Integer, canLogout As Boolean,
-                                     zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer)
+                                     zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
+                                     minimumLogoutMinutes As Integer)
         _lockMgr.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
-                                     canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds)
+                                     canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
+                                     minimumLogoutMinutes)
         _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout)
     End Sub
 

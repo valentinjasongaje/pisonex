@@ -16,7 +16,7 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig
 from schemas import AdminAddTimeRequest
 from services.session_service import SessionService
 from config import settings
@@ -120,10 +120,29 @@ def logout():
 
 # ── Shared data helper ────────────────────────────────────────────────────────
 
+def _get_membership_info(db: Session) -> tuple[bool, dict[int, str]]:
+    """Returns (membership_enabled, {pc_number: username}) for all logged-in members."""
+    cfg = db.query(MembershipConfig).first()
+    enabled = cfg.membership_enabled if cfg else False
+    if not enabled:
+        return False, {}
+
+    bindings = command_store.get_all_member_bindings()  # {pc_number: user_id}
+    if not bindings:
+        return True, {}
+
+    user_ids = list(bindings.values())
+    users = db.query(User).filter(User.id.in_(user_ids)).all()
+    user_map = {u.id: u.username for u in users}
+    pc_members = {pc_num: user_map.get(uid, "") for pc_num, uid in bindings.items()}
+    return True, pc_members
+
+
 def _pc_overview_data(db: Session):
     svc = SessionService(db)
     pcs = svc.get_all_pcs()
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+    membership_enabled, pc_members = _get_membership_info(db)
 
     pc_data = []
     online_count = 0
@@ -148,6 +167,8 @@ def _pc_overview_data(db: Session):
             "last_seen": pc.last_seen,
             "remaining_minutes": remaining_sec // 60,
             "remaining_seconds": remaining_sec % 60,
+            "member_username": pc_members.get(pc.pc_number),
+            "membership_enabled": membership_enabled,
         })
 
     db.commit()
@@ -438,6 +459,7 @@ def monitor_page(
     pcs = svc.get_all_pcs()
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
 
+    membership_enabled, pc_members = _get_membership_info(db)
     import screenshot_store
     pc_data = []
     for pc in pcs:
@@ -458,12 +480,14 @@ def monitor_page(
                 int((datetime.utcnow() - screenshot_time).total_seconds())
                 if screenshot_time else None
             ),
+            "member_username": pc_members.get(pc.pc_number),
         })
     db.commit()
 
     return templates.TemplateResponse("monitor.html", {
         "request": request,
         "pcs": pc_data,
+        "membership_enabled": membership_enabled,
     })
 
 
@@ -478,6 +502,7 @@ def monitor_status(
 
     import screenshot_store
     svc = SessionService(db)
+    membership_enabled, pc_members = _get_membership_info(db)
     pcs = svc.get_all_pcs()
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
 
@@ -496,6 +521,8 @@ def monitor_status(
             "remaining_seconds": remaining_sec % 60,
             "remaining_total_sec": remaining_sec,
             "has_screenshot": screenshot_store.get(pc.pc_number) is not None,
+            "member_username": pc_members.get(pc.pc_number),
+            "membership_enabled": membership_enabled,
         })
     db.commit()
     return result
@@ -583,6 +610,7 @@ def pcs_page(
     svc = SessionService(db)
     pcs = svc.get_all_pcs()
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+    membership_enabled, pc_members = _get_membership_info(db)
 
     pc_data = []
     for pc in pcs:
@@ -600,6 +628,7 @@ def pcs_page(
             "last_seen": pc.last_seen,
             "remaining_minutes": remaining_sec // 60,
             "remaining_seconds": remaining_sec % 60,
+            "member_username": pc_members.get(pc.pc_number),
         })
     db.commit()
 
@@ -607,6 +636,7 @@ def pcs_page(
         "request": request,
         "pcs": pc_data,
         "total": len(pc_data),
+        "membership_enabled": membership_enabled,
     })
 
 

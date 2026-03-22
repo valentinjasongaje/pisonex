@@ -25,6 +25,7 @@
         <th class="col-hide-sm">IP Address</th>
         <th class="col-hide-sm">MAC Address</th>
         <th>Remaining</th>
+        {% if membership_enabled %}<th class="col-hide-sm">Member</th>{% endif %}
         <th class="col-hide-sm">Last Seen</th>
         <th>Coins</th>
         <th>Actions</th>
@@ -56,6 +57,15 @@
           <span style="color: var(--gray);">—</span>
           {% endif %}
         </td>
+        {% if membership_enabled %}
+        <td class="col-hide-sm">
+          {% if pc.member_username %}
+          <span style="color: var(--green, #22c55e); font-size: 13px;">👤 {{ pc.member_username }}</span>
+          {% else %}
+          <span style="color: var(--text-dim);">—</span>
+          {% endif %}
+        </td>
+        {% endif %}
         <td class="col-hide-sm" style="color: var(--text-dim); font-size: 12px;">
           {{ pc.last_seen.strftime('%b %d %H:%M') if pc.last_seen else "Never" }}
         </td>

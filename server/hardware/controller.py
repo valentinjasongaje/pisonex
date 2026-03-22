@@ -232,28 +232,36 @@ class HardwareController:
             threading.Timer(2, self._show_idle).start()
             return
 
-        if not pc.is_online:
-            self._lcd.show(Screen.offline(pc_number))
-            threading.Timer(2, self._show_idle).start()
-            return
-
-        # Real-time reachability check: verify that the PC's last heartbeat
-        # is within the timeout window. The is_online flag can be stale if the
-        # heartbeat updater hasn't run yet, so we double-check last_seen.
-        if pc.last_seen:
-            from datetime import datetime, timedelta
-            cutoff = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
-            if pc.last_seen < cutoff:
+        # Reachability check — prefer a live ping when we have the PC's IP address
+        # because the is_online flag can be stale for up to PC_HEARTBEAT_TIMEOUT
+        # seconds after a PC actually goes offline.  Fall back to the DB flag +
+        # last_seen timestamp only when no IP has been recorded yet.
+        if pc.ip_address:
+            if not self._check_pc_reachable_live(pc.ip_address):
                 self._lcd.show(Screen.offline(pc_number))
-                logger.info("PC %02d last_seen %s is stale (cutoff %s) — unreachable",
-                            pc_number, pc.last_seen, cutoff)
+                logger.info("PC %02d live ping to %s failed — unreachable",
+                            pc_number, pc.ip_address)
                 threading.Timer(2, self._show_idle).start()
                 return
         else:
-            # Never seen — treat as unreachable
-            self._lcd.show(Screen.offline(pc_number))
-            threading.Timer(2, self._show_idle).start()
-            return
+            # No IP recorded — fall back to DB flag + last_seen timestamp
+            if not pc.is_online:
+                self._lcd.show(Screen.offline(pc_number))
+                threading.Timer(2, self._show_idle).start()
+                return
+            if pc.last_seen:
+                from datetime import datetime, timedelta
+                cutoff = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+                if pc.last_seen < cutoff:
+                    self._lcd.show(Screen.offline(pc_number))
+                    logger.info("PC %02d last_seen is stale — unreachable", pc_number)
+                    threading.Timer(2, self._show_idle).start()
+                    return
+            else:
+                # Never seen — treat as unreachable
+                self._lcd.show(Screen.offline(pc_number))
+                threading.Timer(2, self._show_idle).start()
+                return
 
         self._selected_pc = pc_number
         self._coins_inserted = False
@@ -272,6 +280,32 @@ class HardwareController:
         self._lcd.show(Screen.pc_selected(pc_number, settings.PC_IDLE_TIMEOUT))
         self._reset_idle_timer()
         logger.info("PC %02d selected — awaiting coins", pc_number)
+
+    # ── Live reachability probe ───────────────────────────────────
+
+    def _check_pc_reachable_live(self, ip_address: str) -> bool:
+        """
+        Send one ICMP ping to the PC's IP address.
+        Returns True if the PC responds within ~1 s; False on timeout or error.
+        Falls back to True (allow) if the ping binary is not found so that
+        dev environments without a ping command don't block coin acceptance.
+        """
+        import subprocess
+        import platform
+        try:
+            os_name = platform.system().lower()
+            if os_name == "windows":
+                cmd = ["ping", "-n", "1", "-w", "1000", ip_address]
+            else:
+                cmd = ["ping", "-c", "1", "-W", "1", ip_address]
+            result = subprocess.run(cmd, capture_output=True, timeout=4)
+            return result.returncode == 0
+        except FileNotFoundError:
+            logger.warning("ping binary not found — skipping live check for %s", ip_address)
+            return True   # Can't verify — allow optimistically
+        except Exception as exc:
+            logger.warning("Live ping to %s raised %s — treating as unreachable", ip_address, exc)
+            return False
 
     # ── Coin insertion handling ───────────────────────────────────
 

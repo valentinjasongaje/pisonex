@@ -20,6 +20,9 @@
     <div class="pc-offline-msg">{{ pc.last_seen.strftime('%H:%M') if pc.last_seen else "Never" }}</div>
     {% endif %}
     <div class="pc-ip">{{ pc.ip_address or "—" }}</div>
+    {% if pc.membership_enabled and pc.member_username %}
+    <div class="pc-member-badge">👤 {{ pc.member_username }}</div>
+    {% endif %}
   </div>
 
   {% if pc.is_online %}

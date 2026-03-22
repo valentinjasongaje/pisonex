@@ -34,6 +34,7 @@ class PCHeartbeatResponse(BaseModel):
     zero_time_logout_seconds: int = 0
     idle_shutdown_seconds: int = 0
     receiving_coins: bool = False
+    minimum_logout_minutes: int = 0
 
 class PCStatusResponse(BaseModel):
     pc_number: int

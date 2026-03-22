@@ -73,6 +73,14 @@
           <span style="color:var(--text-dim);font-size:11px">remaining</span>
         {% endif %}
       </span>
+      {% if membership_enabled and pc.member_username %}
+      <span class="monitor-member-badge" id="member-{{ pc.pc_number }}"
+            style="font-size:12px;color:var(--green,#22c55e);padding:0 6px">
+        👤 {{ pc.member_username }}
+      </span>
+      {% else %}
+      <span class="monitor-member-badge" id="member-{{ pc.pc_number }}" style="display:none"></span>
+      {% endif %}
       <div class="monitor-footer-actions">
         <button
           class="btn btn-sm btn-default"
@@ -169,6 +177,7 @@ const PC_NUMBERS = [{% for pc in pcs %}{{ pc.pc_number }}{% if not loop.last %},
 let _fullscreenPc = null;
 let _fullscreenStatsOpen = false;
 let _fullscreenStatsTimer = null;
+let _fullscreenImgTimer = null;
 
 function fmtHMS(sec) {
   const h = Math.floor(sec / 3600);
@@ -250,6 +259,18 @@ function updateCard(pc, t) {
     if (img) img.style.display = 'none';
     if (noshot) noshot.style.display = '';
   }
+
+  // Member username
+  const memberEl = document.getElementById('member-' + pc.pc_number);
+  if (memberEl) {
+    if (pc.membership_enabled && pc.member_username) {
+      memberEl.textContent = '👤 ' + pc.member_username;
+      memberEl.style.display = '';
+    } else {
+      memberEl.textContent = '';
+      memberEl.style.display = 'none';
+    }
+  }
 }
 
 function handleImgError(img) {
@@ -292,11 +313,22 @@ function openFullscreen(pcNumber) {
   if (window.matchMedia('(max-width: 768px)').matches && screen.orientation?.lock) {
     screen.orientation.lock('landscape').catch(() => {});
   }
+
+  // Refresh fullscreen screenshot every 1 second for near-live view
+  if (_fullscreenImgTimer) clearInterval(_fullscreenImgTimer);
+  _fullscreenImgTimer = setInterval(() => {
+    if (_fullscreenPc !== null) {
+      document.getElementById('fullscreen-img').src =
+        `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${Date.now()}`;
+    }
+  }, 1000);
 }
 
 function closeFullscreen() {
   document.getElementById('fullscreen-modal').classList.add('hidden');
   document.getElementById('fullscreen-img').src = '';
+  clearInterval(_fullscreenImgTimer);
+  _fullscreenImgTimer = null;
   _fullscreenPc = null;
   _fullscreenStatsOpen = false;
   clearInterval(_fullscreenStatsTimer);

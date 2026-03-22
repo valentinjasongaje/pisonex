@@ -56,7 +56,8 @@ Namespace Services
         ''' <summary>Fired when membership state changes in heartbeat (enabled, username, balance, etc.).</summary>
         Public Event MembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                         balanceSeconds As Integer, canLogout As Boolean,
-                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer)
+                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
+                                        minimumLogoutMinutes As Integer)
 
         ' ── Heartbeat interval ───────────────────────────────────────
         ' 1-second poll in all states.  On a local LAN with FastAPI +
@@ -230,7 +231,8 @@ Namespace Services
                 response.member_balance_seconds,
                 response.member_can_logout,
                 response.zero_time_logout_seconds,
-                response.idle_shutdown_seconds)
+                response.idle_shutdown_seconds,
+                response.minimum_logout_minutes)
         End Function
 
         ' ── Public state ─────────────────────────────────────────────

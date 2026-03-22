@@ -31,6 +31,7 @@ Namespace Services
         Public Property zero_time_logout_seconds As Integer = 0
         Public Property idle_shutdown_seconds As Integer = 0
         Public Property receiving_coins As Boolean = False
+        Public Property minimum_logout_minutes As Integer = 0
     End Class
 
     Public Class ApiService

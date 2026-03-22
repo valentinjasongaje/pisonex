@@ -49,8 +49,22 @@ Namespace Forms
         Private _lblMemberInfo  As Label        ' "Logged in as: [name]"
         Private _lblMemberTime  As Label        ' balance / zero-time countdown
         Private _btnLogout      As Button
-        Private _membershipEnabled As Boolean = False
-        Private _memberLoggedIn    As Boolean = False
+        Private _membershipEnabled    As Boolean = False
+        Private _memberLoggedIn       As Boolean = False
+
+        ' Inline member login / register form
+        Private _isRegisterMode       As Boolean = False
+        Private _canLogout            As Boolean = False
+        Private _minimumLogoutMinutes As Integer = 0
+        Private _lastLayoutKey As String = ""
+        Private _lblModeToggle        As Label       ' "Register" / "Back to Login" link
+        Private _lblUsernameHint      As Label
+        Private _txtMemberUser        As TextBox
+        Private _lblPasswordHint      As Label
+        Private _txtMemberPass        As TextBox
+        Private _lblConfirmHint       As Label
+        Private _txtMemberConf        As TextBox
+        Private _lblInlineError       As Label       ' red inline error text
 
         ' Receiving-coins indicator
         Private _pnlReceivingCoins As Panel
@@ -369,6 +383,57 @@ Namespace Forms
 
             _pnlMember.Controls.AddRange({_lblMemberTitle, _btnLogin, _btnRegister, _lblMemberInfo, _lblMemberTime, _btnLogout})
 
+            ' ── Inline member login / register form controls ──────────────────────
+            Dim fldW = 312   ' field width = panel width (360) - padX (24) * 2
+
+            _lblUsernameHint = FormStyles.CreateLabel("Username")
+            _lblUsernameHint.Visible = False
+
+            _txtMemberUser = FormStyles.CreateInput(New Point(0, 0), fldW, maxLen:=20)
+            _txtMemberUser.Visible = False
+            AddHandler _txtMemberUser.KeyDown, Sub(s, e) If e.KeyCode = Keys.Enter Then OnLoginClick(s, e)
+
+            _lblPasswordHint = FormStyles.CreateLabel("Password")
+            _lblPasswordHint.Visible = False
+
+            _txtMemberPass = FormStyles.CreateInput(New Point(0, 0), fldW, maxLen:=128, pwChar:="●"c)
+            _txtMemberPass.Visible = False
+            AddHandler _txtMemberPass.KeyDown, Sub(s, e) If e.KeyCode = Keys.Enter Then OnLoginClick(s, e)
+
+            _lblConfirmHint = FormStyles.CreateLabel("Confirm Password")
+            _lblConfirmHint.Visible = False
+
+            _txtMemberConf = FormStyles.CreateInput(New Point(0, 0), fldW, maxLen:=128, pwChar:="●"c)
+            _txtMemberConf.Visible = False
+            AddHandler _txtMemberConf.KeyDown, Sub(s, e) If e.KeyCode = Keys.Enter Then OnLoginClick(s, e)
+
+            _lblInlineError = New Label() With {
+                .Text      = "",
+                .Font      = New Font("Segoe UI", 9),
+                .ForeColor = Color.FromArgb(239, 68, 68),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(fldW, 18),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Visible   = False
+            }
+
+            _lblModeToggle = New Label() With {
+                .Text      = "Register",
+                .Font      = New Font("Segoe UI", 8.5F, FontStyle.Underline),
+                .ForeColor = MemberAccent,
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Cursor    = Cursors.Hand,
+                .Visible   = False
+            }
+            AddHandler _lblModeToggle.Click, AddressOf OnModeToggleClick
+
+            _pnlMember.Controls.AddRange({_lblUsernameHint, _txtMemberUser,
+                                           _lblPasswordHint, _txtMemberPass,
+                                           _lblConfirmHint, _txtMemberConf,
+                                           _lblInlineError, _lblModeToggle})
+
             ' ── Receiving-coins indicator (shown when hardware controller is accepting coins for this PC) ──
             _pnlReceivingCoins = New Panel() With {
                 .Size      = New Size(280, 44),
@@ -662,6 +727,10 @@ Namespace Forms
             CenterLabels()
         End Sub
 
+        Private Function GetLayoutKey() As String
+            Return $"{_pnlMember.Visible}|{_pnlMember.Height}|{_pnlReceivingCoins.Visible}|{_lblLicenseWarn.Visible}"
+        End Function
+
         Private Sub CenterLabels()
             ' Main message: position derived from configured percentages.
             ' XPct = % of the slack space (Width - labelWidth), so 50 = centered.
@@ -707,9 +776,13 @@ Namespace Forms
                 _pnlMember.Location = New Point(
                     (Me.ClientSize.Width - _pnlMember.Width) \ 2,
                     _lblSub.Bottom + 28)
-                ' Keep title centered within panel
-                _lblMemberTitle.Location = New Point(20, 14)
-                _lblMemberTitle.Size = New Size(_pnlMember.Width - 40, 20)
+                ' In logged-in state keep the title centered within the panel.
+                ' In inline form state the title is positioned by LayoutMemberForm()
+                ' and must not be overridden here (it's left-aligned with a toggle).
+                If _memberLoggedIn Then
+                    _lblMemberTitle.Location = New Point(20, 14)
+                    _lblMemberTitle.Size     = New Size(_pnlMember.Width - 40, 20)
+                End If
             End If
 
             ' License warning — centered, below sub-message (or below member panel)
@@ -832,24 +905,172 @@ Namespace Forms
 
         ' ── Membership click handlers ────────────────────────────────────────
 
+        ' ── Inline form action (Login or Create Account depending on mode) ──────
+
         Private Sub OnLoginClick(sender As Object, e As EventArgs)
-            Dim result = ShowMemberDialog("Member Login", showConfirmPassword:=False)
-            If result IsNot Nothing Then
-                RaiseEvent MemberLoginRequested(result.Item1, result.Item2)
+            _lblInlineError.Visible = False
+            _lblInlineError.Text = ""
+
+            Dim user = _txtMemberUser.Text.Trim()
+            Dim pass = _txtMemberPass.Text
+
+            If String.IsNullOrEmpty(user) OrElse String.IsNullOrEmpty(pass) Then
+                _lblInlineError.Text = "Username and password are required."
+                _lblInlineError.Visible = True
+                Return
+            End If
+
+            If _isRegisterMode Then
+                If pass <> _txtMemberConf.Text Then
+                    _lblInlineError.Text = "Passwords do not match."
+                    _lblInlineError.Visible = True
+                    Return
+                End If
+                RaiseEvent MemberRegisterRequested(user, pass)
+            Else
+                RaiseEvent MemberLoginRequested(user, pass)
             End If
         End Sub
 
+        ' _btnRegister is hidden in inline mode; kept as no-op for safety
         Private Sub OnRegisterClick(sender As Object, e As EventArgs)
-            Dim result = ShowMemberDialog("Register Account", showConfirmPassword:=True)
-            If result IsNot Nothing Then
-                RaiseEvent MemberRegisterRequested(result.Item1, result.Item2)
-            End If
+        End Sub
+
+        Private Sub OnModeToggleClick(sender As Object, e As EventArgs)
+            _isRegisterMode = Not _isRegisterMode
+            _txtMemberUser.Text = ""
+            _txtMemberPass.Text = ""
+            _txtMemberConf.Text = ""
+            _lblInlineError.Visible = False
+            _lblInlineError.Text = ""
+            LayoutMemberForm()
+            CenterLabels()
         End Sub
 
         Private Sub OnLogoutClick(sender As Object, e As EventArgs)
+            If Not _canLogout Then
+                ShowCannotLogoutDialog()
+                Return
+            End If
             If ConfirmLogout() Then
                 RaiseEvent MemberLogoutRequested()
             End If
+        End Sub
+
+        Private Sub ShowCannotLogoutDialog()
+            Dim minTime = _minimumLogoutMinutes
+            Dim timeStr = If(minTime > 0,
+                             $"{minTime} minute{If(minTime = 1, "", "s")}",
+                             "enough")
+            Dim msg = $"You need at least {timeStr} of remaining session time to be able to log out."
+
+            Dim dlg = New Form() With {.Size = New Size(420, 138), .TopMost = True}
+
+            Dim lbl = New Label() With {
+                .Text      = msg,
+                .Font      = New Font("Segoe UI", 10),
+                .ForeColor = FormStyles.TextDim,
+                .Location  = New Point(24, 16),
+                .Size      = New Size(372, 48),
+                .AutoSize  = False
+            }
+
+            Dim btn = FormStyles.CreateButton("Got it", 140, 36)
+            btn.DialogResult = DialogResult.OK
+            btn.Location = New Point(140, 76)
+
+            dlg.Controls.AddRange({lbl, btn})
+            dlg.AcceptButton = btn
+            FormStyles.MakeBorderless(dlg, "Cannot Log Out")
+            dlg.ShowDialog()
+        End Sub
+
+        ' ── Inline form layout (positions all form controls in _pnlMember) ──────
+
+        Private Sub LayoutMemberForm()
+            Const PW     As Integer = 360   ' panel width
+            Const PadX   As Integer = 24    ' horizontal padding
+            Const PadTop As Integer = 14    ' top padding
+            Const FldW   As Integer = PW - PadX * 2    ' = 312
+            Const InputH As Integer = 28
+            Const LabelH As Integer = 16
+            Const Gap    As Integer = 4     ' label → input gap
+            Const Block  As Integer = 10    ' between field groups
+
+            Dim y = PadTop
+
+            ' Title (left-aligned, leaves room for toggle)
+            _lblMemberTitle.Text      = If(_isRegisterMode, "Create Account", "Member Login")
+            _lblMemberTitle.AutoSize  = False
+            _lblMemberTitle.Size      = New Size(FldW - 90, 20)
+            _lblMemberTitle.TextAlign = ContentAlignment.MiddleLeft
+            _lblMemberTitle.Location  = New Point(PadX, y)
+            _lblMemberTitle.Visible   = True
+
+            ' Mode toggle link (right side of title row)
+            _lblModeToggle.Text    = If(_isRegisterMode, "Back to Login", "Register")
+            _lblModeToggle.Visible = True
+            Dim toggleW = _lblModeToggle.PreferredWidth
+            _lblModeToggle.Location = New Point(PW - PadX - toggleW, y + 2)
+            y += 26 + 8
+
+            ' Username
+            _lblUsernameHint.Location = New Point(PadX, y)
+            _lblUsernameHint.Visible  = True
+            y += LabelH + Gap
+            _txtMemberUser.Location = New Point(PadX, y)
+            _txtMemberUser.Width    = FldW
+            _txtMemberUser.Visible  = True
+            y += InputH + Block
+
+            ' Password
+            _lblPasswordHint.Location = New Point(PadX, y)
+            _lblPasswordHint.Visible  = True
+            y += LabelH + Gap
+            _txtMemberPass.Location = New Point(PadX, y)
+            _txtMemberPass.Width    = FldW
+            _txtMemberPass.Visible  = True
+            y += InputH + Block
+
+            ' Confirm (register mode only)
+            If _isRegisterMode Then
+                _lblConfirmHint.Location = New Point(PadX, y)
+                _lblConfirmHint.Visible  = True
+                y += LabelH + Gap
+                _txtMemberConf.Location = New Point(PadX, y)
+                _txtMemberConf.Width    = FldW
+                _txtMemberConf.Visible  = True
+                y += InputH + Block
+            Else
+                _lblConfirmHint.Visible = False
+                _txtMemberConf.Visible  = False
+            End If
+
+            ' Inline error (space always reserved so layout doesn't jump)
+            _lblInlineError.Location = New Point(PadX, y)
+            _lblInlineError.Size     = New Size(FldW, 18)
+            y += 22
+
+            ' Action button (full field width)
+            _btnLogin.Text     = If(_isRegisterMode, "Create Account", "Login")
+            _btnLogin.Size     = New Size(FldW, 40)
+            _btnLogin.Location = New Point(PadX, y)
+            _btnLogin.Visible  = True
+            y += 40 + PadTop
+
+            ' Finalize panel height
+            _pnlMember.Size = New Size(PW, y)
+        End Sub
+
+        Private Sub HideMemberFormControls()
+            _lblModeToggle.Visible   = False
+            _lblUsernameHint.Visible = False
+            _txtMemberUser.Visible   = False
+            _lblPasswordHint.Visible = False
+            _txtMemberPass.Visible   = False
+            _lblConfirmHint.Visible  = False
+            _txtMemberConf.Visible   = False
+            _lblInlineError.Visible  = False
         End Sub
 
         Private Function ConfirmLogout() As Boolean
@@ -886,93 +1107,23 @@ Namespace Forms
             Return dlg.ShowDialog() = DialogResult.Yes
         End Function
 
-        Private Function ShowMemberDialog(title As String, showConfirmPassword As Boolean) As Tuple(Of String, String)
-            Dim fieldH = 28
-            Dim labelH = 18
-            Dim gap = 6
-            Dim padX = 24
-            Dim padTop = 20
-            Dim fieldW = 292
-
-            ' Calculate content height
-            Dim curY = padTop
-            curY += labelH + gap + fieldH + 12    ' username
-            curY += labelH + gap + fieldH + 12    ' password
-            If showConfirmPassword Then
-                curY += labelH + gap + fieldH + 12 ' confirm
-            End If
-            curY += 40 + 20                        ' button + bottom padding
-
-            Dim dlg = New Form() With {
-                .Size = New Size(padX * 2 + fieldW + 16, curY),
-                .TopMost = True
-            }
-
-            Dim y = padTop
-
-            ' Username
-            Dim lblUser = FormStyles.CreateLabel("Username")
-            lblUser.Location = New Point(padX, y)
-            y += labelH + gap
-            Dim txtUser = FormStyles.CreateInput(New Point(padX, y), fieldW, maxLen:=20)
-            y += fieldH + 12
-
-            ' Password
-            Dim lblPass = FormStyles.CreateLabel("Password")
-            lblPass.Location = New Point(padX, y)
-            y += labelH + gap
-            Dim txtPass = FormStyles.CreateInput(New Point(padX, y), fieldW, maxLen:=128, pwChar:="●"c)
-            y += fieldH + 12
-
-            dlg.Controls.AddRange({lblUser, txtUser, lblPass, txtPass})
-
-            Dim txtConf As TextBox = Nothing
-            If showConfirmPassword Then
-                Dim lblConf = FormStyles.CreateLabel("Confirm Password")
-                lblConf.Location = New Point(padX, y)
-                y += labelH + gap
-                txtConf = FormStyles.CreateInput(New Point(padX, y), fieldW, maxLen:=128, pwChar:="●"c)
-                y += fieldH + 12
-                dlg.Controls.AddRange({lblConf, txtConf})
-            End If
-
-            ' Action button
-            Dim btnText = If(showConfirmPassword, "Create Account", "Login")
-            Dim btnOk = FormStyles.CreateButton(btnText, fieldW, 38)
-            btnOk.DialogResult = DialogResult.OK
-            btnOk.Location = New Point(padX, y)
-            dlg.Controls.Add(btnOk)
-            dlg.AcceptButton = btnOk
-
-            FormStyles.MakeBorderless(dlg, title)
-
-            If dlg.ShowDialog() = DialogResult.OK Then
-                If String.IsNullOrWhiteSpace(txtUser.Text) OrElse String.IsNullOrWhiteSpace(txtPass.Text) Then
-                    MessageBox.Show("Username and password are required.", title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                    Return Nothing
-                End If
-                If showConfirmPassword AndAlso txtPass.Text <> txtConf.Text Then
-                    MessageBox.Show("Passwords do not match.", title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                    Return Nothing
-                End If
-                Return Tuple.Create(txtUser.Text.Trim(), txtPass.Text)
-            End If
-            Return Nothing
-        End Function
-
         ' ── Membership UI update (called from heartbeat) ─────────────────────
 
         Public Sub UpdateMembershipUI(enabled As Boolean, absorption As Boolean, username As String,
                                        balanceSeconds As Integer, canLogout As Boolean,
-                                       zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer)
+                                       zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
+                                       minimumLogoutMinutes As Integer)
             If Me.InvokeRequired Then
                 Me.Invoke(Sub() UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
-                                                    canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds))
+                                                    canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
+                                                    minimumLogoutMinutes))
                 Return
             End If
 
-            _membershipEnabled = enabled
-            _memberLoggedIn = Not String.IsNullOrEmpty(username)
+            _membershipEnabled    = enabled
+            _memberLoggedIn       = Not String.IsNullOrEmpty(username)
+            _canLogout            = canLogout
+            _minimumLogoutMinutes = minimumLogoutMinutes
 
             If Not enabled Then
                 _pnlMember.Visible = False
@@ -980,79 +1131,82 @@ Namespace Forms
             End If
 
             _pnlMember.Visible = True
-            Dim pw = 340   ' panel width
-            Dim cx = pw \ 2 ' center x
+            Const PW As Integer = 360
+            Dim cx = PW \ 2
 
             If _memberLoggedIn Then
-                ' ── Logged-in state ─────────────────────────────
-                _lblMemberTitle.Text = "Member"
-                _lblMemberTitle.Visible = True
-                _btnLogin.Visible = False
+                ' ── Logged-in state — hide inline form, show member info ─────
+                HideMemberFormControls()
                 _btnRegister.Visible = False
 
+                _lblMemberTitle.Text      = "Member"
+                _lblMemberTitle.AutoSize  = False
+                _lblMemberTitle.Size      = New Size(PW - 40, 20)
+                _lblMemberTitle.TextAlign = ContentAlignment.MiddleCenter
+                _lblMemberTitle.Location  = New Point(20, 14)
+                _lblMemberTitle.Visible   = True
+                _btnLogin.Visible         = False
+
                 ' Username
-                _lblMemberInfo.Visible = True
-                _lblMemberInfo.Text = username
+                _lblMemberInfo.Visible   = True
+                _lblMemberInfo.Text      = username
                 _lblMemberInfo.ForeColor = Color.FromArgb(34, 197, 94)
-                _lblMemberInfo.Location = New Point(20, 38)
-                _lblMemberInfo.Size = New Size(pw - 40, 24)
+                _lblMemberInfo.Location  = New Point(20, 38)
+                _lblMemberInfo.Size      = New Size(PW - 40, 24)
 
                 ' Time / status
                 _lblMemberTime.Visible = True
                 If zeroTimeLogoutSeconds > 0 Then
-                    _lblMemberTime.Text = $"No time — auto-logout in {zeroTimeLogoutSeconds}s"
+                    _lblMemberTime.Text      = $"No time — auto-logout in {zeroTimeLogoutSeconds}s"
                     _lblMemberTime.ForeColor = Color.FromArgb(245, 158, 11)
                     _lblSub.Text = "Insert coin to add time"
                 ElseIf balanceSeconds > 0 Then
                     Dim mins = balanceSeconds \ 60
                     Dim secs = balanceSeconds Mod 60
-                    _lblMemberTime.Text = $"Balance: {mins}m {secs}s"
+                    _lblMemberTime.Text      = $"Balance: {mins}m {secs}s"
                     _lblMemberTime.ForeColor = Color.FromArgb(140, 160, 200)
                 Else
-                    _lblMemberTime.Text = "No time remaining"
+                    _lblMemberTime.Text      = "No time remaining"
                     _lblMemberTime.ForeColor = Color.FromArgb(160, 120, 140, 170)
                 End If
                 _lblMemberTime.Location = New Point(20, 64)
-                _lblMemberTime.Size = New Size(pw - 40, 22)
+                _lblMemberTime.Size     = New Size(PW - 40, 22)
 
-                ' Logout button — centered at bottom
-                _btnLogout.Visible = True
-                _btnLogout.Enabled = canLogout
-                _btnLogout.Location = New Point(cx - _btnLogout.Width \ 2, 96)
+                ' Logout button — always enabled; canLogout is checked at click time
+                _btnLogout.Visible   = True
+                _btnLogout.Enabled   = True
+                _btnLogout.Location  = New Point(cx - _btnLogout.Width \ 2, 96)
 
-                _pnlMember.Size = New Size(pw, 144)
+                _pnlMember.Size = New Size(PW, 144)
             Else
-                ' ── Not logged in — show Login / Register ──────
-                _lblMemberTitle.Text = "Member Access"
-                _lblMemberTitle.Visible = True
-                _btnLogin.Visible = True
-                _btnRegister.Visible = True
+                ' ── Not logged in — show inline login / register form ─────────
                 _lblMemberInfo.Visible = False
                 _lblMemberTime.Visible = False
-                _btnLogout.Visible = False
-
-                ' Center the two buttons with a gap between them
-                Dim btnGap = 12
-                Dim totalBtnW = _btnLogin.Width + btnGap + _btnRegister.Width
-                Dim btnStartX = (pw - totalBtnW) \ 2
-                Dim btnY = 42
-                _btnLogin.Location = New Point(btnStartX, btnY)
-                _btnRegister.Location = New Point(btnStartX + _btnLogin.Width + btnGap, btnY)
-
-                _pnlMember.Size = New Size(pw, 98)
+                _btnLogout.Visible     = False
+                _btnRegister.Visible   = False
+                LayoutMemberForm()
             End If
 
-            ' Idle-shutdown warning in sub-message
+            ' Idle-shutdown warning in sub-message (only when not logged in)
             If idleShutdownSeconds > 0 AndAlso Not _memberLoggedIn Then
-                _lblSub.Text = $"PC will shut down in {idleShutdownSeconds}s"
+                _lblSub.Text      = $"PC will shut down in {idleShutdownSeconds}s"
                 _lblSub.ForeColor = Color.FromArgb(239, 68, 68)
             ElseIf Not _memberLoggedIn Then
-                _lblSub.Text = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
+                _lblSub.Text      = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
                 _lblSub.ForeColor = Color.FromArgb(140, 160, 200)
             End If
 
             _pnlMember.Invalidate()
-            CenterLabels()
+            Dim lk = GetLayoutKey()
+            If lk <> _lastLayoutKey Then
+                _lastLayoutKey = lk
+                CenterLabels()
+            Else
+                ' Layout unchanged — only re-center sub-message (text may have changed width)
+                _lblSub.Location = New Point(
+                    (Me.ClientSize.Width - _lblSub.Width) \ 2,
+                    _lblSub.Location.Y)
+            End If
         End Sub
 
         ' ── Receiving-coins indicator ──────────────────────────────────────────
@@ -1119,7 +1273,14 @@ Namespace Forms
 
         Public Sub ShowMemberError(message As String)
             If Me.InvokeRequired Then Me.Invoke(Sub() ShowMemberError(message)) : Return
-            MessageBox.Show(message, "Membership", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            If Not _memberLoggedIn Then
+                ' Show inline in the membership form panel
+                _lblInlineError.Text    = message
+                _lblInlineError.Visible = True
+                _pnlMember.Invalidate()
+            Else
+                MessageBox.Show(message, "Membership", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            End If
         End Sub
 
         Public Sub ShowMemberSuccess(message As String)

@@ -63,9 +63,11 @@ Namespace Services
 
         Public Sub UpdateMembershipUI(enabled As Boolean, absorption As Boolean, username As String,
                                        balanceSeconds As Integer, canLogout As Boolean,
-                                       zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer)
+                                       zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
+                                       minimumLogoutMinutes As Integer)
             _lockForm.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
-                                          canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds)
+                                          canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
+                                          minimumLogoutMinutes)
         End Sub
 
         Public Sub ShowReceivingCoins(isReceiving As Boolean)
