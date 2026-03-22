@@ -52,7 +52,10 @@ async def lifespan(app: FastAPI):
     await license_service.fetch_beta_status()
     logger.info("License status: %s (beta=%s)", license_service.get_status()["status"], license_service.beta_mode)
 
-    # Create all DB tables
+    # Migrate existing DB columns (v2 → v3 seconds-based rename)
+    _migrate_schema()
+
+    # Create all DB tables (creates new tables like membership_config)
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
@@ -101,6 +104,81 @@ async def lifespan(app: FastAPI):
     if hw_controller:
         hw_controller.cleanup()
     logger.info("PisoNet server shut down")
+
+
+def _migrate_schema():
+    """Rename columns from v2 (minutes-based) to v3 (seconds-based) if needed.
+
+    Safe to run repeatedly — each rename is guarded by a column-existence check.
+    SQLite ≥ 3.25.0 supports ALTER TABLE RENAME COLUMN.
+    """
+    import sqlite3
+    from config import settings
+
+    db_path = settings.DATABASE_URL.replace("sqlite:///./", "")
+    if not db_path or not __import__("os").path.exists(db_path):
+        return  # Fresh install — nothing to migrate
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    def has_column(table: str, column: str) -> bool:
+        cursor.execute(f"PRAGMA table_info({table})")
+        return any(row[1] == column for row in cursor.fetchall())
+
+    renames = [
+        # (table, old_column, new_column)
+        ("users", "pin", "password_hash"),
+        ("users", "balance_min", "balance_seconds"),
+        ("sessions", "minutes_granted", "granted_seconds"),
+        ("sessions", "minutes_used", "used_seconds"),
+        ("coin_transactions", "amount_pesos", "amount_php"),
+        ("coin_transactions", "minutes_added", "seconds_added"),
+        ("coin_rates", "minutes", "seconds"),
+    ]
+
+    migrated = []
+    for table, old_col, new_col in renames:
+        if has_column(table, old_col) and not has_column(table, new_col):
+            cursor.execute(f"ALTER TABLE {table} RENAME COLUMN {old_col} TO {new_col}")
+            migrated.append(f"{table}.{old_col} → {new_col}")
+
+    # Add new columns to users table if missing
+    new_user_columns = [
+        ("logged_in_pc_id", "INTEGER"),
+        ("last_login_at", "DATETIME"),
+        ("last_activity_at", "DATETIME"),
+    ]
+    for col_name, col_type in new_user_columns:
+        if not has_column("users", col_name):
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+            migrated.append(f"users.{col_name} (added)")
+
+    # Convert existing minutes values to seconds where applicable
+    if "sessions.minutes_granted → granted_seconds" in migrated:
+        cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")
+        cursor.execute("UPDATE sessions SET used_seconds = used_seconds * 60 WHERE used_seconds > 0")
+        migrated.append("sessions: converted minutes → seconds values")
+
+    if "coin_transactions.minutes_added → seconds_added" in migrated:
+        cursor.execute("UPDATE coin_transactions SET seconds_added = seconds_added * 60 WHERE seconds_added > 0")
+        migrated.append("coin_transactions: converted minutes → seconds values")
+
+    if "coin_rates.minutes → seconds" in migrated:
+        cursor.execute("UPDATE coin_rates SET seconds = seconds * 60 WHERE seconds > 0")
+        migrated.append("coin_rates: converted minutes → seconds values")
+
+    if "users.balance_min → balance_seconds" in migrated:
+        cursor.execute("UPDATE users SET balance_seconds = balance_seconds * 60 WHERE balance_seconds > 0")
+        migrated.append("users: converted minutes → seconds values")
+
+    conn.commit()
+    conn.close()
+
+    if migrated:
+        logger.info("Schema migration (v2→v3): %s", ", ".join(migrated))
+    else:
+        logger.debug("Schema migration: no changes needed")
 
 
 def _seed_defaults(db):
