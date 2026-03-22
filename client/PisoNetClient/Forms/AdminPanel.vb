@@ -130,28 +130,105 @@ Namespace Forms
             InitializeComponent()
         End Sub
 
+        Private Const TITLE_H As Integer = 32
+
         Private Sub InitializeComponent()
-            Me.Text            = "PisoNet Admin Panel"
-            Me.FormBorderStyle = FormBorderStyle.FixedDialog
-            Me.ClientSize      = New Size(FORM_W, FORM_H)
+            Me.FormBorderStyle = FormBorderStyle.None
+            Me.ClientSize      = New Size(FORM_W, FORM_H + TITLE_H)
             Me.StartPosition   = FormStartPosition.CenterScreen
-            Me.MaximizeBox     = False
-            Me.MinimizeBox     = False
             Me.BackColor       = ColFormBg
             Me.ForeColor       = Color.White
+            Me.Icon            = Resources.LogoHelper.GetIcon()
             Me.Font            = New Font("Segoe UI", 9)
             Me.DoubleBuffered  = True
 
+            BuildTitleBar()
             BuildSidebar()
             BuildContentArea()
             BuildFooterButtons()
+
+            ' Form border
+            AddHandler Me.Paint, Sub(s, e)
+                Using pen = New Pen(Color.FromArgb(30, 80, 120, 200), 1)
+                    e.Graphics.DrawRectangle(pen, 0, 0, Me.Width - 1, Me.Height - 1)
+                End Using
+            End Sub
+        End Sub
+
+        Private Sub BuildTitleBar()
+            Dim bar = New Panel() With {
+                .Location  = New Point(0, 0),
+                .Size      = New Size(FORM_W, TITLE_H),
+                .BackColor = Color.FromArgb(6, 10, 18),
+                .Cursor    = Cursors.SizeAll
+            }
+
+            ' Gradient accent line at top
+            AddHandler bar.Paint, Sub(s, e)
+                Dim g = e.Graphics
+                Using br = New LinearGradientBrush(New Rectangle(0, 0, bar.Width, 2),
+                        FormStyles.AccentBlue, Color.FromArgb(124, 58, 237), 0F)
+                    g.FillRectangle(br, New Rectangle(0, 0, bar.Width, 2))
+                End Using
+                Using pen = New Pen(Color.FromArgb(30, 80, 120, 200), 1)
+                    g.DrawLine(pen, 0, bar.Height - 1, bar.Width, bar.Height - 1)
+                End Using
+            End Sub
+
+            ' Title text
+            Dim lbl = New Label() With {
+                .Text      = "PisoNet — Admin Panel",
+                .Font      = New Font("Segoe UI", 8.5F, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(140, 160, 200),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(FORM_W - 40, TITLE_H),
+                .Location  = New Point(14, 0),
+                .TextAlign = ContentAlignment.MiddleLeft,
+                .Cursor    = Cursors.SizeAll
+            }
+
+            ' Close button
+            Dim btnClose = New Label() With {
+                .Text      = ChrW(&H2715),
+                .Font      = New Font("Segoe UI", 9),
+                .ForeColor = Color.FromArgb(100, 120, 150),
+                .BackColor = Color.Transparent,
+                .Size      = New Size(TITLE_H, TITLE_H),
+                .Location  = New Point(FORM_W - TITLE_H, 0),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Cursor    = Cursors.Hand
+            }
+            AddHandler btnClose.MouseEnter, Sub(s, e)
+                btnClose.BackColor = Color.FromArgb(60, 239, 68, 68)
+                btnClose.ForeColor = Color.FromArgb(239, 150, 150)
+            End Sub
+            AddHandler btnClose.MouseLeave, Sub(s, e)
+                btnClose.BackColor = Color.Transparent
+                btnClose.ForeColor = Color.FromArgb(100, 120, 150)
+            End Sub
+            AddHandler btnClose.Click, Sub(s, e) Me.Close()
+
+            ' Drag support
+            Dim dragHandler = Sub(sender As Object, ev As MouseEventArgs)
+                If ev.Button = MouseButtons.Left Then
+                    ReleaseCapture()
+                    SendMessage(Me.Handle, WM_NCLBUTTONDOWN, New IntPtr(HTCAPTION), IntPtr.Zero)
+                End If
+            End Sub
+            AddHandler bar.MouseDown, dragHandler
+            AddHandler lbl.MouseDown, dragHandler
+
+            bar.Controls.Add(lbl)
+            bar.Controls.Add(btnClose)
+            Me.Controls.Add(bar)
         End Sub
 
         ' ── Sidebar ──────────────────────────────────────────────────────────
 
         Private Sub BuildSidebar()
             _sidebar = New Panel() With {
-                .Location  = New Point(0, 0),
+                .Location  = New Point(0, TITLE_H),
                 .Size      = New Size(SIDEBAR_W, FORM_H),
                 .BackColor = ColSidebarBg
             }
@@ -290,7 +367,7 @@ Namespace Forms
 
         Private Sub BuildContentArea()
             _contentArea = New Panel() With {
-                .Location  = New Point(SIDEBAR_W, 0),
+                .Location  = New Point(SIDEBAR_W, TITLE_H),
                 .Size      = New Size(FORM_W - SIDEBAR_W, FORM_H - 60),
                 .BackColor = ColContentBg,
                 .Padding   = New Padding(0)
@@ -320,7 +397,7 @@ Namespace Forms
 
         Private Sub BuildFooterButtons()
             Dim footer = New Panel() With {
-                .Location  = New Point(SIDEBAR_W, FORM_H - 60),
+                .Location  = New Point(SIDEBAR_W, FORM_H - 60 + TITLE_H),
                 .Size      = New Size(FORM_W - SIDEBAR_W, 60),
                 .BackColor = Color.FromArgb(12, 16, 28)
             }

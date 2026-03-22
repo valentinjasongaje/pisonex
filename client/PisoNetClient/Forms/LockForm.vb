@@ -807,45 +807,34 @@ Namespace Forms
 
         Private Function ConfirmLogout() As Boolean
             Dim dlg = New Form() With {
-                .Text = "Confirm Logout",
-                .Size = New Size(320, 150),
-                .StartPosition = FormStartPosition.CenterScreen,
-                .FormBorderStyle = FormBorderStyle.FixedDialog,
-                .MaximizeBox = False, .MinimizeBox = False, .TopMost = True,
-                .BackColor = Color.FromArgb(12, 16, 28), .ForeColor = Color.White,
-                .Font = New Font("Segoe UI", 9)
+                .Size = New Size(340, 130),
+                .TopMost = True
             }
 
             Dim lbl = New Label() With {
                 .Text = "Are you sure you want to logout?" & vbCrLf & "Your remaining time will be saved to your account.",
                 .Font = New Font("Segoe UI", 9.5F),
-                .ForeColor = Color.FromArgb(180, 195, 220),
-                .Location = New Point(24, 16), .Size = New Size(260, 46),
+                .ForeColor = FormStyles.TextDim,
+                .Location = New Point(24, 16), .Size = New Size(280, 42),
                 .AutoSize = False
             }
 
-            Dim btnYes = New Button() With {
-                .Text = "Logout", .DialogResult = DialogResult.Yes,
-                .Location = New Point(24, 72), .Size = New Size(120, 34),
-                .BackColor = Color.FromArgb(180, 50, 50), .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-                .Cursor = Cursors.Hand
-            }
-            btnYes.FlatAppearance.BorderSize = 0
+            Dim btnYes = FormStyles.CreateButton("Logout", 130, 34, FormStyles.DangerRed, Color.White, Color.FromArgb(220, 60, 60))
+            btnYes.DialogResult = DialogResult.Yes
+            btnYes.Location = New Point(24, 68)
 
-            Dim btnNo = New Button() With {
-                .Text = "Cancel", .DialogResult = DialogResult.No,
-                .Location = New Point(156, 72), .Size = New Size(120, 34),
-                .BackColor = Color.FromArgb(30, 38, 58), .ForeColor = Color.FromArgb(180, 195, 220),
-                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-                .Cursor = Cursors.Hand
-            }
+            Dim btnNo = FormStyles.CreateButton("Cancel", 130, 34, Color.FromArgb(30, 38, 58),
+                FormStyles.TextDim, Color.FromArgb(40, 50, 72))
+            btnNo.DialogResult = DialogResult.No
+            btnNo.Location = New Point(166, 68)
             btnNo.FlatAppearance.BorderSize = 1
             btnNo.FlatAppearance.BorderColor = Color.FromArgb(60, 80, 120, 200)
 
             dlg.Controls.AddRange({lbl, btnYes, btnNo})
             dlg.AcceptButton = btnNo
             dlg.CancelButton = btnNo
+
+            FormStyles.MakeBorderless(dlg, "Confirm Logout", closable:=False)
 
             Return dlg.ShowDialog() = DialogResult.Yes
         End Function
@@ -858,92 +847,57 @@ Namespace Forms
             Dim padTop = 20
             Dim fieldW = 292
 
-            ' Calculate height
+            ' Calculate content height
             Dim curY = padTop
-            curY += labelH + gap        ' "Username:" label
-            curY += fieldH + 12         ' username field + spacing
-            curY += labelH + gap        ' "Password:" label
-            curY += fieldH + 12         ' password field + spacing
+            curY += labelH + gap + fieldH + 12    ' username
+            curY += labelH + gap + fieldH + 12    ' password
             If showConfirmPassword Then
-                curY += labelH + gap    ' "Confirm:" label
-                curY += fieldH + 12     ' confirm field + spacing
+                curY += labelH + gap + fieldH + 12 ' confirm
             End If
-            curY += 40 + 20            ' button + bottom padding
+            curY += 40 + 20                        ' button + bottom padding
 
             Dim dlg = New Form() With {
-                .Text = title,
                 .Size = New Size(padX * 2 + fieldW + 16, curY),
-                .StartPosition = FormStartPosition.CenterScreen,
-                .FormBorderStyle = FormBorderStyle.FixedDialog,
-                .MaximizeBox = False, .MinimizeBox = False, .TopMost = True,
-                .BackColor = Color.FromArgb(12, 16, 28), .ForeColor = Color.White,
-                .Font = New Font("Segoe UI", 9)
+                .TopMost = True
             }
 
             Dim y = padTop
 
             ' Username
-            Dim lblUser = New Label() With {
-                .Text = "Username", .Font = New Font("Segoe UI", 8.5F),
-                .ForeColor = Color.FromArgb(140, 160, 200),
-                .AutoSize = True, .Location = New Point(padX, y)
-            }
+            Dim lblUser = FormStyles.CreateLabel("Username")
+            lblUser.Location = New Point(padX, y)
             y += labelH + gap
-            Dim txtUser = New TextBox() With {
-                .Location = New Point(padX, y), .Size = New Size(fieldW, fieldH), .MaxLength = 20,
-                .BackColor = Color.FromArgb(22, 26, 42), .ForeColor = Color.White,
-                .BorderStyle = BorderStyle.FixedSingle, .Font = New Font("Segoe UI", 10)
-            }
+            Dim txtUser = FormStyles.CreateInput(New Point(padX, y), fieldW, maxLen:=20)
             y += fieldH + 12
 
             ' Password
-            Dim lblPass = New Label() With {
-                .Text = "Password", .Font = New Font("Segoe UI", 8.5F),
-                .ForeColor = Color.FromArgb(140, 160, 200),
-                .AutoSize = True, .Location = New Point(padX, y)
-            }
+            Dim lblPass = FormStyles.CreateLabel("Password")
+            lblPass.Location = New Point(padX, y)
             y += labelH + gap
-            Dim txtPass = New TextBox() With {
-                .Location = New Point(padX, y), .Size = New Size(fieldW, fieldH), .MaxLength = 128,
-                .PasswordChar = "●"c,
-                .BackColor = Color.FromArgb(22, 26, 42), .ForeColor = Color.White,
-                .BorderStyle = BorderStyle.FixedSingle, .Font = New Font("Segoe UI", 10)
-            }
+            Dim txtPass = FormStyles.CreateInput(New Point(padX, y), fieldW, maxLen:=128, pwChar:="●"c)
             y += fieldH + 12
 
             dlg.Controls.AddRange({lblUser, txtUser, lblPass, txtPass})
 
             Dim txtConf As TextBox = Nothing
             If showConfirmPassword Then
-                Dim lblConf = New Label() With {
-                    .Text = "Confirm Password", .Font = New Font("Segoe UI", 8.5F),
-                    .ForeColor = Color.FromArgb(140, 160, 200),
-                    .AutoSize = True, .Location = New Point(padX, y)
-                }
+                Dim lblConf = FormStyles.CreateLabel("Confirm Password")
+                lblConf.Location = New Point(padX, y)
                 y += labelH + gap
-                txtConf = New TextBox() With {
-                    .Location = New Point(padX, y), .Size = New Size(fieldW, fieldH), .MaxLength = 128,
-                    .PasswordChar = "●"c,
-                    .BackColor = Color.FromArgb(22, 26, 42), .ForeColor = Color.White,
-                    .BorderStyle = BorderStyle.FixedSingle, .Font = New Font("Segoe UI", 10)
-                }
+                txtConf = FormStyles.CreateInput(New Point(padX, y), fieldW, maxLen:=128, pwChar:="●"c)
                 y += fieldH + 12
                 dlg.Controls.AddRange({lblConf, txtConf})
             End If
 
             ' Action button
             Dim btnText = If(showConfirmPassword, "Create Account", "Login")
-            Dim btnOk = New Button() With {
-                .Text = btnText, .DialogResult = DialogResult.OK,
-                .Location = New Point(padX, y), .Size = New Size(fieldW, 38),
-                .BackColor = MemberAccent, .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 10, FontStyle.Bold),
-                .Cursor = Cursors.Hand
-            }
-            btnOk.FlatAppearance.BorderSize = 0
-            btnOk.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 160, 255)
+            Dim btnOk = FormStyles.CreateButton(btnText, fieldW, 38)
+            btnOk.DialogResult = DialogResult.OK
+            btnOk.Location = New Point(padX, y)
             dlg.Controls.Add(btnOk)
             dlg.AcceptButton = btnOk
+
+            FormStyles.MakeBorderless(dlg, title)
 
             If dlg.ShowDialog() = DialogResult.OK Then
                 If String.IsNullOrWhiteSpace(txtUser.Text) OrElse String.IsNullOrWhiteSpace(txtPass.Text) Then

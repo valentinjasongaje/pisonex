@@ -41,6 +41,27 @@ Namespace Resources
             Return bmp
         End Function
 
+        Private _iconCached As Drawing.Icon = Nothing
+        Private _iconLoaded As Boolean = False
+
+        ''' <summary>
+        ''' Returns the embedded .ico file as an Icon, or SystemIcons.Application as fallback.
+        ''' </summary>
+        Public Function GetIcon() As Drawing.Icon
+            If _iconLoaded Then Return _iconCached
+            _iconLoaded = True
+            Try
+                Dim asm    = Assembly.GetExecutingAssembly()
+                Dim stream = asm.GetManifestResourceStream("PisoNetClient.Resources.logo.ico")
+                If stream IsNot Nothing Then
+                    _iconCached = New Drawing.Icon(stream)
+                End If
+            Catch
+            End Try
+            If _iconCached Is Nothing Then _iconCached = SystemIcons.Application
+            Return _iconCached
+        End Function
+
     End Module
 
 End Namespace

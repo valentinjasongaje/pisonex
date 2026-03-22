@@ -428,38 +428,23 @@ Module Program
 
     Private Function AskForPin() As String
         Dim dlg = New Form() With {
-            .Text = "Admin Access",
-            .Size = New Size(300, 160),
-            .StartPosition = FormStartPosition.CenterScreen,
-            .FormBorderStyle = FormBorderStyle.FixedDialog,
-            .MaximizeBox = False, .MinimizeBox = False,
-            .TopMost = True,
-            .BackColor = Color.FromArgb(15, 20, 35),
-            .ForeColor = Color.White
+            .Size = New Size(300, 120),
+            .TopMost = True
         }
 
-        Dim lbl = New Label() With {
-            .Text = "Enter Admin PIN:", .AutoSize = True,
-            .Location = New Point(16, 16), .ForeColor = Color.White
-        }
+        Dim lbl = Forms.FormStyles.CreateLabel("Enter Admin PIN", bold:=True)
+        lbl.Location = New Point(24, 16)
 
-        Dim txt = New TextBox() With {
-            .PasswordChar = "●"c, .MaxLength = 8,
-            .Location = New Point(16, 40), .Width = 252,
-            .BackColor = Color.FromArgb(26, 30, 45), .ForeColor = Color.White,
-            .BorderStyle = BorderStyle.FixedSingle
-        }
+        Dim txt = Forms.FormStyles.CreateInput(New Point(24, 40), 236, maxLen:=8, pwChar:="●"c)
 
-        Dim btn = New Button() With {
-            .Text = "OK", .DialogResult = DialogResult.OK,
-            .Location = New Point(16, 76), .Width = 80,
-            .BackColor = Color.FromArgb(79, 142, 247), .ForeColor = Color.White,
-            .FlatStyle = FlatStyle.Flat
-        }
-        btn.FlatAppearance.BorderSize = 0
+        Dim btn = Forms.FormStyles.CreateButton("Unlock", 236, 36)
+        btn.DialogResult = DialogResult.OK
+        btn.Location = New Point(24, 76)
 
         dlg.Controls.AddRange({lbl, txt, btn})
         dlg.AcceptButton = btn
+
+        Forms.FormStyles.MakeBorderless(dlg, "Admin Access")
 
         If dlg.ShowDialog() = DialogResult.OK Then Return txt.Text
         Return Nothing

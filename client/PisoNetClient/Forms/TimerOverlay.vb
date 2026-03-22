@@ -276,7 +276,7 @@ Namespace Forms
             ' Expand height for member row if visible
             If _lblMember.Visible Then
                 Dim baseH = Me.Height
-                Dim newH = baseH + MEMBER_ROW_H + 4  ' 4px separator gap
+                Dim newH = baseH + MEMBER_ROW_H + 10  ' 4px separator + 6px bottom padding for rounded corner
                 Me.Size = New Size(FORM_W, newH)
                 Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, newH), CORNER_R))
                 LayoutMemberControls(baseH)
@@ -361,8 +361,9 @@ Namespace Forms
             ' Member row sits below a subtle separator line
             Dim y = baseH + 4  ' 4px gap after separator
             _lblMember.Location = New Point(PAD_X, y)
-            _lblMember.Size = New Size(Me.Width - PAD_X - 56 - PAD_X, MEMBER_ROW_H)
-            _btnLogout.Location = New Point(Me.Width - 46 - PAD_X, y + (MEMBER_ROW_H - 18) \ 2)
+            _lblMember.Size = New Size(Me.Width - PAD_X - 60 - PAD_X, MEMBER_ROW_H)
+            ' Keep logout button inside the rounded rect (CORNER_R inset from edge)
+            _btnLogout.Location = New Point(Me.Width - 46 - PAD_X - 4, y + (MEMBER_ROW_H - 18) \ 2)
         End Sub
 
         ' ── Logout confirmation ──────────────────────────────────────

@@ -22,13 +22,8 @@ Namespace Forms
         End Sub
 
         Private Sub InitializeComponent()
-            Me.Text            = "PisoNet — First Time Setup"
-            Me.FormBorderStyle = FormBorderStyle.FixedDialog
             Me.Size            = New Size(440, 420)
-            Me.StartPosition   = FormStartPosition.CenterScreen
-            Me.MaximizeBox     = False
-            Me.MinimizeBox     = False
-            Me.BackColor       = Color.FromArgb(15, 20, 35)
+            Me.BackColor       = FormStyles.DarkBg
             Me.ForeColor       = Color.White
 
             Dim y = 20
@@ -58,7 +53,7 @@ Namespace Forms
                 .Value    = AppConfig.PCNumber,
                 .Location = New Point(24, y),
                 .Width    = 80,
-                .BackColor = Color.FromArgb(26, 30, 45),
+                .BackColor = Color.FromArgb(22, 26, 42),
                 .ForeColor = Color.White
             }
             Me.Controls.Add(_nudPcNum)
@@ -85,19 +80,15 @@ Namespace Forms
             y += 36
 
             ' ── Save button ────────────────────────────────────────────────
-            Dim btnSave = New Button() With {
-                .Text      = "Save & Start",
-                .Location  = New Point(24, y),
-                .Size      = New Size(140, 38),
-                .BackColor = Color.FromArgb(79, 142, 247),
-                .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat
-            }
-            btnSave.FlatAppearance.BorderSize = 0
+            Dim btnSave = FormStyles.CreateButton("Save && Start", 384, 38)
+            btnSave.Location = New Point(24, y)
             AddHandler btnSave.Click, AddressOf OnSave
             Me.Controls.Add(btnSave)
 
             Me.AcceptButton = btnSave
+
+            ' Apply borderless styling (this shifts all controls down and adds title bar)
+            FormStyles.MakeBorderless(Me, "PisoNet — First Time Setup", closable:=False)
         End Sub
 
         Private Sub OnSave(sender As Object, e As EventArgs)

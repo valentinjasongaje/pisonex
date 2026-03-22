@@ -1,5 +1,6 @@
 Imports System.Windows.Forms
 Imports System.Drawing
+Imports PisoNetClient.Resources
 
 Namespace Services
 
@@ -21,7 +22,7 @@ Namespace Services
 
         Public Sub New()
             _notify = New NotifyIcon()
-            _notify.Icon  = SystemIcons.Application
+            _notify.Icon  = LogoHelper.GetIcon()
             _notify.Text  = "PisoNet — Waiting"
             _notify.Visible = True
 

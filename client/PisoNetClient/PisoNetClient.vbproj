@@ -17,8 +17,13 @@
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <ApplicationIcon>Resources\logo.ico</ApplicationIcon>
+  </PropertyGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Resources\logo.png" />
+    <EmbeddedResource Include="Resources\logo.ico" />
   </ItemGroup>
 
 </Project>
