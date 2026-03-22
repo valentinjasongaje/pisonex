@@ -9,54 +9,74 @@
 <div class="card">
   <h2>Settings</h2>
   <form id="membership-config-form" onsubmit="saveMembershipConfig(event)">
-    <div class="form-row">
+
+    <!-- Toggle switches row -->
+    <div class="membership-toggles">
+      <label class="toggle-label">
+        <input type="checkbox" id="cfg-membership-enabled"
+          {% if config.membership_enabled %}checked{% endif %} />
+        <span>Enable Membership Mode</span>
+      </label>
+      <label class="toggle-label">
+        <input type="checkbox" id="cfg-absorption-enabled"
+          {% if config.absorption_enabled %}checked{% endif %} />
+        <span>Allow Session Absorption</span>
+      </label>
+    </div>
+
+    <!-- Number inputs grid -->
+    <div class="membership-grid">
       <div class="form-group">
-        <label>
-          <input type="checkbox" id="cfg-membership-enabled"
-            {% if config.membership_enabled %}checked{% endif %} />
-          Enable Membership Mode
-        </label>
+        <label for="cfg-logout-deduction">Logout Deduction</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-logout-deduction" min="0" max="60"
+            value="{{ config.logout_deduction_minutes }}" />
+          <span class="suffix">min</span>
+        </div>
       </div>
+
       <div class="form-group">
-        <label>
-          <input type="checkbox" id="cfg-absorption-enabled"
-            {% if config.absorption_enabled %}checked{% endif %} />
-          Allow Session Absorption
-        </label>
+        <label for="cfg-min-logout">Minimum Logout Time</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-min-logout" min="0" max="120"
+            value="{{ config.minimum_logout_minutes }}" />
+          <span class="suffix">min</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="cfg-zero-time">Zero-Time Auto-Logout</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-zero-time" min="10" max="600"
+            value="{{ config.zero_time_auto_logout_seconds }}" />
+          <span class="suffix">sec</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="cfg-idle-shutdown">Idle Auto-Shutdown</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-idle-shutdown" min="0" max="60"
+            value="{{ config.idle_auto_shutdown_minutes }}" />
+          <span class="suffix">min</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="cfg-heartbeat-timeout">Heartbeat Timeout</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-heartbeat-timeout" min="5" max="1440"
+            value="{{ config.member_heartbeat_timeout_minutes }}" />
+          <span class="suffix">min</span>
+        </div>
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Logout Deduction (minutes)</label>
-        <input type="number" id="cfg-logout-deduction" min="0" max="60"
-          value="{{ config.logout_deduction_minutes }}" />
-      </div>
-      <div class="form-group">
-        <label>Minimum Logout Time (minutes)</label>
-        <input type="number" id="cfg-min-logout" min="0" max="120"
-          value="{{ config.minimum_logout_minutes }}" />
-      </div>
-      <div class="form-group">
-        <label>Zero-Time Auto-Logout (seconds)</label>
-        <input type="number" id="cfg-zero-time" min="10" max="600"
-          value="{{ config.zero_time_auto_logout_seconds }}" />
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Idle Auto-Shutdown (minutes)</label>
-        <input type="number" id="cfg-idle-shutdown" min="0" max="60"
-          value="{{ config.idle_auto_shutdown_minutes }}" />
-      </div>
-      <div class="form-group">
-        <label>Heartbeat Timeout (minutes)</label>
-        <input type="number" id="cfg-heartbeat-timeout" min="5" max="1440"
-          value="{{ config.member_heartbeat_timeout_minutes }}" />
-      </div>
-      <button type="submit" class="btn btn-primary align-end">Save Settings</button>
+
+    <div class="membership-actions">
+      <button type="submit" class="btn btn-primary">Save Settings</button>
+      <span id="config-status"></span>
     </div>
   </form>
-  <div id="config-status" style="margin-top:.5rem;font-size:.85rem"></div>
 </div>
 
 <!-- Members List -->
@@ -109,6 +129,78 @@
   <p style="color:var(--gray)">No registered members yet.</p>
   {% endif %}
 </div>
+
+<style>
+  .membership-toggles {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    background: var(--surface-2, rgba(255,255,255,0.03));
+    border-radius: 8px;
+    border: 1px solid var(--border, rgba(255,255,255,0.06));
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: var(--text, #e2e8f0) !important;
+    cursor: pointer;
+  }
+  .toggle-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--blue, #3b82f6);
+  }
+
+  .membership-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .membership-grid .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .membership-grid label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim, #94a3b8);
+  }
+
+  .input-suffix {
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+  .input-suffix input {
+    width: 100%;
+    padding-right: 40px;
+  }
+  .input-suffix .suffix {
+    position: absolute;
+    right: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim, #94a3b8);
+    pointer-events: none;
+    opacity: 0.7;
+  }
+
+  .membership-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .membership-actions #config-status {
+    font-size: 0.85rem;
+  }
+</style>
 
 <script>
 async function saveMembershipConfig(e) {

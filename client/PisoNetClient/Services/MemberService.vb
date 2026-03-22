@@ -10,21 +10,21 @@ Namespace Services
         Public Property user_id As Integer
         Public Property username As String
         Public Property absorbed_seconds As Integer
-        Public Property error As String
+        Public Property [error] As String
     End Class
 
     Public Class MemberLoginResponse
         Public Property success As Boolean
         Public Property balance_seconds As Integer
         Public Property absorbed_seconds As Integer
-        Public Property error As String
+        Public Property [error] As String
     End Class
 
     Public Class MemberLogoutResponse
         Public Property success As Boolean
         Public Property remaining_seconds As Integer
         Public Property deducted_seconds As Integer
-        Public Property error As String
+        Public Property [error] As String
     End Class
 
     Public Class MemberService

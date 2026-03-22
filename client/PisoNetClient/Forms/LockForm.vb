@@ -43,6 +43,7 @@ Namespace Forms
 
         ' Membership UI controls
         Private _pnlMember      As Panel        ' container for membership UI
+        Private _lblMemberTitle As Label        ' "Member Access" header
         Private _btnLogin       As Button
         Private _btnRegister    As Button
         Private _lblMemberInfo  As Label        ' "Logged in as: [name]"
@@ -50,6 +51,11 @@ Namespace Forms
         Private _btnLogout      As Button
         Private _membershipEnabled As Boolean = False
         Private _memberLoggedIn    As Boolean = False
+
+        ' Membership colors
+        Private Shared ReadOnly MemberAccent As Color = Color.FromArgb(79, 142, 247)
+        Private Shared ReadOnly MemberBg     As Color = Color.FromArgb(220, 8, 12, 24)
+        Private Shared ReadOnly MemberBorder As Color = Color.FromArgb(50, 80, 120, 200)
 
         Public Event AdminPanelRequested()
         Public Event MemberLoginRequested(username As String, password As String)
@@ -271,34 +277,50 @@ Namespace Forms
 
             ' ── Membership UI ────────────────────────────────────────────────────
             _pnlMember = New Panel() With {
-                .Size      = New Size(320, 160),
-                .BackColor = Color.FromArgb(100, 16, 20, 36),
+                .Size      = New Size(340, 160),
+                .BackColor = Color.Transparent,
                 .Visible   = False
             }
             AddHandler _pnlMember.Paint, AddressOf OnMemberPanelPaint
 
+            _lblMemberTitle = New Label() With {
+                .Text      = "Member Access",
+                .Font      = New Font("Segoe UI", 9, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(120, 150, 200),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(300, 20),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Location  = New Point(20, 14)
+            }
+
             _btnLogin = New Button() With {
-                .Text      = "Login",
-                .Size      = New Size(140, 38),
+                .Text      = "  Login",
+                .Size      = New Size(140, 40),
                 .Font      = New Font("Segoe UI", 10, FontStyle.Bold),
                 .ForeColor = Color.White,
-                .BackColor = Color.FromArgb(79, 142, 247),
+                .BackColor = MemberAccent,
                 .FlatStyle = FlatStyle.Flat,
-                .Cursor    = Cursors.Hand
+                .Cursor    = Cursors.Hand,
+                .TextAlign = ContentAlignment.MiddleCenter
             }
             _btnLogin.FlatAppearance.BorderSize = 0
+            _btnLogin.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 160, 255)
             AddHandler _btnLogin.Click, AddressOf OnLoginClick
 
             _btnRegister = New Button() With {
-                .Text      = "Register",
-                .Size      = New Size(140, 38),
+                .Text      = "  Register",
+                .Size      = New Size(140, 40),
                 .Font      = New Font("Segoe UI", 10, FontStyle.Bold),
-                .ForeColor = Color.White,
-                .BackColor = Color.FromArgb(55, 65, 81),
+                .ForeColor = Color.FromArgb(180, 195, 220),
+                .BackColor = Color.FromArgb(30, 38, 58),
                 .FlatStyle = FlatStyle.Flat,
-                .Cursor    = Cursors.Hand
+                .Cursor    = Cursors.Hand,
+                .TextAlign = ContentAlignment.MiddleCenter
             }
-            _btnRegister.FlatAppearance.BorderSize = 0
+            _btnRegister.FlatAppearance.BorderSize = 1
+            _btnRegister.FlatAppearance.BorderColor = Color.FromArgb(60, 80, 120, 200)
+            _btnRegister.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 50, 72)
             AddHandler _btnRegister.Click, AddressOf OnRegisterClick
 
             _lblMemberInfo = New Label() With {
@@ -306,7 +328,9 @@ Namespace Forms
                 .Font      = New Font("Segoe UI", 11, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(34, 197, 94),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
+                .AutoSize  = False,
+                .Size      = New Size(300, 24),
+                .TextAlign = ContentAlignment.MiddleCenter,
                 .Visible   = False
             }
 
@@ -315,24 +339,27 @@ Namespace Forms
                 .Font      = New Font("Segoe UI", 10),
                 .ForeColor = Color.FromArgb(140, 160, 200),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
+                .AutoSize  = False,
+                .Size      = New Size(300, 22),
+                .TextAlign = ContentAlignment.MiddleCenter,
                 .Visible   = False
             }
 
             _btnLogout = New Button() With {
                 .Text      = "Logout",
-                .Size      = New Size(100, 32),
+                .Size      = New Size(120, 34),
                 .Font      = New Font("Segoe UI", 9, FontStyle.Bold),
                 .ForeColor = Color.White,
-                .BackColor = Color.FromArgb(239, 68, 68),
+                .BackColor = Color.FromArgb(180, 50, 50),
                 .FlatStyle = FlatStyle.Flat,
                 .Cursor    = Cursors.Hand,
                 .Visible   = False
             }
             _btnLogout.FlatAppearance.BorderSize = 0
+            _btnLogout.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 60, 60)
             AddHandler _btnLogout.Click, AddressOf OnLogoutClick
 
-            _pnlMember.Controls.AddRange({_btnLogin, _btnRegister, _lblMemberInfo, _lblMemberTime, _btnLogout})
+            _pnlMember.Controls.AddRange({_lblMemberTitle, _btnLogin, _btnRegister, _lblMemberInfo, _lblMemberTime, _btnLogout})
 
             Me.Controls.AddRange({_lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlStatus, _lblLicenseWarn})
         End Sub
@@ -632,7 +659,10 @@ Namespace Forms
             If _pnlMember.Visible Then
                 _pnlMember.Location = New Point(
                     (Me.ClientSize.Width - _pnlMember.Width) \ 2,
-                    _lblSub.Bottom + 20)
+                    _lblSub.Bottom + 28)
+                ' Keep title centered within panel
+                _lblMemberTitle.Location = New Point(20, 14)
+                _lblMemberTitle.Size = New Size(_pnlMember.Width - 40, 20)
             End If
 
             ' License warning — centered, below sub-message (or below member panel)
@@ -728,7 +758,7 @@ Namespace Forms
             Dim g = e.Graphics
             g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
             Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
-            Dim r = 12
+            Dim r = 14
             Using path = New Drawing2D.GraphicsPath()
                 Dim d = r * 2
                 path.AddArc(rect.X, rect.Y, d, d, 180, 90)
@@ -736,12 +766,20 @@ Namespace Forms
                 path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
                 path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
                 path.CloseFigure()
-                Using br = New SolidBrush(Color.FromArgb(180, 10, 14, 28))
+                ' Dark glass background
+                Using br = New SolidBrush(Color.FromArgb(210, 8, 12, 24))
                     g.FillPath(br, path)
                 End Using
-                Using pen = New Pen(Color.FromArgb(60, 80, 110, 180), 1)
+                ' Subtle border
+                Using pen = New Pen(Color.FromArgb(45, 80, 120, 200), 1)
                     g.DrawPath(pen, path)
                 End Using
+            End Using
+            ' Top accent line (matches timer overlay style)
+            Dim accentRect = New Rectangle(r, 0, pnl.Width - r * 2, 2)
+            Using br = New Drawing2D.LinearGradientBrush(accentRect, MemberAccent,
+                    Color.FromArgb(124, 58, 237), 0F)
+                g.FillRectangle(br, accentRect)
             End Using
         End Sub
 
@@ -762,80 +800,161 @@ Namespace Forms
         End Sub
 
         Private Sub OnLogoutClick(sender As Object, e As EventArgs)
-            RaiseEvent MemberLogoutRequested()
+            If ConfirmLogout() Then
+                RaiseEvent MemberLogoutRequested()
+            End If
         End Sub
 
-        Private Function ShowMemberDialog(title As String, showConfirmPassword As Boolean) As Tuple(Of String, String)
-            Dim dlgH = If(showConfirmPassword, 220, 185)
+        Private Function ConfirmLogout() As Boolean
             Dim dlg = New Form() With {
-                .Text = title, .Size = New Size(320, dlgH),
+                .Text = "Confirm Logout",
+                .Size = New Size(320, 150),
                 .StartPosition = FormStartPosition.CenterScreen,
                 .FormBorderStyle = FormBorderStyle.FixedDialog,
                 .MaximizeBox = False, .MinimizeBox = False, .TopMost = True,
-                .BackColor = Color.FromArgb(15, 20, 35), .ForeColor = Color.White
+                .BackColor = Color.FromArgb(12, 16, 28), .ForeColor = Color.White,
+                .Font = New Font("Segoe UI", 9)
             }
 
-            Dim lblUser = New Label() With {.Text = "Username:", .AutoSize = True, .Location = New Point(16, 16)}
+            Dim lbl = New Label() With {
+                .Text = "Are you sure you want to logout?" & vbCrLf & "Your remaining time will be saved to your account.",
+                .Font = New Font("Segoe UI", 9.5F),
+                .ForeColor = Color.FromArgb(180, 195, 220),
+                .Location = New Point(24, 16), .Size = New Size(260, 46),
+                .AutoSize = False
+            }
+
+            Dim btnYes = New Button() With {
+                .Text = "Logout", .DialogResult = DialogResult.Yes,
+                .Location = New Point(24, 72), .Size = New Size(120, 34),
+                .BackColor = Color.FromArgb(180, 50, 50), .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+                .Cursor = Cursors.Hand
+            }
+            btnYes.FlatAppearance.BorderSize = 0
+
+            Dim btnNo = New Button() With {
+                .Text = "Cancel", .DialogResult = DialogResult.No,
+                .Location = New Point(156, 72), .Size = New Size(120, 34),
+                .BackColor = Color.FromArgb(30, 38, 58), .ForeColor = Color.FromArgb(180, 195, 220),
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+                .Cursor = Cursors.Hand
+            }
+            btnNo.FlatAppearance.BorderSize = 1
+            btnNo.FlatAppearance.BorderColor = Color.FromArgb(60, 80, 120, 200)
+
+            dlg.Controls.AddRange({lbl, btnYes, btnNo})
+            dlg.AcceptButton = btnNo
+            dlg.CancelButton = btnNo
+
+            Return dlg.ShowDialog() = DialogResult.Yes
+        End Function
+
+        Private Function ShowMemberDialog(title As String, showConfirmPassword As Boolean) As Tuple(Of String, String)
+            Dim fieldH = 28
+            Dim labelH = 18
+            Dim gap = 6
+            Dim padX = 24
+            Dim padTop = 20
+            Dim fieldW = 292
+
+            ' Calculate height
+            Dim curY = padTop
+            curY += labelH + gap        ' "Username:" label
+            curY += fieldH + 12         ' username field + spacing
+            curY += labelH + gap        ' "Password:" label
+            curY += fieldH + 12         ' password field + spacing
+            If showConfirmPassword Then
+                curY += labelH + gap    ' "Confirm:" label
+                curY += fieldH + 12     ' confirm field + spacing
+            End If
+            curY += 40 + 20            ' button + bottom padding
+
+            Dim dlg = New Form() With {
+                .Text = title,
+                .Size = New Size(padX * 2 + fieldW + 16, curY),
+                .StartPosition = FormStartPosition.CenterScreen,
+                .FormBorderStyle = FormBorderStyle.FixedDialog,
+                .MaximizeBox = False, .MinimizeBox = False, .TopMost = True,
+                .BackColor = Color.FromArgb(12, 16, 28), .ForeColor = Color.White,
+                .Font = New Font("Segoe UI", 9)
+            }
+
+            Dim y = padTop
+
+            ' Username
+            Dim lblUser = New Label() With {
+                .Text = "Username", .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = Color.FromArgb(140, 160, 200),
+                .AutoSize = True, .Location = New Point(padX, y)
+            }
+            y += labelH + gap
             Dim txtUser = New TextBox() With {
-                .Location = New Point(16, 36), .Width = 270, .MaxLength = 20,
-                .BackColor = Color.FromArgb(26, 30, 45), .ForeColor = Color.White, .BorderStyle = BorderStyle.FixedSingle
+                .Location = New Point(padX, y), .Size = New Size(fieldW, fieldH), .MaxLength = 20,
+                .BackColor = Color.FromArgb(22, 26, 42), .ForeColor = Color.White,
+                .BorderStyle = BorderStyle.FixedSingle, .Font = New Font("Segoe UI", 10)
             }
+            y += fieldH + 12
 
-            Dim lblPass = New Label() With {.Text = "Password:", .AutoSize = True, .Location = New Point(16, 66)}
-            Dim txtPass = New TextBox() With {
-                .Location = New Point(16, 86), .Width = 270, .MaxLength = 128, .PasswordChar = "●"c,
-                .BackColor = Color.FromArgb(26, 30, 45), .ForeColor = Color.White, .BorderStyle = BorderStyle.FixedSingle
+            ' Password
+            Dim lblPass = New Label() With {
+                .Text = "Password", .Font = New Font("Segoe UI", 8.5F),
+                .ForeColor = Color.FromArgb(140, 160, 200),
+                .AutoSize = True, .Location = New Point(padX, y)
             }
+            y += labelH + gap
+            Dim txtPass = New TextBox() With {
+                .Location = New Point(padX, y), .Size = New Size(fieldW, fieldH), .MaxLength = 128,
+                .PasswordChar = "●"c,
+                .BackColor = Color.FromArgb(22, 26, 42), .ForeColor = Color.White,
+                .BorderStyle = BorderStyle.FixedSingle, .Font = New Font("Segoe UI", 10)
+            }
+            y += fieldH + 12
 
             dlg.Controls.AddRange({lblUser, txtUser, lblPass, txtPass})
 
-            Dim btnY = 120
+            Dim txtConf As TextBox = Nothing
             If showConfirmPassword Then
-                Dim lblConf = New Label() With {.Text = "Confirm Password:", .AutoSize = True, .Location = New Point(16, 116)}
-                Dim txtConf = New TextBox() With {
-                    .Location = New Point(16, 136), .Width = 270, .MaxLength = 128, .PasswordChar = "●"c,
-                    .BackColor = Color.FromArgb(26, 30, 45), .ForeColor = Color.White, .BorderStyle = BorderStyle.FixedSingle
+                Dim lblConf = New Label() With {
+                    .Text = "Confirm Password", .Font = New Font("Segoe UI", 8.5F),
+                    .ForeColor = Color.FromArgb(140, 160, 200),
+                    .AutoSize = True, .Location = New Point(padX, y)
                 }
+                y += labelH + gap
+                txtConf = New TextBox() With {
+                    .Location = New Point(padX, y), .Size = New Size(fieldW, fieldH), .MaxLength = 128,
+                    .PasswordChar = "●"c,
+                    .BackColor = Color.FromArgb(22, 26, 42), .ForeColor = Color.White,
+                    .BorderStyle = BorderStyle.FixedSingle, .Font = New Font("Segoe UI", 10)
+                }
+                y += fieldH + 12
                 dlg.Controls.AddRange({lblConf, txtConf})
-                btnY = 172
+            End If
 
-                Dim btnOk = New Button() With {
-                    .Text = "OK", .DialogResult = DialogResult.OK,
-                    .Location = New Point(16, btnY), .Width = 80,
-                    .BackColor = Color.FromArgb(79, 142, 247), .ForeColor = Color.White, .FlatStyle = FlatStyle.Flat
-                }
-                btnOk.FlatAppearance.BorderSize = 0
-                dlg.Controls.Add(btnOk)
-                dlg.AcceptButton = btnOk
+            ' Action button
+            Dim btnText = If(showConfirmPassword, "Create Account", "Login")
+            Dim btnOk = New Button() With {
+                .Text = btnText, .DialogResult = DialogResult.OK,
+                .Location = New Point(padX, y), .Size = New Size(fieldW, 38),
+                .BackColor = MemberAccent, .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 10, FontStyle.Bold),
+                .Cursor = Cursors.Hand
+            }
+            btnOk.FlatAppearance.BorderSize = 0
+            btnOk.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 160, 255)
+            dlg.Controls.Add(btnOk)
+            dlg.AcceptButton = btnOk
 
-                If dlg.ShowDialog() = DialogResult.OK Then
-                    If String.IsNullOrWhiteSpace(txtUser.Text) OrElse String.IsNullOrWhiteSpace(txtPass.Text) Then
-                        MessageBox.Show("Username and password are required.", title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                        Return Nothing
-                    End If
-                    If txtPass.Text <> txtConf.Text Then
-                        MessageBox.Show("Passwords do not match.", title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                        Return Nothing
-                    End If
-                    Return Tuple.Create(txtUser.Text.Trim(), txtPass.Text)
+            If dlg.ShowDialog() = DialogResult.OK Then
+                If String.IsNullOrWhiteSpace(txtUser.Text) OrElse String.IsNullOrWhiteSpace(txtPass.Text) Then
+                    MessageBox.Show("Username and password are required.", title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return Nothing
                 End If
-            Else
-                Dim btnOk = New Button() With {
-                    .Text = "OK", .DialogResult = DialogResult.OK,
-                    .Location = New Point(16, btnY), .Width = 80,
-                    .BackColor = Color.FromArgb(79, 142, 247), .ForeColor = Color.White, .FlatStyle = FlatStyle.Flat
-                }
-                btnOk.FlatAppearance.BorderSize = 0
-                dlg.Controls.Add(btnOk)
-                dlg.AcceptButton = btnOk
-
-                If dlg.ShowDialog() = DialogResult.OK Then
-                    If String.IsNullOrWhiteSpace(txtUser.Text) OrElse String.IsNullOrWhiteSpace(txtPass.Text) Then
-                        MessageBox.Show("Username and password are required.", title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                        Return Nothing
-                    End If
-                    Return Tuple.Create(txtUser.Text.Trim(), txtPass.Text)
+                If showConfirmPassword AndAlso txtPass.Text <> txtConf.Text Then
+                    MessageBox.Show("Passwords do not match.", title, MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    Return Nothing
                 End If
+                Return Tuple.Create(txtUser.Text.Trim(), txtPass.Text)
             End If
             Return Nothing
         End Function
@@ -860,19 +979,29 @@ Namespace Forms
             End If
 
             _pnlMember.Visible = True
+            Dim pw = 340   ' panel width
+            Dim cx = pw \ 2 ' center x
 
             If _memberLoggedIn Then
-                ' Show logged-in state
+                ' ── Logged-in state ─────────────────────────────
+                _lblMemberTitle.Text = "Member"
+                _lblMemberTitle.Visible = True
                 _btnLogin.Visible = False
                 _btnRegister.Visible = False
-                _lblMemberInfo.Visible = True
-                _lblMemberInfo.Text = $"Logged in as: {username}"
 
+                ' Username
+                _lblMemberInfo.Visible = True
+                _lblMemberInfo.Text = username
+                _lblMemberInfo.ForeColor = Color.FromArgb(34, 197, 94)
+                _lblMemberInfo.Location = New Point(20, 38)
+                _lblMemberInfo.Size = New Size(pw - 40, 24)
+
+                ' Time / status
                 _lblMemberTime.Visible = True
                 If zeroTimeLogoutSeconds > 0 Then
-                    _lblMemberTime.Text = $"No time remaining — auto-logout in {zeroTimeLogoutSeconds}s"
+                    _lblMemberTime.Text = $"No time — auto-logout in {zeroTimeLogoutSeconds}s"
                     _lblMemberTime.ForeColor = Color.FromArgb(245, 158, 11)
-                    _lblSub.Text = "Insert coin to start session"
+                    _lblSub.Text = "Insert coin to add time"
                 ElseIf balanceSeconds > 0 Then
                     Dim mins = balanceSeconds \ 60
                     Dim secs = balanceSeconds Mod 60
@@ -880,33 +1009,39 @@ Namespace Forms
                     _lblMemberTime.ForeColor = Color.FromArgb(140, 160, 200)
                 Else
                     _lblMemberTime.Text = "No time remaining"
-                    _lblMemberTime.ForeColor = Color.FromArgb(140, 160, 200)
+                    _lblMemberTime.ForeColor = Color.FromArgb(160, 120, 140, 170)
                 End If
+                _lblMemberTime.Location = New Point(20, 64)
+                _lblMemberTime.Size = New Size(pw - 40, 22)
 
+                ' Logout button — centered at bottom
                 _btnLogout.Visible = True
                 _btnLogout.Enabled = canLogout
+                _btnLogout.Location = New Point(cx - _btnLogout.Width \ 2, 96)
 
-                ' Layout logged-in state
-                _lblMemberInfo.Location = New Point(20, 16)
-                _lblMemberTime.Location = New Point(20, 44)
-                _btnLogout.Location = New Point(20, 76)
-
-                _pnlMember.Size = New Size(320, 120)
+                _pnlMember.Size = New Size(pw, 144)
             Else
-                ' Show login/register buttons
+                ' ── Not logged in — show Login / Register ──────
+                _lblMemberTitle.Text = "Member Access"
+                _lblMemberTitle.Visible = True
                 _btnLogin.Visible = True
                 _btnRegister.Visible = True
                 _lblMemberInfo.Visible = False
                 _lblMemberTime.Visible = False
                 _btnLogout.Visible = False
 
-                _btnLogin.Location = New Point(16, 16)
-                _btnRegister.Location = New Point(164, 16)
+                ' Center the two buttons with a gap between them
+                Dim btnGap = 12
+                Dim totalBtnW = _btnLogin.Width + btnGap + _btnRegister.Width
+                Dim btnStartX = (pw - totalBtnW) \ 2
+                Dim btnY = 42
+                _btnLogin.Location = New Point(btnStartX, btnY)
+                _btnRegister.Location = New Point(btnStartX + _btnLogin.Width + btnGap, btnY)
 
-                _pnlMember.Size = New Size(320, 70)
+                _pnlMember.Size = New Size(pw, 98)
             End If
 
-            ' Show idle-shutdown warning
+            ' Idle-shutdown warning in sub-message
             If idleShutdownSeconds > 0 AndAlso Not _memberLoggedIn Then
                 _lblSub.Text = $"PC will shut down in {idleShutdownSeconds}s"
                 _lblSub.ForeColor = Color.FromArgb(239, 68, 68)
@@ -915,6 +1050,7 @@ Namespace Forms
                 _lblSub.ForeColor = Color.FromArgb(140, 160, 200)
             End If
 
+            _pnlMember.Invalidate()
             CenterLabels()
         End Sub
 

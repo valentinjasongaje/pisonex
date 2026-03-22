@@ -29,15 +29,16 @@ Namespace Forms
         Private Shared ReadOnly GreenColor   As Color = Color.FromArgb(34, 197, 94)
 
         ' ── Dimensions ───────────────────────────────────────────────
-        Private Const FORM_W      As Integer = 240
-        Private Const CORNER_R    As Integer = 14
-        Private Const ACCENT_H    As Integer = 3
-        Private Const PAD_X       As Integer = 14
-        Private Const PAD_Y       As Integer = 10
-        Private Const FORM_H_SLIM As Integer = 52
-        Private Const FORM_H_TALL As Integer = 72
-        Private Const DOT_SIZE    As Integer = 8
-        Private Const DOT_MARGIN  As Integer = 10
+        Private Const FORM_W        As Integer = 240
+        Private Const CORNER_R      As Integer = 14
+        Private Const ACCENT_H      As Integer = 3
+        Private Const PAD_X         As Integer = 14
+        Private Const PAD_Y         As Integer = 10
+        Private Const FORM_H_SLIM   As Integer = 52
+        Private Const FORM_H_TALL   As Integer = 72
+        Private Const DOT_SIZE      As Integer = 8
+        Private Const DOT_MARGIN    As Integer = 10
+        Private Const MEMBER_ROW_H  As Integer = 24
 
         ' ── Controls ─────────────────────────────────────────────────
         Private _lblTime  As Label
@@ -111,27 +112,29 @@ Namespace Forms
             ' ── Member name label ───────────────────────────────────
             _lblMember = New Label() With {
                 .Text      = "",
-                .Font      = New Font("Segoe UI", 7),
+                .Font      = New Font("Segoe UI", 7.5F),
                 .ForeColor = Color.FromArgb(34, 197, 94),
                 .BackColor = Color.Transparent,
                 .AutoSize  = False,
-                .TextAlign = ContentAlignment.MiddleCenter,
+                .TextAlign = ContentAlignment.MiddleLeft,
                 .Visible   = False
             }
 
             ' ── Logout button ───────────────────────────────────────
             _btnLogout = New Button() With {
                 .Text      = "Logout",
-                .Font      = New Font("Segoe UI", 7, FontStyle.Bold),
-                .ForeColor = Color.White,
-                .BackColor = Color.FromArgb(239, 68, 68),
+                .Font      = New Font("Segoe UI", 6.5F, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(239, 150, 150),
+                .BackColor = Color.FromArgb(40, 239, 68, 68),
                 .FlatStyle = FlatStyle.Flat,
-                .Size      = New Size(50, 20),
+                .Size      = New Size(46, 18),
                 .Cursor    = Cursors.Hand,
                 .Visible   = False
             }
-            _btnLogout.FlatAppearance.BorderSize = 0
-            AddHandler _btnLogout.Click, Sub(s, ev) RaiseEvent MemberLogoutRequested()
+            _btnLogout.FlatAppearance.BorderSize = 1
+            _btnLogout.FlatAppearance.BorderColor = Color.FromArgb(80, 239, 68, 68)
+            _btnLogout.FlatAppearance.MouseOverBackColor = Color.FromArgb(80, 239, 68, 68)
+            AddHandler _btnLogout.Click, AddressOf OnLogoutClick
 
             Me.Controls.AddRange({_lblTime, _lblPC, _lblMember, _btnLogout, _pbLogo})
 
@@ -165,6 +168,14 @@ Namespace Forms
             Using br = New LinearGradientBrush(accentRect, AccentBlue, AccentPurple, 0F)
                 g.FillRectangle(br, accentRect)
             End Using
+
+            ' Separator line above member row (when visible)
+            If _lblMember.Visible Then
+                Dim sepY = Me.Height - MEMBER_ROW_H - 4
+                Using pen = New Pen(Color.FromArgb(40, 100, 120, 180), 1)
+                    g.DrawLine(pen, PAD_X, sepY, Me.Width - PAD_X, sepY)
+                End Using
+            End If
 
             ' Connection dot
             If AppConfig.TimerShowConnDot Then
@@ -264,10 +275,11 @@ Namespace Forms
 
             ' Expand height for member row if visible
             If _lblMember.Visible Then
-                Dim newH = Me.Height + 22
+                Dim baseH = Me.Height
+                Dim newH = baseH + MEMBER_ROW_H + 4  ' 4px separator gap
                 Me.Size = New Size(FORM_W, newH)
                 Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, newH), CORNER_R))
-                LayoutMemberControls()
+                LayoutMemberControls(baseH)
             End If
 
             Me.Invalidate()
@@ -322,9 +334,10 @@ Namespace Forms
                 Me.Invoke(Sub() SetMemberInfo(username, canLogout))
                 Return
             End If
+            Dim changed = (_memberName IsNot Nothing) <> (username IsNot Nothing)
             _memberName = username
             If Not String.IsNullOrEmpty(username) Then
-                _lblMember.Text = username
+                _lblMember.Text = $"  {username}"  ' small indent after separator
                 _lblMember.Visible = True
                 _btnLogout.Visible = True
                 _btnLogout.Enabled = canLogout
@@ -332,16 +345,34 @@ Namespace Forms
                 _lblMember.Visible = False
                 _btnLogout.Visible = False
             End If
-            LayoutMemberControls()
+            ' Full re-layout so the form resizes/shrinks correctly
+            If changed Then
+                ApplyConfig()
+            Else
+                ' Just reposition controls without full resize
+                If _lblMember.Visible Then
+                    LayoutMemberControls(Me.Height - MEMBER_ROW_H - 4)
+                End If
+            End If
         End Sub
 
-        Private Sub LayoutMemberControls()
+        Private Sub LayoutMemberControls(baseH As Integer)
             If Not _lblMember.Visible Then Return
-            ' Member label + logout button on bottom row of the overlay
-            Dim y = Me.Height - 22
+            ' Member row sits below a subtle separator line
+            Dim y = baseH + 4  ' 4px gap after separator
             _lblMember.Location = New Point(PAD_X, y)
-            _lblMember.Size = New Size(Me.Width - PAD_X * 2 - 56, 18)
-            _btnLogout.Location = New Point(Me.Width - 56, y - 1)
+            _lblMember.Size = New Size(Me.Width - PAD_X - 56 - PAD_X, MEMBER_ROW_H)
+            _btnLogout.Location = New Point(Me.Width - 46 - PAD_X, y + (MEMBER_ROW_H - 18) \ 2)
+        End Sub
+
+        ' ── Logout confirmation ──────────────────────────────────────
+        Private Sub OnLogoutClick(sender As Object, e As EventArgs)
+            Dim result = MessageBox.Show(
+                "Are you sure you want to logout?" & vbCrLf & "Your remaining time will be saved.",
+                "Confirm Logout", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+            If result = DialogResult.Yes Then
+                RaiseEvent MemberLogoutRequested()
+            End If
         End Sub
 
         ' ── Mouse handling ────────────────────────────────────────────
