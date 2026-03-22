@@ -9,15 +9,21 @@ from database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id          = Column(Integer, primary_key=True, index=True)
-    username    = Column(String(50), unique=True, nullable=False, index=True)
-    pin         = Column(String(255), nullable=False)   # bcrypt hashed
-    balance_min = Column(Integer, default=0, nullable=False)
-    created_at  = Column(DateTime, default=datetime.utcnow)
-    is_active   = Column(Boolean, default=True)
+    id              = Column(Integer, primary_key=True, index=True)
+    username        = Column(String(50), unique=True, nullable=False, index=True)
+    password_hash   = Column(String(255), nullable=False)  # bcrypt hashed (any characters)
+    balance_seconds = Column(Integer, default=0, nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    is_active       = Column(Boolean, default=True)
+
+    # Membership tracking
+    logged_in_pc_id  = Column(Integer, ForeignKey("pcs.id"), nullable=True)
+    last_login_at    = Column(DateTime, nullable=True)
+    last_activity_at = Column(DateTime, nullable=True)
 
     sessions     = relationship("Session", back_populates="user")
     transactions = relationship("CoinTransaction", back_populates="user")
+    logged_in_pc = relationship("PC", foreign_keys=[logged_in_pc_id])
 
 
 class PC(Base):
@@ -45,8 +51,8 @@ class Session(Base):
     pc_id           = Column(Integer, ForeignKey("pcs.id"), nullable=False)
     started_at      = Column(DateTime, default=datetime.utcnow)
     ended_at        = Column(DateTime, nullable=True)
-    minutes_granted = Column(Integer, default=0, nullable=False)
-    minutes_used    = Column(Integer, default=0, nullable=False)
+    granted_seconds = Column(Integer, default=0, nullable=False)
+    used_seconds    = Column(Integer, default=0, nullable=False)
     is_active       = Column(Boolean, default=True, index=True)
     session_token   = Column(String(36), unique=True, nullable=False)
 
@@ -60,8 +66,8 @@ class CoinTransaction(Base):
     id            = Column(Integer, primary_key=True, index=True)
     pc_id         = Column(Integer, ForeignKey("pcs.id"), nullable=True)
     user_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
-    amount_pesos  = Column(Integer, nullable=False)
-    minutes_added = Column(Integer, nullable=False)
+    amount_php    = Column(Integer, nullable=False)
+    seconds_added = Column(Integer, nullable=False)
     created_at    = Column(DateTime, default=datetime.utcnow, index=True)
 
     pc   = relationship("PC", back_populates="transactions")
@@ -73,10 +79,23 @@ class CoinRate(Base):
 
     id         = Column(Integer, primary_key=True, index=True)
     pesos      = Column(Integer, nullable=False)
-    minutes    = Column(Integer, nullable=False)
+    seconds    = Column(Integer, nullable=False)
     label      = Column(String(100))            # e.g. "₱5 = 30 minutes"
     is_active  = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MembershipConfig(Base):
+    __tablename__ = "membership_config"
+
+    id                              = Column(Integer, primary_key=True, default=1)
+    membership_enabled              = Column(Boolean, default=False, nullable=False)
+    absorption_enabled              = Column(Boolean, default=False, nullable=False)
+    logout_deduction_minutes        = Column(Integer, default=5, nullable=False)
+    minimum_logout_minutes          = Column(Integer, default=10, nullable=False)
+    zero_time_auto_logout_seconds   = Column(Integer, default=30, nullable=False)
+    idle_auto_shutdown_minutes      = Column(Integer, default=5, nullable=False)
+    member_heartbeat_timeout_minutes = Column(Integer, default=60, nullable=False)
 
 
 class SystemLog(Base):

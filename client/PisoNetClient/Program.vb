@@ -10,6 +10,7 @@ Imports PisoNetClient.Forms
 Module Program
 
     Private _api As ApiService
+    Private _memberSvc As MemberService
     Private _lockMgr As LockManager
     Private _session As SessionManager
     Private _overlay As TimerOverlay
@@ -47,6 +48,13 @@ Module Program
         _guardTimer.AutoReset = True
         _guardTimer.Start()
 
+        ' ── License initialization ────────────────────────────────────────
+        LicenseService.EnsureFirstRunDate()
+        LicenseService.LoadCachedBetaMode()
+        LicenseService.FetchBetaStatusAsync().GetAwaiter().GetResult()
+        LicenseService.StartVerificationTimer()
+        LicenseService.StartBetaCheckTimer()
+
         ' ── Apply Windows restrictions ────────────────────────────────────
         WindowsPolicy.Apply()
 
@@ -55,6 +63,7 @@ Module Program
 
         ' ── Create all UI objects on the STA thread ───────────────────────
         _api = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
+        _memberSvc = New MemberService(AppConfig.ServerUrl)
         _lockMgr = New LockManager()
         _session = New SessionManager(_api, _lockMgr)
         _overlay = New TimerOverlay()
@@ -76,6 +85,13 @@ Module Program
         AddHandler _session.AnnouncementChanged, AddressOf OnAnnouncementChanged
         AddHandler _session.CommandReceived, AddressOf OnCommandReceived
         AddHandler _session.WallpaperChanged, AddressOf OnWallpaperChanged
+        AddHandler _session.MembershipUpdated, AddressOf OnMembershipUpdated
+
+        ' Membership events from lock form and overlay
+        AddHandler _lockMgr.LockFormLoginRequested, AddressOf OnMemberLogin
+        AddHandler _lockMgr.LockFormRegisterRequested, AddressOf OnMemberRegister
+        AddHandler _lockMgr.LockFormLogoutRequested, AddressOf OnMemberLogout
+        AddHandler _overlay.MemberLogoutRequested, AddressOf OnMemberLogoutFromOverlay
 
         ' Admin panel from lock form shortcut and from tray menu
         AddHandler _lockMgr.LockFormAdminRequested, AddressOf OnAdminPanelRequested
@@ -84,6 +100,9 @@ Module Program
 
         ' ── Lock immediately on startup ──────────────────────────────────
         _lockMgr.LockPC()
+
+        ' ── Check license status ────────────────────────────────────────
+        CheckLicenseStatus()
 
         ' ── Defer session start until the message loop is running ────────
         ' This ensures Invoke works correctly for UnlockPC and other UI
@@ -126,6 +145,13 @@ Module Program
             _overlay.Invoke(Sub() OnSessionStarted())
             Return
         End If
+
+        ' Block session start if license is not active
+        If Not LicenseService.IsActive() Then
+            CheckLicenseStatus()
+            Return
+        End If
+
         If Not _overlay.Visible Then _overlay.Show()
         _tray.SetTimerVisible(True)
         _tray.UpdateStatus("PisoNet — Session active")
@@ -175,10 +201,13 @@ Module Program
             ToastType.Warning)
     End Sub
 
-    Private Sub OnTimeAdded(minutes As Integer)
+    Private Sub OnTimeAdded(seconds As Integer)
+        Dim mins = seconds \ 60
+        Dim secs = seconds Mod 60
+        Dim timeStr = If(mins > 0, $"{mins}m {secs}s", $"{secs}s")
         _notifs.Show(
-            $"+{minutes} Minute{If(minutes = 1, "", "s")} Added",
-            $"{minutes} minute{If(minutes = 1, "", "s")} {If(minutes = 1, "has", "have")} been added to your session.",
+            $"+{timeStr} Added",
+            $"{timeStr} has been added to your session.",
             ToastType.Success)
     End Sub
 
@@ -286,6 +315,67 @@ Module Program
         End Function)
     End Sub
 
+    ' ── Membership event handlers ────────────────────────────────────────
+
+    Private Sub OnMembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
+                                     balanceSeconds As Integer, canLogout As Boolean,
+                                     zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer)
+        _lockMgr.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
+                                     canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds)
+        _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout)
+    End Sub
+
+    Private Sub OnMemberLogin(username As String, password As String)
+        Task.Run(Async Function()
+            Dim result = Await _memberSvc.LoginAsync(AppConfig.PCNumber, username, password)
+            If result.success Then
+                Dim absMsg = ""
+                If result.absorbed_seconds > 0 Then
+                    Dim aMins = result.absorbed_seconds \ 60
+                    absMsg = $" (+{aMins}m absorbed from previous session)"
+                End If
+                _notifs.Show("Login Successful", $"Welcome back, {username}!{absMsg}", ToastType.Success)
+            Else
+                _lockMgr.ShowMemberError(If(result.[error], "Login failed"))
+            End If
+        End Function)
+    End Sub
+
+    Private Sub OnMemberRegister(username As String, password As String)
+        Task.Run(Async Function()
+            Dim result = Await _memberSvc.RegisterAsync(AppConfig.PCNumber, username, password)
+            If result.success Then
+                Dim absMsg = ""
+                If result.absorbed_seconds > 0 Then
+                    Dim aMins = result.absorbed_seconds \ 60
+                    absMsg = $" (+{aMins}m absorbed)"
+                End If
+                _notifs.Show("Registration Successful", $"Account created for {result.username}!{absMsg}", ToastType.Success)
+            Else
+                _lockMgr.ShowMemberError(If(result.[error], "Registration failed"))
+            End If
+        End Function)
+    End Sub
+
+    Private Sub OnMemberLogout()
+        Task.Run(Async Function()
+            Dim result = Await _memberSvc.LogoutAsync(AppConfig.PCNumber)
+            If result.success Then
+                Dim mins = result.remaining_seconds \ 60
+                Dim secs = result.remaining_seconds Mod 60
+                Dim dedMins = result.deducted_seconds \ 60
+                _notifs.Show("Logged Out",
+                    $"Time saved: {mins}m {secs}s (deducted {dedMins}m)", ToastType.Success)
+            Else
+                _lockMgr.ShowMemberError(If(result.[error], "Logout failed"))
+            End If
+        End Function)
+    End Sub
+
+    Private Sub OnMemberLogoutFromOverlay()
+        OnMemberLogout()
+    End Sub
+
     ' ── Admin panel flow ──────────────────────────────────────────────────
 
     Private Sub OnAdminPanelRequested()
@@ -328,6 +418,7 @@ Module Program
         WindowsPolicy.RemoveAll()
         _capture?.Dispose()
         _metrics?.Dispose()
+        _memberSvc?.Dispose()
         _tray?.Dispose()
         _lockMgr.AllowExit()
         Application.Exit()
@@ -402,6 +493,24 @@ Module Program
     Private Sub EnsureGuardRunning()
         If Process.GetProcessesByName("PisoNetWatchdog").Length > 0 Then Return
         SpawnGuard()
+    End Sub
+
+    ' ── License check ────────────────────────────────────────────────────
+
+    Private Sub CheckLicenseStatus()
+        Dim status = LicenseService.GetStatus()
+        Select Case status
+            Case LicenseStatus.Expired
+                _lockMgr.ShowLicenseWarning(
+                    "Trial expired. Contact administrator to activate this PC.")
+            Case LicenseStatus.OfflineLocked
+                _lockMgr.ShowLicenseWarning(
+                    "Activation cannot be confirmed. Please connect to the internet.")
+            Case LicenseStatus.Trial
+                ' Trial active — no warning needed, but could show subtle trial indicator
+            Case LicenseStatus.Activated
+                _lockMgr.HideLicenseWarning()
+        End Select
     End Sub
 
     ' ── Windows startup registration ──────────────────────────────────────

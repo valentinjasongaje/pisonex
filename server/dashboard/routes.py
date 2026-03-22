@@ -154,7 +154,7 @@ def _pc_overview_data(db: Session):
 
     today = datetime.utcnow().date()
     today_row = db.query(
-        func.coalesce(func.sum(CoinTransaction.amount_pesos), 0)
+        func.coalesce(func.sum(CoinTransaction.amount_php), 0)
     ).filter(
         func.date(CoinTransaction.created_at) == today
     ).scalar()
@@ -199,6 +199,21 @@ def pc_grid_partial(
     })
 
 
+@router.get("/license", response_class=HTMLResponse)
+def license_page(
+    request: Request,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    from main import license_service
+    lic = license_service.get_status() if license_service else {}
+    return templates.TemplateResponse("license.html", {
+        "request": request,
+        "lic": lic,
+    })
+
+
 @router.get("/rates", response_class=HTMLResponse)
 def rates_page(
     request: Request,
@@ -235,9 +250,10 @@ def save_rate(
     if existing:
         existing.is_active = False
 
+    seconds = minutes * 60
     rate = CoinRate(
         pesos=pesos,
-        minutes=minutes,
+        seconds=seconds,
         label=f"₱{pesos} = {minutes} minutes",
     )
     db.add(rate)
@@ -304,7 +320,7 @@ def transactions_page(
         .limit(1000)
         .all()
     )
-    total_pesos = sum(t.amount_pesos for t in transactions)
+    total_pesos = sum(t.amount_php for t in transactions)
     pcs = db.query(PC).order_by(PC.pc_number).all()
     return templates.TemplateResponse("transactions.html", {
         "request": request,
@@ -357,11 +373,12 @@ def dashboard_add_time(
     if body.minutes <= 0:
         raise HTTPException(status_code=422, detail="Minutes must be greater than 0")
 
-    session = svc.add_time_minutes(body.pc_number, body.minutes)
+    seconds = body.minutes * 60
+    session = svc.add_time_seconds(body.pc_number, seconds)
     return {
         "pc_number": body.pc_number,
-        "minutes_added": body.minutes,
-        "total_minutes": session.minutes_granted,
+        "seconds_added": seconds,
+        "total_seconds": session.granted_seconds,
     }
 
 
@@ -603,7 +620,7 @@ def _reports_data(days: int, db):
 
     def _sum(q):
         row = q.with_entities(
-            func.coalesce(func.sum(CoinTransaction.amount_pesos), 0).label("pesos"),
+            func.coalesce(func.sum(CoinTransaction.amount_php), 0).label("pesos"),
             func.count(CoinTransaction.id).label("count"),
         ).first()
         return int(row.pesos), int(row.count)
@@ -622,7 +639,7 @@ def _reports_data(days: int, db):
         db.query(
             PC.pc_number,
             PC.name,
-            func.coalesce(func.sum(CoinTransaction.amount_pesos), 0).label("pesos"),
+            func.coalesce(func.sum(CoinTransaction.amount_php), 0).label("pesos"),
             func.count(CoinTransaction.id).label("tx_count"),
         )
         .outerjoin(CoinTransaction, (CoinTransaction.pc_id == PC.id) &
@@ -644,7 +661,7 @@ def _reports_data(days: int, db):
     daily_rows = (
         db.query(
             func.date(CoinTransaction.created_at).label("day"),
-            func.sum(CoinTransaction.amount_pesos).label("pesos"),
+            func.sum(CoinTransaction.amount_php).label("pesos"),
             func.count(CoinTransaction.id).label("count"),
         )
         .filter(CoinTransaction.created_at >= chart_since)
@@ -710,14 +727,14 @@ def reports_export_csv(
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["Date", "PC Number", "PC Name", "Amount (₱)", "Minutes Added"])
+    writer.writerow(["Date", "PC Number", "PC Name", "Amount (₱)", "Seconds Added"])
     for tx, pc_number, pc_name in query.all():
         writer.writerow([
             tx.created_at.strftime("%Y-%m-%d %H:%M:%S"),
             pc_number or "",
             pc_name or "",
-            tx.amount_pesos,
-            tx.minutes_added,
+            tx.amount_php,
+            tx.seconds_added,
         ])
 
     buf.seek(0)
@@ -985,3 +1002,155 @@ def _list_wallpaper_files() -> list[dict]:
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             })
     return files
+
+
+# ── Membership admin page & API ──────────────────────────────────────────────
+
+from models import User, MembershipConfig
+from schemas import MembershipConfigUpdate
+from services.membership_service import MembershipService
+
+
+@router.get("/membership", response_class=HTMLResponse)
+def membership_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+
+    msvc = MembershipService(db)
+    cfg = msvc.get_config()
+    members = (
+        db.query(User)
+        .order_by(desc(User.created_at))
+        .all()
+    )
+
+    member_data = []
+    svc = SessionService(db)
+    for m in members:
+        logged_in_pc = None
+        remaining_sec = 0
+        if m.logged_in_pc_id:
+            pc = db.query(PC).filter(PC.id == m.logged_in_pc_id).first()
+            if pc:
+                logged_in_pc = pc.pc_number
+                session = svc.get_active_session(pc.pc_number)
+                remaining_sec = svc.remaining_seconds(session) if session else 0
+
+        member_data.append({
+            "id": m.id,
+            "username": m.username,
+            "balance_seconds": m.balance_seconds,
+            "is_active": m.is_active,
+            "logged_in_pc": logged_in_pc,
+            "remaining_seconds": remaining_sec,
+            "last_login_at": m.last_login_at,
+            "created_at": m.created_at,
+        })
+
+    return templates.TemplateResponse("membership.html", {
+        "request": request,
+        "config": cfg,
+        "members": member_data,
+    })
+
+
+@router.post("/api/membership/config")
+def update_membership_config(
+    body: MembershipConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    msvc = MembershipService(db)
+    cfg = msvc.update_config(**body.model_dump(exclude_unset=True))
+    return {"status": "ok", "config": {
+        "membership_enabled": cfg.membership_enabled,
+        "absorption_enabled": cfg.absorption_enabled,
+        "logout_deduction_minutes": cfg.logout_deduction_minutes,
+        "minimum_logout_minutes": cfg.minimum_logout_minutes,
+        "zero_time_auto_logout_seconds": cfg.zero_time_auto_logout_seconds,
+        "idle_auto_shutdown_minutes": cfg.idle_auto_shutdown_minutes,
+        "member_heartbeat_timeout_minutes": cfg.member_heartbeat_timeout_minutes,
+    }}
+
+
+class AdjustBalanceBody(BaseModel):
+    seconds: int
+
+
+@router.post("/api/membership/members/{member_id}/deactivate")
+def deactivate_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.query(User).filter(User.id == member_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    # Force-logout if currently logged in
+    if user.logged_in_pc_id:
+        msvc = MembershipService(db)
+        msvc.force_logout_member(member_id)
+
+    user.is_active = False
+    db.commit()
+    return {"status": "deactivated", "member_id": member_id}
+
+
+@router.post("/api/membership/members/{member_id}/activate")
+def activate_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.query(User).filter(User.id == member_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Member not found")
+    user.is_active = True
+    db.commit()
+    return {"status": "activated", "member_id": member_id}
+
+
+@router.post("/api/membership/members/{member_id}/adjust-balance")
+def adjust_member_balance(
+    member_id: int,
+    body: AdjustBalanceBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.query(User).filter(User.id == member_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    user.balance_seconds = max(0, user.balance_seconds + body.seconds)
+    db.commit()
+    return {"status": "ok", "balance_seconds": user.balance_seconds}
+
+
+@router.post("/api/membership/members/{member_id}/force-logout")
+def force_logout_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    msvc = MembershipService(db)
+    ok = msvc.force_logout_member(member_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Member not found or not logged in")
+    return {"status": "logged_out", "member_id": member_id}

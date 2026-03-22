@@ -3,15 +3,15 @@ from models import CoinRate
 from config import settings
 
 
-def pesos_to_minutes(amount_pesos: int, db: DBSession) -> int:
+def pesos_to_seconds(amount_pesos: int, db: DBSession) -> int:
     """
-    Converts a peso amount to minutes using active coin rates.
+    Converts a peso amount to seconds using active coin rates.
 
     Applies rates greedily from highest to lowest denomination,
     so users automatically get the best rate for their coins.
 
-    Example rates:  ₱10 = 65 min,  ₱5 = 30 min,  ₱1 = 5 min
-    Inserting ₱11:  1x₱10 (65min) + 1x₱1 (5min) = 70 minutes
+    Example rates:  ₱10 = 3900s (65 min),  ₱5 = 1800s (30 min),  ₱1 = 300s (5 min)
+    Inserting ₱11:  1x₱10 (3900s) + 1x₱1 (300s) = 4200 seconds (70 minutes)
     """
     rates = (
         db.query(CoinRate)
@@ -23,25 +23,25 @@ def pesos_to_minutes(amount_pesos: int, db: DBSession) -> int:
     if not rates:
         # Fallback to default rate from config if no rates in DB
         pesos_per_block = settings.DEFAULT_RATE_PESOS
-        min_per_block = settings.DEFAULT_RATE_MINUTES
-        return (amount_pesos // pesos_per_block) * min_per_block
+        sec_per_block = settings.DEFAULT_RATE_SECONDS
+        return (amount_pesos // pesos_per_block) * sec_per_block
 
-    total_minutes = 0
+    total_seconds = 0
     remaining = amount_pesos
 
     for rate in rates:
         if remaining >= rate.pesos:
             multiplier = remaining // rate.pesos
-            total_minutes += multiplier * rate.minutes
+            total_seconds += multiplier * rate.seconds
             remaining -= multiplier * rate.pesos
 
     # Any leftover pesos use the smallest denomination rate
     if remaining > 0:
         smallest = rates[-1]
         if smallest.pesos > 0:
-            total_minutes += int(remaining * (smallest.minutes / smallest.pesos))
+            total_seconds += int(remaining * (smallest.seconds / smallest.pesos))
 
-    return total_minutes
+    return total_seconds
 
 
 def get_active_rates(db: DBSession) -> list[CoinRate]:

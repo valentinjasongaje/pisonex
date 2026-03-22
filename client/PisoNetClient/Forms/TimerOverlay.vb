@@ -43,8 +43,13 @@ Namespace Forms
         Private _lblTime  As Label
         Private _lblPC    As Label
         Private _pbLogo   As PictureBox
+        Private _lblMember As Label
+        Private _btnLogout As Button
 
         Private _isConnected As Boolean = True
+        Private _memberName As String = Nothing
+
+        Public Event MemberLogoutRequested()
 
         ' ── Native drag ──────────────────────────────────────────────
         <DllImport("user32.dll", CharSet:=CharSet.Auto)>
@@ -103,13 +108,39 @@ Namespace Forms
                 .BackColor = Color.Transparent
             }
 
-            Me.Controls.AddRange({_lblTime, _lblPC, _pbLogo})
+            ' ── Member name label ───────────────────────────────────
+            _lblMember = New Label() With {
+                .Text      = "",
+                .Font      = New Font("Segoe UI", 7),
+                .ForeColor = Color.FromArgb(34, 197, 94),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Visible   = False
+            }
+
+            ' ── Logout button ───────────────────────────────────────
+            _btnLogout = New Button() With {
+                .Text      = "Logout",
+                .Font      = New Font("Segoe UI", 7, FontStyle.Bold),
+                .ForeColor = Color.White,
+                .BackColor = Color.FromArgb(239, 68, 68),
+                .FlatStyle = FlatStyle.Flat,
+                .Size      = New Size(50, 20),
+                .Cursor    = Cursors.Hand,
+                .Visible   = False
+            }
+            _btnLogout.FlatAppearance.BorderSize = 0
+            AddHandler _btnLogout.Click, Sub(s, ev) RaiseEvent MemberLogoutRequested()
+
+            Me.Controls.AddRange({_lblTime, _lblPC, _lblMember, _btnLogout, _pbLogo})
 
             ' Left-click drag on every visible surface
             Dim drag = New MouseEventHandler(AddressOf HandleMouseDown)
             AddHandler Me.MouseDown,        drag
             AddHandler _lblTime.MouseDown,  drag
             AddHandler _lblPC.MouseDown,    drag
+            AddHandler _lblMember.MouseDown, drag
             AddHandler _pbLogo.MouseDown,   drag
         End Sub
 
@@ -230,6 +261,15 @@ Namespace Forms
             End If
 
             _lblTime.ForeColor = Color.FromArgb(AppConfig.TimerTimeArgb)
+
+            ' Expand height for member row if visible
+            If _lblMember.Visible Then
+                Dim newH = Me.Height + 22
+                Me.Size = New Size(FORM_W, newH)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, newH), CORNER_R))
+                LayoutMemberControls()
+            End If
+
             Me.Invalidate()
             PositionToCorner()
         End Sub
@@ -275,6 +315,33 @@ Namespace Forms
             End If
             _isConnected = False
             Me.Invalidate()
+        End Sub
+
+        Public Sub SetMemberInfo(username As String, canLogout As Boolean)
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() SetMemberInfo(username, canLogout))
+                Return
+            End If
+            _memberName = username
+            If Not String.IsNullOrEmpty(username) Then
+                _lblMember.Text = username
+                _lblMember.Visible = True
+                _btnLogout.Visible = True
+                _btnLogout.Enabled = canLogout
+            Else
+                _lblMember.Visible = False
+                _btnLogout.Visible = False
+            End If
+            LayoutMemberControls()
+        End Sub
+
+        Private Sub LayoutMemberControls()
+            If Not _lblMember.Visible Then Return
+            ' Member label + logout button on bottom row of the overlay
+            Dim y = Me.Height - 22
+            _lblMember.Location = New Point(PAD_X, y)
+            _lblMember.Size = New Size(Me.Width - PAD_X * 2 - 56, 18)
+            _btnLogout.Location = New Point(Me.Width - 56, y - 1)
         End Sub
 
         ' ── Mouse handling ────────────────────────────────────────────

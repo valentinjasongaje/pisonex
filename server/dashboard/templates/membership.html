@@ -1,0 +1,168 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Membership</h1>
+</div>
+
+<!-- Configuration -->
+<div class="card">
+  <h2>Settings</h2>
+  <form id="membership-config-form" onsubmit="saveMembershipConfig(event)">
+    <div class="form-row">
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="cfg-membership-enabled"
+            {% if config.membership_enabled %}checked{% endif %} />
+          Enable Membership Mode
+        </label>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="cfg-absorption-enabled"
+            {% if config.absorption_enabled %}checked{% endif %} />
+          Allow Session Absorption
+        </label>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Logout Deduction (minutes)</label>
+        <input type="number" id="cfg-logout-deduction" min="0" max="60"
+          value="{{ config.logout_deduction_minutes }}" />
+      </div>
+      <div class="form-group">
+        <label>Minimum Logout Time (minutes)</label>
+        <input type="number" id="cfg-min-logout" min="0" max="120"
+          value="{{ config.minimum_logout_minutes }}" />
+      </div>
+      <div class="form-group">
+        <label>Zero-Time Auto-Logout (seconds)</label>
+        <input type="number" id="cfg-zero-time" min="10" max="600"
+          value="{{ config.zero_time_auto_logout_seconds }}" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Idle Auto-Shutdown (minutes)</label>
+        <input type="number" id="cfg-idle-shutdown" min="0" max="60"
+          value="{{ config.idle_auto_shutdown_minutes }}" />
+      </div>
+      <div class="form-group">
+        <label>Heartbeat Timeout (minutes)</label>
+        <input type="number" id="cfg-heartbeat-timeout" min="5" max="1440"
+          value="{{ config.member_heartbeat_timeout_minutes }}" />
+      </div>
+      <button type="submit" class="btn btn-primary align-end">Save Settings</button>
+    </div>
+  </form>
+  <div id="config-status" style="margin-top:.5rem;font-size:.85rem"></div>
+</div>
+
+<!-- Members List -->
+<div class="card">
+  <h2>Members ({{ members | length }})</h2>
+  {% if members %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Balance</th>
+        <th>Status</th>
+        <th>Logged In</th>
+        <th>Remaining</th>
+        <th>Last Login</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in members %}
+      <tr id="member-row-{{ m.id }}">
+        <td>{{ m.username }}</td>
+        <td>{{ m.balance_seconds // 60 }}m {{ m.balance_seconds % 60 }}s</td>
+        <td>
+          {% if m.is_active %}
+            <span class="badge badge-success">Active</span>
+          {% else %}
+            <span class="badge badge-danger">Inactive</span>
+          {% endif %}
+        </td>
+        <td>{% if m.logged_in_pc %}PC {{ "%02d" | format(m.logged_in_pc) }}{% else %}&mdash;{% endif %}</td>
+        <td>{% if m.remaining_seconds > 0 %}{{ m.remaining_seconds // 60 }}m {{ m.remaining_seconds % 60 }}s{% else %}&mdash;{% endif %}</td>
+        <td>{% if m.last_login_at %}{{ m.last_login_at.strftime('%m/%d %H:%M') }}{% else %}&mdash;{% endif %}</td>
+        <td>
+          {% if m.is_active %}
+            <button class="btn btn-sm btn-warning" onclick="deactivateMember({{ m.id }})">Deactivate</button>
+          {% else %}
+            <button class="btn btn-sm btn-success" onclick="activateMember({{ m.id }})">Activate</button>
+          {% endif %}
+          {% if m.logged_in_pc %}
+            <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
+          {% endif %}
+          <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--gray)">No registered members yet.</p>
+  {% endif %}
+</div>
+
+<script>
+async function saveMembershipConfig(e) {
+  e.preventDefault();
+  const body = {
+    membership_enabled: document.getElementById('cfg-membership-enabled').checked,
+    absorption_enabled: document.getElementById('cfg-absorption-enabled').checked,
+    logout_deduction_minutes: parseInt(document.getElementById('cfg-logout-deduction').value),
+    minimum_logout_minutes: parseInt(document.getElementById('cfg-min-logout').value),
+    zero_time_auto_logout_seconds: parseInt(document.getElementById('cfg-zero-time').value),
+    idle_auto_shutdown_minutes: parseInt(document.getElementById('cfg-idle-shutdown').value),
+    member_heartbeat_timeout_minutes: parseInt(document.getElementById('cfg-heartbeat-timeout').value),
+  };
+  const res = await fetch('/dashboard/api/membership/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  });
+  const el = document.getElementById('config-status');
+  if (res.ok) {
+    el.textContent = 'Settings saved.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save settings.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 3000);
+}
+
+async function deactivateMember(id) {
+  if (!confirm('Deactivate this member?')) return;
+  await fetch(`/dashboard/api/membership/members/${id}/deactivate`, {method: 'POST'});
+  location.reload();
+}
+
+async function activateMember(id) {
+  await fetch(`/dashboard/api/membership/members/${id}/activate`, {method: 'POST'});
+  location.reload();
+}
+
+async function forceLogout(id) {
+  if (!confirm('Force logout this member? Their remaining time will be saved.')) return;
+  await fetch(`/dashboard/api/membership/members/${id}/force-logout`, {method: 'POST'});
+  location.reload();
+}
+
+function adjustBalance(id, username) {
+  const input = prompt(`Adjust balance for ${username}.\nEnter seconds to add (negative to subtract):`);
+  if (input === null) return;
+  const seconds = parseInt(input);
+  if (isNaN(seconds)) { alert('Invalid number'); return; }
+  fetch(`/dashboard/api/membership/members/${id}/adjust-balance`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({seconds})
+  }).then(() => location.reload());
+}
+</script>
+
+{% endblock %}

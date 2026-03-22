@@ -38,8 +38,8 @@ Namespace Services
         Public Event ServerConnectionRestored()
         ''' <summary>Fired at 5 and 1 minute(s) remaining. minutesLeft = 5 or 1.</summary>
         Public Event LowTimeWarning(minutesLeft As Integer)
-        ''' <summary>Fired when the server reports that time was added to this PC's session.</summary>
-        Public Event TimeAdded(minutes As Integer)
+        ''' <summary>Fired when the server reports that time was added to this PC's session (in seconds).</summary>
+        Public Event TimeAdded(seconds As Integer)
         ''' <summary>Fired when the server delivers a one-time message for this PC.</summary>
         Public Event MessageReceived(text As String)
         ''' <summary>Fired when the shop-wide announcement text changes (or is cleared with Nothing).</summary>
@@ -48,6 +48,10 @@ Namespace Services
         Public Event CommandReceived(type As String, payload As String)
         ''' <summary>Fired when the server-pushed wallpaper changes (or is cleared with empty strings).</summary>
         Public Event WallpaperChanged(url As String, hash As String)
+        ''' <summary>Fired when membership state changes in heartbeat (enabled, username, balance, etc.).</summary>
+        Public Event MembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
+                                        balanceSeconds As Integer, canLogout As Boolean,
+                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer)
 
         ' ── Heartbeat interval ───────────────────────────────────────
         ' 1-second poll in all states.  On a local LAN with FastAPI +
@@ -141,8 +145,7 @@ Namespace Services
 
             SyncLock _stateLock
                 ' Server is always the source of truth for remaining time
-                Dim serverSeconds = (response.remaining_minutes * 60) + response.remaining_seconds
-                _remainingSeconds = serverSeconds
+                _remainingSeconds = response.remaining_seconds
                 _sessionToken = response.session_token
 
                 Dim serverSaysLocked = response.is_locked
@@ -175,8 +178,8 @@ Namespace Services
             End If
 
             ' Notify the user if the server reports that time was added
-            If response.time_added_minutes > 0 Then
-                RaiseEvent TimeAdded(response.time_added_minutes)
+            If response.time_added_seconds > 0 Then
+                RaiseEvent TimeAdded(response.time_added_seconds)
             End If
 
             ' ── Remote control delivery ────────────────────────────────────────
@@ -207,6 +210,16 @@ Namespace Services
                     If(response.wallpaper_url, String.Empty),
                     If(wpHash, String.Empty))
             End If
+
+            ' Membership state — always fire so the UI can update
+            RaiseEvent MembershipUpdated(
+                response.membership_enabled,
+                response.absorption_enabled,
+                response.member_username,
+                response.member_balance_seconds,
+                response.member_can_logout,
+                response.zero_time_logout_seconds,
+                response.idle_shutdown_seconds)
         End Function
 
         ' ── Public state ─────────────────────────────────────────────

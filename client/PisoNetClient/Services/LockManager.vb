@@ -12,10 +12,16 @@ Namespace Services
 
         ''' <summary>Forwarded from LockForm.AdminPanelRequested — wired in Program.vb.</summary>
         Public Event LockFormAdminRequested()
+        Public Event LockFormLoginRequested(username As String, password As String)
+        Public Event LockFormRegisterRequested(username As String, password As String)
+        Public Event LockFormLogoutRequested()
 
         Public Sub New()
             _lockForm = New Forms.LockForm()
             AddHandler _lockForm.AdminPanelRequested, Sub() RaiseEvent LockFormAdminRequested()
+            AddHandler _lockForm.MemberLoginRequested, Sub(u, p) RaiseEvent LockFormLoginRequested(u, p)
+            AddHandler _lockForm.MemberRegisterRequested, Sub(u, p) RaiseEvent LockFormRegisterRequested(u, p)
+            AddHandler _lockForm.MemberLogoutRequested, Sub() RaiseEvent LockFormLogoutRequested()
         End Sub
 
         Public Sub LockPC()
@@ -46,6 +52,35 @@ Namespace Services
         Public Sub RefreshLockAppearance()
             _lockForm.RefreshAppearance()
         End Sub
+
+        Public Sub ShowLicenseWarning(message As String)
+            _lockForm.ShowLicenseWarning(message)
+        End Sub
+
+        Public Sub HideLicenseWarning()
+            _lockForm.HideLicenseWarning()
+        End Sub
+
+        Public Sub UpdateMembershipUI(enabled As Boolean, absorption As Boolean, username As String,
+                                       balanceSeconds As Integer, canLogout As Boolean,
+                                       zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer)
+            _lockForm.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
+                                          canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds)
+        End Sub
+
+        Public Sub ShowMemberError(message As String)
+            _lockForm.ShowMemberError(message)
+        End Sub
+
+        Public Sub ShowMemberSuccess(message As String)
+            _lockForm.ShowMemberSuccess(message)
+        End Sub
+
+        Public ReadOnly Property IsLicenseActive As Boolean
+            Get
+                Return _lockForm.IsLicenseActive
+            End Get
+        End Property
 
         ''' <summary>Call before Application.Exit() so WM_CLOSE is honoured.</summary>
         Public Sub AllowExit()

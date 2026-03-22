@@ -153,3 +153,107 @@ def get_pc_wallpaper(pc_number: int) -> tuple[str | None, str | None]:
         if override:
             return override["url"], override["hash"]
         return _wallpaper_url, _wallpaper_hash
+
+
+# ── Member-PC binding (volatile, rebuilt from DB on startup) ──────────────────
+
+_member_pc_binding: dict[int, int] = {}     # pc_number → user_id
+_pc_idle_since: dict[int, float] = {}       # pc_number → timestamp (time.time())
+_zero_time_since: dict[int, float] = {}     # pc_number → timestamp (time.time())
+_login_attempts: dict[str, list[float]] = {}  # username → [timestamp, ...]
+
+
+def bind_member(pc_number: int, user_id: int) -> None:
+    """Record that a member is logged into a PC."""
+    with _lock:
+        _member_pc_binding[pc_number] = user_id
+
+
+def unbind_member(pc_number: int) -> int | None:
+    """Remove member binding for a PC. Returns the user_id that was bound, or None."""
+    with _lock:
+        return _member_pc_binding.pop(pc_number, None)
+
+
+def get_member_for_pc(pc_number: int) -> int | None:
+    """Return the user_id logged into this PC, or None."""
+    with _lock:
+        return _member_pc_binding.get(pc_number)
+
+
+def get_pc_for_member(user_id: int) -> int | None:
+    """Return the pc_number this member is logged into, or None."""
+    with _lock:
+        for pc, uid in _member_pc_binding.items():
+            if uid == user_id:
+                return pc
+        return None
+
+
+def get_all_member_bindings() -> dict[int, int]:
+    """Return a copy of all member-PC bindings."""
+    with _lock:
+        return dict(_member_pc_binding)
+
+
+def rebuild_member_bindings(bindings: dict[int, int]) -> None:
+    """Replace all member-PC bindings (used on startup to rebuild from DB)."""
+    with _lock:
+        _member_pc_binding.clear()
+        _member_pc_binding.update(bindings)
+
+
+# ── Idle auto-shutdown tracking ───────────────────────────────────────────────
+
+def set_idle_since(pc_number: int, timestamp: float) -> None:
+    with _lock:
+        _pc_idle_since[pc_number] = timestamp
+
+
+def get_idle_since(pc_number: int) -> float | None:
+    with _lock:
+        return _pc_idle_since.get(pc_number)
+
+
+def clear_idle_since(pc_number: int) -> None:
+    with _lock:
+        _pc_idle_since.pop(pc_number, None)
+
+
+# ── Zero-time auto-logout tracking ───────────────────────────────────────────
+
+def set_zero_time_since(pc_number: int, timestamp: float) -> None:
+    with _lock:
+        _zero_time_since[pc_number] = timestamp
+
+
+def get_zero_time_since(pc_number: int) -> float | None:
+    with _lock:
+        return _zero_time_since.get(pc_number)
+
+
+def clear_zero_time_since(pc_number: int) -> None:
+    with _lock:
+        _zero_time_since.pop(pc_number, None)
+
+
+# ── Login rate limiting ───────────────────────────────────────────────────────
+
+import time as _time
+
+_LOGIN_WINDOW_SECONDS = 60
+_LOGIN_MAX_ATTEMPTS = 5
+
+
+def check_login_rate(username: str) -> bool:
+    """Return True if the login attempt is allowed, False if rate-limited."""
+    now = _time.time()
+    with _lock:
+        attempts = _login_attempts.get(username, [])
+        # Prune old attempts outside the window
+        attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+        _login_attempts[username] = attempts
+        if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+            return False
+        attempts.append(now)
+        return True

@@ -47,7 +47,7 @@ class HardwareController:
         self._countdown_remaining: int = 0
         self._coins_inserted: bool = False  # tracks if any coin was inserted this session
         self._total_pesos: int = 0          # running total pesos this session
-        self._total_minutes: int = 0        # running total minutes this session
+        self._total_seconds: int = 0        # running total seconds this session
 
         self._lcd = LCD()
         self._coin = CoinSlot(
@@ -75,7 +75,7 @@ class HardwareController:
         self._selected_pc = None
         self._coins_inserted = False
         self._total_pesos = 0
-        self._total_minutes = 0
+        self._total_seconds = 0
         self._transition(State.IDLE)
         self._lcd.show(Screen.idle())
 
@@ -124,7 +124,7 @@ class HardwareController:
                     self._lcd.show(Screen.inserting_coins(
                         self._selected_pc,
                         self._total_pesos,
-                        self._total_minutes,
+                        self._total_seconds,
                         self._countdown_remaining,
                     ))
                 else:
@@ -205,9 +205,9 @@ class HardwareController:
         if self._coins_inserted:
             # Show confirmation with total time
             session = self._service.get_active_session(pc)
-            total_min = session.minutes_granted if session else 0
-            self._lcd.show(Screen.confirmed(pc, total_min))
-            logger.info("PC %02d: user confirmed done (total %d min)", pc, total_min)
+            total_sec = session.granted_seconds if session else 0
+            self._lcd.show(Screen.confirmed(pc, total_sec))
+            logger.info("PC %02d: user confirmed done (total %ds)", pc, total_sec)
         else:
             self._lcd.show(Screen.timeout())
             logger.info("PC %02d: user pressed # with no coins — cancelling", pc)
@@ -259,9 +259,9 @@ class HardwareController:
             pc = self._selected_pc
         if not command_store.is_coins_allowed(pc):
             return  # discard pulse — coin slot was disabled mid-session
-        minutes_preview = (pesos // settings.DEFAULT_RATE_PESOS) * settings.DEFAULT_RATE_MINUTES
+        seconds_preview = (pesos // settings.DEFAULT_RATE_PESOS) * settings.DEFAULT_RATE_SECONDS
         self._lcd.show(Screen.inserting_coins(
-            pc, pesos, minutes_preview, self._countdown_remaining
+            pc, pesos, seconds_preview, self._countdown_remaining
         ))
 
     def _on_coin(self, pesos: int):
@@ -293,22 +293,22 @@ class HardwareController:
 
     def _process_coin(self, pesos: int):
         try:
-            minutes, session = self._service.add_time_by_pesos(
+            seconds_added, session = self._service.add_time_by_pesos(
                 pc_number=self._selected_pc,
                 pesos=pesos,
             )
-            total_min = session.minutes_granted
-            self._lcd.show(Screen.coin_inserted(pesos, minutes, total_min))
+            total_sec = session.granted_seconds
+            self._lcd.show(Screen.coin_inserted(pesos, seconds_added, total_sec))
             time.sleep(settings.DISPLAY_CONFIRM_DELAY)
 
             with self._lock:
                 self._total_pesos += pesos
-                self._total_minutes = total_min
+                self._total_seconds = total_sec
                 self._transition(State.AWAITING_COINS)
                 self._lcd.show(Screen.inserting_coins(
                     self._selected_pc,
                     self._total_pesos,
-                    self._total_minutes,
+                    self._total_seconds,
                     settings.PC_IDLE_TIMEOUT,
                 ))
                 self._reset_idle_timer()

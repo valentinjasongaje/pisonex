@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from schemas import AddTimeRequest, AddTimeResponse, SessionStatusResponse
 from services.session_service import SessionService
+import command_store
 
 router = APIRouter(prefix="/api/session", tags=["session"])
 
@@ -12,8 +13,9 @@ router = APIRouter(prefix="/api/session", tags=["session"])
 def add_time(body: AddTimeRequest, db: Session = Depends(get_db)):
     """
     Called by the hardware controller (coin slot) after coin insertion.
-    Converts pesos to minutes and creates or extends a PC session.
+    Converts pesos to seconds and creates or extends a PC session.
     Also called by admin to manually top-up via the dashboard.
+    Member-aware: if a member is logged in, the transaction is associated with them.
     """
     svc = SessionService(db)
     pc = svc.get_pc(body.pc_number)
@@ -25,16 +27,24 @@ def add_time(body: AddTimeRequest, db: Session = Depends(get_db)):
     if body.pesos <= 0:
         raise HTTPException(422, "Pesos must be greater than 0")
 
+    # Check if a member is logged in — associate transaction with them
+    user_id = command_store.get_member_for_pc(body.pc_number)
+
+    # If member is in zero-time state, coin insertion cancels the auto-logout timer
+    if user_id is not None:
+        command_store.clear_zero_time_since(body.pc_number)
+        command_store.clear_idle_since(body.pc_number)
+
     try:
-        minutes, session = svc.add_time_by_pesos(body.pc_number, body.pesos)
+        seconds, session = svc.add_time_by_pesos(body.pc_number, body.pesos, user_id=user_id)
     except ValueError as e:
         raise HTTPException(422, str(e))
 
     return AddTimeResponse(
         pc_number=body.pc_number,
         pesos_added=body.pesos,
-        minutes_added=minutes,
-        total_minutes=session.minutes_granted,
+        seconds_added=seconds,
+        total_seconds=session.granted_seconds,
         session_token=session.session_token,
     )
 
@@ -48,16 +58,14 @@ def get_session(pc_number: int, db: Session = Depends(get_db)):
     if not session:
         return SessionStatusResponse(
             has_session=False,
-            remaining_minutes=0,
             remaining_seconds=0,
         )
 
     remaining_sec = svc.remaining_seconds(session)
     return SessionStatusResponse(
         has_session=True,
-        remaining_minutes=remaining_sec // 60,
-        remaining_seconds=remaining_sec % 60,
-        minutes_granted=session.minutes_granted,
+        remaining_seconds=remaining_sec,
+        granted_seconds=session.granted_seconds,
         started_at=session.started_at,
         session_token=session.session_token,
     )

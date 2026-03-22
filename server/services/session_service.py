@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from sqlalchemy.orm import Session as DBSession
 from models import PC, Session, CoinTransaction, SystemLog
-from services.rate_service import pesos_to_minutes
+from services.rate_service import pesos_to_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # Tracks PCs with a brand-new session that the client hasn't acknowledged yet.
 # On first client heartbeat we reset started_at so the full time is granted.
 _pending_start: set[int] = set()
-# How many minutes were added since the client's last heartbeat (for notification).
+# How many seconds were added since the client's last heartbeat (for notification).
 _pending_notify: dict[int, int] = {}
 
 
@@ -81,30 +81,31 @@ class SessionService:
         if not session or not session.is_active:
             return 0
         elapsed = (datetime.utcnow() - session.started_at).total_seconds()
-        granted = session.minutes_granted * 60
-        return max(0, int(granted - elapsed))
+        return max(0, int(session.granted_seconds - elapsed))
 
-    def add_time_by_pesos(self, pc_number: int, pesos: int) -> tuple[int, Session]:
+    def add_time_by_pesos(self, pc_number: int, pesos: int, user_id: int = None) -> tuple[int, Session]:
         """
-        Converts pesos to minutes, creates or extends an active session.
-        Returns (minutes_added, session).
+        Converts pesos to seconds, creates or extends an active session.
+        If user_id is provided, associates the transaction with that member.
+        Returns (seconds_added, session).
         """
         pc = self.get_pc(pc_number)
         if not pc:
             raise ValueError(f"PC {pc_number} not found")
 
-        minutes = pesos_to_minutes(pesos, self._db)
-        if minutes == 0:
-            raise ValueError(f"₱{pesos} does not convert to any minutes")
+        seconds = pesos_to_seconds(pesos, self._db)
+        if seconds == 0:
+            raise ValueError(f"₱{pesos} does not convert to any time")
 
         session = self.get_active_session(pc_number)
 
         if session:
-            session.minutes_granted += minutes
+            session.granted_seconds += seconds
         else:
             session = Session(
                 pc_id=pc.id,
-                minutes_granted=minutes,
+                user_id=user_id,
+                granted_seconds=seconds,
                 session_token=str(uuid.uuid4()),
                 started_at=datetime.utcnow(),
             )
@@ -112,35 +113,37 @@ class SessionService:
             pc.is_locked = False
             _pending_start.add(pc_number)
 
-        _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + minutes
+        _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + seconds
 
         tx = CoinTransaction(
             pc_id=pc.id,
-            amount_pesos=pesos,
-            minutes_added=minutes,
+            user_id=user_id,
+            amount_php=pesos,
+            seconds_added=seconds,
         )
         self._db.add(tx)
         self._log(
             "INFO", "session",
-            f"₱{pesos} → {minutes}min added to PC {pc_number:02d}"
+            f"₱{pesos} → {seconds}s added to PC {pc_number:02d}"
         )
         self._db.commit()
         self._db.refresh(session)
-        return minutes, session
+        return seconds, session
 
-    def add_time_minutes(self, pc_number: int, minutes: int) -> Session:
-        """Admin: directly add minutes without coin conversion."""
+    def add_time_seconds(self, pc_number: int, seconds: int, user_id: int = None) -> Session:
+        """Admin: directly add seconds without coin conversion."""
         pc = self.get_pc(pc_number)
         if not pc:
             raise ValueError(f"PC {pc_number} not found")
 
         session = self.get_active_session(pc_number)
         if session:
-            session.minutes_granted += minutes
+            session.granted_seconds += seconds
         else:
             session = Session(
                 pc_id=pc.id,
-                minutes_granted=minutes,
+                user_id=user_id,
+                granted_seconds=seconds,
                 session_token=str(uuid.uuid4()),
                 started_at=datetime.utcnow(),
             )
@@ -148,9 +151,9 @@ class SessionService:
             pc.is_locked = False
             _pending_start.add(pc_number)
 
-        _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + minutes
+        _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + seconds
 
-        self._log("INFO", "admin", f"Admin added {minutes}min to PC {pc_number:02d}")
+        self._log("INFO", "admin", f"Admin added {seconds}s to PC {pc_number:02d}")
         self._db.commit()
         self._db.refresh(session)
         return session
@@ -169,7 +172,7 @@ class SessionService:
         _pending_start.discard(pc_number)
 
     def pop_pending_notification(self, pc_number: int) -> int:
-        """Returns minutes added since the last heartbeat and clears the counter."""
+        """Returns seconds added since the last heartbeat and clears the counter."""
         return _pending_notify.pop(pc_number, 0)
 
     def end_session(self, pc_number: int) -> bool:
@@ -178,10 +181,10 @@ class SessionService:
         if not pc:
             return False
         if session:
-            elapsed_min = int(
-                (datetime.utcnow() - session.started_at).total_seconds() / 60
+            elapsed_sec = int(
+                (datetime.utcnow() - session.started_at).total_seconds()
             )
-            session.minutes_used = min(elapsed_min, session.minutes_granted)
+            session.used_seconds = min(elapsed_sec, session.granted_seconds)
             session.is_active = False
             session.ended_at = datetime.utcnow()
         pc.is_locked = True

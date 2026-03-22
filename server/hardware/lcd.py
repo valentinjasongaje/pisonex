@@ -21,6 +21,17 @@ _CUSTOM_CHARS = [
 ]
 
 
+def _fmt_time(total_seconds: int) -> str:
+    """Format seconds as 'Xm' or 'Xm Ys' for LCD display."""
+    if total_seconds <= 0:
+        return "0 min"
+    m = total_seconds // 60
+    s = total_seconds % 60
+    if s == 0:
+        return f"{m} min"
+    return f"{m}m {s}s"
+
+
 class LCD:
     """
     Controls a 20x4 character LCD via I2C (PCF8574 backpack).
@@ -116,10 +127,10 @@ class Screen:
     @staticmethod
     def idle() -> list[str]:
         rate_p = settings.DEFAULT_RATE_PESOS
-        rate_m = settings.DEFAULT_RATE_MINUTES
+        rate_sec = settings.DEFAULT_RATE_SECONDS
         return [
             _center("=== PISONET ==="),
-            _center(f"P{rate_p} = {rate_m} min"),
+            _center(f"P{rate_p} = {_fmt_time(rate_sec)}"),
             _center("Enter PC Number:"),
             _center("[01-50] then [#]"),
         ]
@@ -141,10 +152,10 @@ class Screen:
         remaining_secs: seconds left before timeout (0 = don't show countdown).
         """
         rate_p = settings.DEFAULT_RATE_PESOS
-        rate_m = settings.DEFAULT_RATE_MINUTES
+        rate_sec = settings.DEFAULT_RATE_SECONDS
 
         pc_line = _center(f">>> PC {pc_number:02d} <<<")
-        rate_line = _center(f"P{rate_p} = {rate_m} min")
+        rate_line = _center(f"P{rate_p} = {_fmt_time(rate_sec)}")
 
         if remaining_secs > 0:
             countdown = f"Insert coin ({remaining_secs}s)"
@@ -159,7 +170,7 @@ class Screen:
         ]
 
     @staticmethod
-    def inserting_coins(pc_number: int, pesos: int, minutes: int,
+    def inserting_coins(pc_number: int, pesos: int, total_seconds: int,
                         remaining_secs: int = 0) -> list[str]:
         """Real-time progress screen shown while coins are still being inserted."""
         if remaining_secs > 0:
@@ -170,34 +181,34 @@ class Screen:
         return [
             _center(f">>> PC {pc_number:02d} <<<"),
             _center(f"Inserted: P{pesos}"),
-            _center(f"= {minutes} min {timer_str}"),
+            _center(f"= {_fmt_time(total_seconds)} {timer_str}"),
             _center("# Done  * Cancel"),
         ]
 
     @staticmethod
-    def coin_inserted(pesos: int, minutes: int, total_min: int) -> list[str]:
+    def coin_inserted(pesos: int, seconds_added: int, total_seconds: int) -> list[str]:
         return [
             _center(f"+P{pesos} Inserted!"),
-            _center(f"+{minutes} min added"),
+            _center(f"+{_fmt_time(seconds_added)} added"),
             "",
-            _center(f"Total: {total_min} min"),
+            _center(f"Total: {_fmt_time(total_seconds)}"),
         ]
 
     @staticmethod
-    def confirmed(pc_number: int, total_min: int) -> list[str]:
+    def confirmed(pc_number: int, total_seconds: int) -> list[str]:
         """Shown when user presses # to confirm they are done inserting."""
         return [
             _center(f"PC {pc_number:02d} Ready!"),
-            _center(f"Time: {total_min} min"),
+            _center(f"Time: {_fmt_time(total_seconds)}"),
             "",
             _center("Enjoy!"),
         ]
 
     @staticmethod
-    def time_added(pc_number: int, total_min: int) -> list[str]:
+    def time_added(pc_number: int, total_seconds: int) -> list[str]:
         return [
             _center(f"PC {pc_number:02d} Unlocked!"),
-            _center(f"Time: {total_min} min"),
+            _center(f"Time: {_fmt_time(total_seconds)}"),
             "",
             _center("Enjoy!"),
         ]

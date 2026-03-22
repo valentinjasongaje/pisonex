@@ -2,14 +2,14 @@
   <h2>Active Rates</h2>
   <table class="data-table">
     <thead>
-      <tr><th>Pesos</th><th>Minutes</th><th>Rate/hr</th><th>Action</th></tr>
+      <tr><th>Pesos</th><th>Time</th><th>Rate/hr</th><th>Action</th></tr>
     </thead>
     <tbody>
       {% for rate in rates %}
       <tr>
-        <td>₱{{ rate.pesos }}</td>
-        <td>{{ rate.minutes }} min</td>
-        <td>₱{{ ((60 / rate.minutes) * rate.pesos) | round(1) }}/hr</td>
+        <td>&#8369;{{ rate.pesos }}</td>
+        <td>{{ rate.seconds // 60 }} min</td>
+        <td>&#8369;{{ ((3600 / rate.seconds) * rate.pesos) | round(1) }}/hr</td>
         <td>
           <button
             class="btn btn-sm btn-danger"

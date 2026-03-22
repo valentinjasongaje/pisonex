@@ -24,7 +24,7 @@ AdminDep = Depends(get_current_admin)
 def get_earnings(days: int = 30, db: Session = Depends(get_db)):
     since = datetime.utcnow() - timedelta(days=days)
     row = db.query(
-        func.coalesce(func.sum(CoinTransaction.amount_pesos), 0).label("total_pesos"),
+        func.coalesce(func.sum(CoinTransaction.amount_php), 0).label("total_pesos"),
         func.count(CoinTransaction.id).label("total_transactions"),
     ).filter(CoinTransaction.created_at >= since).first()
 
@@ -41,7 +41,7 @@ def get_daily_earnings(days: int = 7, db: Session = Depends(get_db)):
     since = datetime.utcnow() - timedelta(days=days)
     rows = db.query(
         func.date(CoinTransaction.created_at).label("date"),
-        func.sum(CoinTransaction.amount_pesos).label("total_pesos"),
+        func.sum(CoinTransaction.amount_php).label("total_pesos"),
         func.count(CoinTransaction.id).label("transactions"),
     ).filter(
         CoinTransaction.created_at >= since
@@ -87,8 +87,8 @@ def get_rates(db: Session = Depends(get_db)):
 @router.post("/rates", response_model=CoinRateResponse, dependencies=[AdminDep])
 def set_rate(body: CoinRateCreate, db: Session = Depends(get_db)):
     """Create or update the rate for a given peso amount."""
-    if body.pesos <= 0 or body.minutes <= 0:
-        raise HTTPException(422, "Pesos and minutes must be greater than 0")
+    if body.pesos <= 0 or body.seconds <= 0:
+        raise HTTPException(422, "Pesos and seconds must be greater than 0")
 
     # Deactivate existing rate for same peso value
     existing = db.query(CoinRate).filter(
@@ -97,8 +97,8 @@ def set_rate(body: CoinRateCreate, db: Session = Depends(get_db)):
     if existing:
         existing.is_active = False
 
-    label = body.label or f"₱{body.pesos} = {body.minutes} minutes"
-    rate = CoinRate(pesos=body.pesos, minutes=body.minutes, label=label)
+    label = body.label or f"₱{body.pesos} = {body.seconds // 60} minutes"
+    rate = CoinRate(pesos=body.pesos, seconds=body.seconds, label=label)
     db.add(rate)
     db.commit()
     db.refresh(rate)
@@ -119,7 +119,7 @@ def delete_rate(rate_id: int, db: Session = Depends(get_db)):
 
 @router.post("/pc/add-time", dependencies=[AdminDep])
 def admin_add_time(body: AdminAddTimeRequest, db: Session = Depends(get_db)):
-    """Admin manually adds minutes to a PC without coin conversion."""
+    """Admin manually adds minutes to a PC (converted to seconds internally)."""
     svc = SessionService(db)
     pc = svc.get_pc(body.pc_number)
     if not pc:
@@ -127,11 +127,12 @@ def admin_add_time(body: AdminAddTimeRequest, db: Session = Depends(get_db)):
     if body.minutes <= 0:
         raise HTTPException(422, "Minutes must be greater than 0")
 
-    session = svc.add_time_minutes(body.pc_number, body.minutes)
+    seconds = body.minutes * 60
+    session = svc.add_time_seconds(body.pc_number, seconds)
     return {
         "pc_number": body.pc_number,
-        "minutes_added": body.minutes,
-        "total_minutes": session.minutes_granted,
+        "seconds_added": seconds,
+        "total_seconds": session.granted_seconds,
     }
 
 

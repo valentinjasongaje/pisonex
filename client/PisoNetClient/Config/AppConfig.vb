@@ -360,6 +360,55 @@ Namespace Config
             End Get
         End Property
 
+        ' ── License activation ─────────────────────────────────────────────
+        Public ReadOnly Property LicenseKey As String
+            Get
+                Return If(ReadReg("LicenseKey"), "")
+            End Get
+        End Property
+
+        Public ReadOnly Property LicenseDeviceId As String
+            Get
+                Return If(ReadReg("LicenseDeviceId"), "")
+            End Get
+        End Property
+
+        Public ReadOnly Property LicenseActivatedAt As String
+            Get
+                Return If(ReadReg("LicenseActivatedAt"), "")
+            End Get
+        End Property
+
+        Public ReadOnly Property LicenseExpiresAt As String
+            Get
+                Return If(ReadReg("LicenseExpiresAt"), "")
+            End Get
+        End Property
+
+        Public ReadOnly Property LicenseLastVerified As String
+            Get
+                Return If(ReadReg("LicenseLastVerified"), "")
+            End Get
+        End Property
+
+        Public ReadOnly Property LicenseFirstRunDate As String
+            Get
+                Return If(ReadReg("LicenseFirstRunDate"), "")
+            End Get
+        End Property
+
+        Public ReadOnly Property LicenseBetaMode As String
+            Get
+                Return If(ReadReg("LicenseBetaMode"), "")
+            End Get
+        End Property
+
+        Public ReadOnly Property LicenseBetaCheckedAt As String
+            Get
+                Return If(ReadReg("LicenseBetaCheckedAt"), "")
+            End Get
+        End Property
+
         ' ── First-run flag ─────────────────────────────────────────────────
         Public ReadOnly Property IsConfigured As Boolean
             Get
@@ -493,6 +542,30 @@ Namespace Config
         End Sub
         Public Sub SaveApiKey(value As String)
             WriteReg("ApiKey", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseKey(value As String)
+            WriteReg("LicenseKey", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseDeviceId(value As String)
+            WriteReg("LicenseDeviceId", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseActivatedAt(value As String)
+            WriteReg("LicenseActivatedAt", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseExpiresAt(value As String)
+            WriteReg("LicenseExpiresAt", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseLastVerified(value As String)
+            WriteReg("LicenseLastVerified", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseFirstRunDate(value As String)
+            WriteReg("LicenseFirstRunDate", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseBetaMode(value As String)
+            WriteReg("LicenseBetaMode", If(value, ""))
+        End Sub
+        Public Sub SaveLicenseBetaCheckedAt(value As String)
+            WriteReg("LicenseBetaCheckedAt", If(value, ""))
         End Sub
         ''' <summary>Saves own exe path so the watchdog can find it after a restart.</summary>
         Public Sub SaveClientExePath(path As String)

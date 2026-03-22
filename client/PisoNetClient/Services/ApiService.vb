@@ -8,10 +8,9 @@ Namespace Services
 
     Public Class HeartbeatResponse
         Public Property is_locked As Boolean
-        Public Property remaining_minutes As Integer
         Public Property remaining_seconds As Integer
         Public Property session_token As String
-        Public Property time_added_minutes As Integer
+        Public Property time_added_seconds As Integer
         ' Remote control fields — populated by server when admin sends actions
         Public Property pending_command As String   ' "shutdown"|"restart"|"lock"|"open_url"
         Public Property command_payload As String   ' URL/path for open_url
@@ -21,6 +20,16 @@ Namespace Services
         ' Server-pushed wallpaper
         Public Property wallpaper_url As String
         Public Property wallpaper_hash As String
+        ' Server license status
+        Public Property server_licensed As Boolean = True
+        ' Membership fields
+        Public Property membership_enabled As Boolean = False
+        Public Property absorption_enabled As Boolean = False
+        Public Property member_username As String
+        Public Property member_balance_seconds As Integer = 0
+        Public Property member_can_logout As Boolean = False
+        Public Property zero_time_logout_seconds As Integer = 0
+        Public Property idle_shutdown_seconds As Integer = 0
     End Class
 
     Public Class ApiService

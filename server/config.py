@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 8000
 
-    # Coin rates
+    # Coin rates (seconds-based)
     DEFAULT_RATE_PESOS: int = 5
-    DEFAULT_RATE_MINUTES: int = 30
+    DEFAULT_RATE_SECONDS: int = 1800  # 30 minutes
 
     # PC monitoring
     PC_HEARTBEAT_TIMEOUT: int = 30  # seconds before PC is marked offline
@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     # Leave empty ("") to disable auth (default, backward-compatible).
     # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here
     CLIENT_API_KEY: str = ""
+
+    # Membership defaults (used to seed MembershipConfig on first run)
+    MEMBERSHIP_ENABLED: bool = False
+    ABSORPTION_ENABLED: bool = False
+    LOGOUT_DEDUCTION_MINUTES: int = 5
+    MINIMUM_LOGOUT_MINUTES: int = 10
+    ZERO_TIME_AUTO_LOGOUT_SECONDS: int = 30
+    IDLE_AUTO_SHUTDOWN_MINUTES: int = 5
+    MEMBER_HEARTBEAT_TIMEOUT_MINUTES: int = 60
 
     # GPIO pins (BCM numbering)
     COIN_PIN: int = 4
