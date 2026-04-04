@@ -152,6 +152,8 @@ Namespace Services
                 Dim resp = Await _httpClient.PostAsync($"{PISONEX_API}/api/license/activate", content)
                 Dim body = Await resp.Content.ReadAsStringAsync()
 
+                Debug.WriteLine($"[LICENSE] Activate response: HTTP {CInt(resp.StatusCode)} — {body}")
+
                 If resp.IsSuccessStatusCode Then
                     AppConfig.SaveLicenseKey(licenseKey)
                     AppConfig.SaveLicenseActivatedAt(DateTime.UtcNow.ToString("o"))
@@ -176,7 +178,17 @@ Namespace Services
                     Try
                         Dim doc = JsonDocument.Parse(body)
                         Dim errProp As JsonElement
-                        If doc.RootElement.TryGetProperty("error", errProp) Then
+                        If doc.RootElement.TryGetProperty("error", errProp) AndAlso
+                           errProp.ValueKind = JsonValueKind.String Then
+                            errMsg = errProp.GetString()
+                        ElseIf doc.RootElement.TryGetProperty("detail", errProp) Then
+                            If errProp.ValueKind = JsonValueKind.String Then
+                                errMsg = errProp.GetString()
+                            Else
+                                errMsg = errProp.ToString()
+                            End If
+                        ElseIf doc.RootElement.TryGetProperty("message", errProp) AndAlso
+                               errProp.ValueKind = JsonValueKind.String Then
                             errMsg = errProp.GetString()
                         End If
                     Catch
