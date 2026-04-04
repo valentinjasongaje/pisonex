@@ -51,6 +51,7 @@ Namespace Forms
         Private _memberName As String = Nothing
 
         Public Event MemberLogoutRequested()
+        Public Event TimerHiddenByUser()
 
         ' ── Native drag ──────────────────────────────────────────────
         <DllImport("user32.dll", CharSet:=CharSet.Auto)>
@@ -486,7 +487,10 @@ Namespace Forms
             Dim itemHide = New ToolStripMenuItem("Hide Timer") With {
                 .ForeColor = Color.FromArgb(220, 228, 240)
             }
-            AddHandler itemHide.Click, Sub(s, ev) Me.Hide()
+            AddHandler itemHide.Click, Sub(s, ev)
+                                                   Me.Hide()
+                                                   RaiseEvent TimerHiddenByUser()
+                                               End Sub
 
             Dim itemReset = New ToolStripMenuItem("Reset Position") With {
                 .ForeColor = Color.FromArgb(220, 228, 240)

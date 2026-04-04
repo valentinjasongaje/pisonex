@@ -65,9 +65,31 @@ Namespace Resources
             _iconLoaded = True
             Try
                 Dim asm = Assembly.GetExecutingAssembly()
+
+                ' 1. Try exact name
                 Dim stream = asm.GetManifestResourceStream("PisoNetClient.Resources.logo.ico")
+
+                ' 2. Fallback: case-insensitive search
+                If stream Is Nothing Then
+                    Dim resourceName = asm.GetManifestResourceNames().
+                        FirstOrDefault(Function(r) r.EndsWith("logo.ico", StringComparison.OrdinalIgnoreCase))
+                    If Not String.IsNullOrEmpty(resourceName) Then
+                        stream = asm.GetManifestResourceStream(resourceName)
+                    End If
+                End If
+
+                ' 3. Fallback: convert the PNG logo to an icon
+                If stream Is Nothing Then
+                    Dim logo = GetLogo(32, 32)
+                    If logo IsNot Nothing Then
+                        Dim bmp = New Bitmap(logo)
+                        _iconCached = Drawing.Icon.FromHandle(bmp.GetHicon())
+                        Return _iconCached
+                    End If
+                End If
+
                 If stream IsNot Nothing Then
-                    _iconCached = New Drawing.Icon(stream)
+                    _iconCached = New Drawing.Icon(stream, 32, 32)
                 End If
             Catch
             End Try

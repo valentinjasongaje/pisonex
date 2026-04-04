@@ -11,7 +11,7 @@ Namespace Forms
 
     ''' <summary>
     ''' Admin configuration panel with sidebar navigation and card-based layout.
-    ''' Accessible only after entering the correct PIN.
+    ''' Accessible only after entering the correct PASSWORD.
     ''' </summary>
     Public Class AdminPanel
         Inherits Form
@@ -35,6 +35,7 @@ Namespace Forms
         Private _chkCapture     As CheckBox
         Private _nudInterval    As NumericUpDown
         Private _nudQuality     As NumericUpDown
+        Private _txtCurrentPin  As TextBox
         Private _txtPin         As TextBox
         Private _txtPin2        As TextBox
         Private _chkNotifs      As CheckBox
@@ -770,18 +771,21 @@ Namespace Forms
 
             page.Controls.Add(PageTitle("Security", New Point(LM, y))) : y += 34
 
-            ' PIN card
-            Dim pinCard = CardPanel(New Point(LM, y), New Size(IW, 130))
+            ' PASSWORD card
+            Dim pinCard = CardPanel(New Point(LM, y), New Size(IW, 176))
             Dim cy = 14
-            pinCard.Controls.Add(SectionLabel("Change Admin PIN", New Point(14, cy))) : cy += 22
-            pinCard.Controls.Add(InfoLabel("Leave blank to keep current PIN.", New Point(14, cy))) : cy += 24
+            pinCard.Controls.Add(SectionLabel("Change Admin PASSWORD", New Point(14, cy))) : cy += 26
 
-            pinCard.Controls.Add(SmallLabel("New PIN", New Point(14, cy)))
-            pinCard.Controls.Add(SmallLabel("Confirm PIN", New Point(224, cy))) : cy += 18
+            pinCard.Controls.Add(SmallLabel("Current PASSWORD", New Point(14, cy))) : cy += 20
+            _txtCurrentPin = DarkTextBox(New Point(14, cy), 190, "", pwChar:="●"c) : pinCard.Controls.Add(_txtCurrentPin)
+            cy += 36
+
+            pinCard.Controls.Add(SmallLabel("New PASSWORD", New Point(14, cy)))
+            pinCard.Controls.Add(SmallLabel("Confirm PASSWORD", New Point(224, cy))) : cy += 20
             _txtPin  = DarkTextBox(New Point(14,  cy), 190, "", pwChar:="●"c) : pinCard.Controls.Add(_txtPin)
             _txtPin2 = DarkTextBox(New Point(224, cy), 190, "", pwChar:="●"c) : pinCard.Controls.Add(_txtPin2)
 
-            page.Controls.Add(pinCard) : y += 140
+            page.Controls.Add(pinCard) : y += 186
 
             ' Warnings card
             Dim warnCard = CardPanel(New Point(LM, y), New Size(IW, 100))
@@ -1300,17 +1304,18 @@ Namespace Forms
         Private Sub OnSave(sender As Object, e As EventArgs)
             Dim newPin  = _txtPin.Text.Trim()
             Dim newPin2 = _txtPin2.Text.Trim()
+            Dim currentPin = _txtCurrentPin.Text.Trim()
             If newPin.Length > 0 Then
-                If newPin.Length < 4 Then
-                    MessageBox.Show("New PIN must be at least 4 digits.", "Validation",
+                If currentPin <> AppConfig.AdminPin Then
+                    MessageBox.Show("Current PASSWORD is incorrect.", "Validation",
                                     MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return
                 End If
-                If Not newPin.All(Function(c) Char.IsDigit(c)) Then
-                    MessageBox.Show("PIN must contain digits only.", "Validation",
+                If newPin.Length < 4 Then
+                    MessageBox.Show("New password must be at least 4 characters.", "Validation",
                                     MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return
                 End If
                 If newPin <> newPin2 Then
-                    MessageBox.Show("PINs do not match.", "Validation",
+                    MessageBox.Show("Passwords do not match.", "Validation",
                                     MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return
                 End If
                 AppConfig.SaveAdminPin(newPin)

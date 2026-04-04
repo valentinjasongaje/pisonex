@@ -5,7 +5,7 @@ Imports PisoNetClient.Config
 Namespace Forms
 
     ''' <summary>
-    ''' Shown on first run to configure the server URL, PC number, and admin PIN.
+    ''' Shown on first run to configure the server URL, PC number, and admin PASSWORD.
     ''' Cannot be dismissed without saving — required to proceed.
     ''' </summary>
     Public Class SetupDialog
@@ -59,14 +59,14 @@ Namespace Forms
             Me.Controls.Add(_nudPcNum)
             y += 36
 
-            ' ── Admin PIN ──────────────────────────────────────────────────
-            AddLabel("Admin PIN  (4-8 digits, used to access settings)",
+            ' ── Admin Password ─────────────────────────────────────────────
+            AddLabel("Admin Password  (min 4 characters, used to access settings)",
                      New Font("Segoe UI", 9, FontStyle.Bold),
                      Color.FromArgb(148, 163, 184), New Point(24, y))
             y += 18
             _txtPin  = AddTextBox(New Point(24, y), 120, AppConfig.AdminPin, pwChar:="●"c)
             _txtPin2 = AddTextBox(New Point(160, y), 120, AppConfig.AdminPin, pwChar:="●"c)
-            AddLabel("↑ PIN", New Font("Segoe UI", 8), Color.FromArgb(100, 116, 139), New Point(24, y + 28))
+            AddLabel("↑ Password", New Font("Segoe UI", 8), Color.FromArgb(100, 116, 139), New Point(24, y + 28))
             AddLabel("↑ Confirm", New Font("Segoe UI", 8), Color.FromArgb(100, 116, 139), New Point(160, y + 28))
             y += 56
 
@@ -100,13 +100,10 @@ Namespace Forms
                 Warn("Server URL cannot be empty.") : Return
             End If
             If pin.Length < 4 Then
-                Warn("Admin PIN must be at least 4 digits.") : Return
-            End If
-            If Not pin.All(Function(c) Char.IsDigit(c)) Then
-                Warn("Admin PIN must contain digits only.") : Return
+                Warn("Admin password must be at least 4 characters.") : Return
             End If
             If pin <> pin2 Then
-                Warn("PINs do not match.") : Return
+                Warn("Passwords do not match.") : Return
             End If
 
             AppConfig.SaveServerUrl(url)

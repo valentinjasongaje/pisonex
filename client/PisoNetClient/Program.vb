@@ -109,6 +109,7 @@ Module Program
         AddHandler _lockMgr.LockFormAdminRequested, AddressOf OnAdminPanelRequested
         AddHandler _tray.AdminPanelRequested, AddressOf OnAdminPanelRequested
         AddHandler _tray.TimerToggleRequested, AddressOf OnTimerToggleRequested
+        AddHandler _overlay.TimerHiddenByUser, Sub() _tray.SetTimerVisible(False)
 
         ' ── Lock immediately on startup ──────────────────────────────────
         _lockMgr.LockPC()
@@ -425,11 +426,11 @@ Module Program
             Return
         End If
 
-        ' Ask for PIN
+        ' Ask for password
         Dim enteredPin = AskForPin()
         If enteredPin Is Nothing OrElse enteredPin <> AppConfig.AdminPin Then
             If enteredPin IsNot Nothing Then
-                MessageBox.Show("Incorrect PIN.", "Admin Access",
+                MessageBox.Show("Incorrect password.", "Admin Access",
                                 MessageBoxButtons.OK, MessageBoxIcon.Warning)
             End If
             Return
@@ -463,7 +464,7 @@ Module Program
         Application.Exit()
     End Sub
 
-    ' ── PIN input dialog ──────────────────────────────────────────────────
+    ' ── Password input dialog ────────────────────────────────────────────
 
     Private Function AskForPin() As String
         Dim dlg = New Form() With {
@@ -471,10 +472,10 @@ Module Program
             .TopMost = True
         }
 
-        Dim lbl = Forms.FormStyles.CreateLabel("Enter Admin PIN", bold:=True)
+        Dim lbl = Forms.FormStyles.CreateLabel("Enter Admin Password", bold:=True)
         lbl.Location = New Point(24, 16)
 
-        Dim txt = Forms.FormStyles.CreateInput(New Point(24, 40), 236, maxLen:=8, pwChar:="●"c)
+        Dim txt = Forms.FormStyles.CreateInput(New Point(24, 40), 236, pwChar:="●"c)
 
         Dim btn = Forms.FormStyles.CreateButton("Unlock", 236, 36)
         btn.DialogResult = DialogResult.OK

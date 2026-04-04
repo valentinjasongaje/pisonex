@@ -21,7 +21,7 @@ Namespace Forms
     '''   3. FocusTimer — a 750 ms heartbeat that checks the foreground window owner
     '''      and re-asserts our window if it belongs to a different process.
     '''
-    ''' Admin shortcut: Ctrl+Shift+F12 → PIN prompt → AdminPanel.
+    ''' Admin shortcut: Ctrl+Shift+F12 → PASSWORD prompt → AdminPanel.
     ''' </summary>
     Public Class LockForm
         Inherits Form
@@ -722,7 +722,7 @@ Namespace Forms
                     Dim fgPid As Integer = 0
                     GetWindowThreadProcessId(fg, fgPid)
                     ' Only intervene if the foreground belongs to another process
-                    ' (we don't steal focus from our own admin PIN dialog, etc.)
+                    ' (we don't steal focus from our own admin PASSWORD dialog, etc.)
                     If fgPid <> Process.GetCurrentProcess().Id Then
                         ShowWindow(fg, SW_MINIMIZE)
                         ForceToFront()

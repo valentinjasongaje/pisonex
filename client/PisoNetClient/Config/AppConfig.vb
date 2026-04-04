@@ -29,7 +29,7 @@ Namespace Config
         End Property
 
         ' ── Security ──────────────────────────────────────────────────────
-        ''' <summary>Admin PIN to access the admin panel or exit the app.</summary>
+        ''' <summary>Admin PASSWORD to access the admin panel or exit the app.</summary>
         Public ReadOnly Property AdminPin As String
             Get
                 Dim val = ReadReg("AdminPin")

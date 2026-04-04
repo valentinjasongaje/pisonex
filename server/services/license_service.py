@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 PISONEX_API = "https://www.pisonex.com"
 LICENSE_FILE = Path(__file__).resolve().parent.parent / "data" / "license.json"
-TRIAL_DAYS = 0  # TODO: restore to 14 after testing
+TRIAL_DAYS = 14
 OFFLINE_GRACE_HOURS = 72  # 3 days
 VERIFY_INTERVAL_HOURS = 6
 BETA_CHECK_INTERVAL_HOURS = 1  # how often to re-fetch beta flag
