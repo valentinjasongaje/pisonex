@@ -31,6 +31,7 @@ Namespace Forms
         Private _lblMessage   As Label
         Private _lblSub       As Label
         Private _lblPCNumber  As Label
+        Private _pnlPCBadge   As Panel        ' rounded-square badge wrapping the PC label
         Private _lblOffline   As Label
         Private _pnlStatus    As Panel        ' connection status pill (bottom-center)
         Private _lblStatusDot As Label        ' colored dot inside pill
@@ -240,145 +241,159 @@ Namespace Forms
             Me.KeyPreview      = True
             Me.Cursor          = Cursors.Default
 
-            ' PC number badge — position driven by AppConfig.LockPcLabelX/YPct
+            ' PC number badge — rounded-square card, upper-left
             _lblPCNumber = New Label() With {
-                .Text      = $"PC {AppConfig.PCNumber:D2}",
-                .Font      = New Font("Segoe UI", AppConfig.LockPcLabelSize, FontStyle.Bold),
-                .ForeColor = Color.FromArgb(AppConfig.LockPcLabelForeArgb),
+                .Text = $"PC {AppConfig.PCNumber:D2}",
+                .Font = New Font("Segoe UI", 56, FontStyle.Bold),
+                .ForeColor = Color.White,
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(24, 24)   ' CenterLabels() will override this
+                .AutoSize = True,
+                .Location = New Point(22, 14)
             }
+
+            ' The badge panel sizes itself around the label with padding
+            Const BadgePadH As Integer = 22
+            Const BadgePadV As Integer = 14
+            _pnlPCBadge = New Panel() With {
+                .BackColor = Color.Transparent
+            }
+            AddHandler _pnlPCBadge.Paint, AddressOf OnPCBadgePaint
+            _pnlPCBadge.Controls.Add(_lblPCNumber)
+            ' Size is fixed here; will be recalculated after font renders in CenterLabels()
+            _pnlPCBadge.Size = New Size(
+                _lblPCNumber.PreferredWidth + BadgePadH * 2,
+                _lblPCNumber.PreferredHeight + BadgePadV * 2)
+            _lblPCNumber.Location = New Point(BadgePadH, BadgePadV)
 
             ' Server-offline indicator — top-right, hidden by default
             _lblOffline = New Label() With {
-                .Text      = "Server Offline",
-                .Font      = New Font("Segoe UI", 10, FontStyle.Bold),
+                .Text = "Server Offline",
+                .Font = New Font("Segoe UI", 10, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(245, 158, 11),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Visible   = False
+                .AutoSize = True,
+                .Visible = False
             }
 
             ' Main message — font/color/position driven by AppConfig (editable in admin panel)
             _lblMessage = New Label() With {
-                .Text      = AppConfig.LockMessage,
-                .Font      = New Font("Segoe UI", AppConfig.LockMsgSize, FontStyle.Bold),
+                .Text = AppConfig.LockMessage,
+                .Font = New Font("Segoe UI", AppConfig.LockMsgSize, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(AppConfig.LockMsgForeArgb),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
+                .AutoSize = True,
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
             ' Sub-message — lighter, thinner
             _lblSub = New Label() With {
-                .Text      = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}",
-                .Font      = New Font("Segoe UI", 13),
+                .Text = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}",
+                .Font = New Font("Segoe UI", 13),
                 .ForeColor = Color.FromArgb(140, 160, 200),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
+                .AutoSize = True,
                 .TextAlign = ContentAlignment.MiddleCenter
             }
 
             ' ── Connection status pill (bottom-center) ───────────────────────────
             _pnlStatus = New Panel() With {
-                .Size      = New Size(200, 32),
+                .Size = New Size(200, 32),
                 .BackColor = Color.FromArgb(100, 16, 20, 36)
             }
             AddHandler _pnlStatus.Paint, AddressOf OnStatusPillPaint
 
             _lblStatusDot = New Label() With {
-                .Text      = "●",
-                .Font      = New Font("Segoe UI", 9),
+                .Text = "●",
+                .Font = New Font("Segoe UI", 9),
                 .ForeColor = Color.FromArgb(34, 197, 94),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(14, 7)
+                .AutoSize = True,
+                .Location = New Point(14, 7)
             }
 
             _lblStatusTxt = New Label() With {
-                .Text      = "Connected to server",
-                .Font      = New Font("Segoe UI", 9),
+                .Text = "Connected to server",
+                .Font = New Font("Segoe UI", 9),
                 .ForeColor = Color.FromArgb(140, 160, 200),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(32, 7)
+                .AutoSize = True,
+                .Location = New Point(32, 7)
             }
 
             _pnlStatus.Controls.AddRange({_lblStatusDot, _lblStatusTxt})
 
             ' License warning — shown when software is not activated
             _lblLicenseWarn = New Label() With {
-                .Text      = "Software Not Activated",
-                .Font      = New Font("Segoe UI", 11, FontStyle.Bold),
+                .Text = "Software Not Activated",
+                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(239, 68, 68),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Visible   = False
+                .AutoSize = True,
+                .Visible = False
             }
 
             ' Server license expired banner — shown at top of screen
             _pnlServerLicenseWarn = New Panel() With {
                 .BackColor = Color.FromArgb(220, 120, 53, 15),
-                .Visible   = False,
-                .Dock      = DockStyle.Top,
-                .Height    = 40
+                .Visible = False,
+                .Dock = DockStyle.Top,
+                .Height = 40
             }
             Dim _lblSrvWarnIcon = New Label() With {
-                .Text      = "⚠",
-                .Font      = New Font("Segoe UI", 12),
+                .Text = "⚠",
+                .Font = New Font("Segoe UI", 12),
                 .ForeColor = Color.FromArgb(251, 191, 36),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(16, 8)
+                .AutoSize = True,
+                .Location = New Point(16, 8)
             }
             Dim _lblSrvWarnText = New Label() With {
-                .Text      = "Server license expired",
-                .Font      = New Font("Segoe UI", 9, FontStyle.Bold),
+                .Text = "Server license expired",
+                .Font = New Font("Segoe UI", 9, FontStyle.Bold),
                 .ForeColor = Color.White,
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(42, 4)
+                .AutoSize = True,
+                .Location = New Point(42, 4)
             }
             Dim _lblSrvWarnSub = New Label() With {
-                .Text      = "Open the server dashboard to activate — Ctrl+Shift+F12 for admin panel",
-                .Font      = New Font("Segoe UI", 8),
+                .Text = "Open the server dashboard to activate — Ctrl+Shift+F12 for admin panel",
+                .Font = New Font("Segoe UI", 8),
                 .ForeColor = Color.FromArgb(253, 230, 138),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(42, 22)
+                .AutoSize = True,
+                .Location = New Point(42, 22)
             }
             Dim _lblSrvWarnLink = New Label() With {
-                .Text      = "Open Dashboard",
-                .Font      = New Font("Segoe UI", 8, FontStyle.Underline),
+                .Text = "Open Dashboard",
+                .Font = New Font("Segoe UI", 8, FontStyle.Underline),
                 .ForeColor = Color.FromArgb(147, 210, 255),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Cursor    = Cursors.Hand
+                .AutoSize = True,
+                .Cursor = Cursors.Hand
             }
             AddHandler _lblSrvWarnLink.Click, Sub(s, ev)
-                If Not String.IsNullOrEmpty(_serverDashboardUrl) Then
-                    Try
-                        Me.TopMost = False
-                        Me.WindowState = FormWindowState.Minimized
-                        Process.Start(New ProcessStartInfo(_serverDashboardUrl) With {.UseShellExecute = True})
-                    Catch
-                    End Try
-                End If
-            End Sub
+                                                  If Not String.IsNullOrEmpty(_serverDashboardUrl) Then
+                                                      Try
+                                                          Me.TopMost = False
+                                                          Me.WindowState = FormWindowState.Minimized
+                                                          Process.Start(New ProcessStartInfo(_serverDashboardUrl) With {.UseShellExecute = True})
+                                                      Catch
+                                                      End Try
+                                                  End If
+                                              End Sub
             ' Position the link label after the sub text is laid out
             AddHandler _pnlServerLicenseWarn.Layout, Sub(s, ev)
-                _lblSrvWarnLink.Location = New Point(
+                                                         _lblSrvWarnLink.Location = New Point(
                     _pnlServerLicenseWarn.Width - _lblSrvWarnLink.Width - 16,
                     (_pnlServerLicenseWarn.Height - _lblSrvWarnLink.Height) \ 2)
-            End Sub
+                                                     End Sub
             _pnlServerLicenseWarn.Controls.AddRange({_lblSrvWarnIcon, _lblSrvWarnText, _lblSrvWarnSub, _lblSrvWarnLink})
 
             ' ── Membership UI ────────────────────────────────────────────────────
             _pnlMember = New Panel() With {
-                .Size      = New Size(340, 160),
+                .Size = New Size(340, 160),
                 .BackColor = Color.Transparent,
-                .Visible   = False
+                .Visible = False
             }
             AddHandler _pnlMember.Paint, AddressOf OnMemberPanelPaint
 
@@ -392,24 +407,24 @@ Namespace Forms
             End If
 
             _lblMemberTitle = New Label() With {
-                .Text      = "Member Access",
-                .Font      = New Font("Segoe UI", 9, FontStyle.Bold),
+                .Text = "Member Access",
+                .Font = New Font("Segoe UI", 9, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(120, 150, 200),
                 .BackColor = Color.Transparent,
-                .AutoSize  = False,
-                .Size      = New Size(300, 20),
+                .AutoSize = False,
+                .Size = New Size(300, 20),
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .Location  = New Point(20, 14)
+                .Location = New Point(20, 14)
             }
 
             _btnLogin = New Button() With {
-                .Text      = "  Login",
-                .Size      = New Size(140, 40),
-                .Font      = New Font("Segoe UI", 10, FontStyle.Bold),
+                .Text = "  Login",
+                .Size = New Size(140, 40),
+                .Font = New Font("Segoe UI", 10, FontStyle.Bold),
                 .ForeColor = Color.White,
                 .BackColor = MemberAccent,
                 .FlatStyle = FlatStyle.Flat,
-                .Cursor    = Cursors.Hand,
+                .Cursor = Cursors.Hand,
                 .TextAlign = ContentAlignment.MiddleCenter
             }
             _btnLogin.FlatAppearance.BorderSize = 0
@@ -417,13 +432,13 @@ Namespace Forms
             AddHandler _btnLogin.Click, AddressOf OnLoginClick
 
             _btnRegister = New Button() With {
-                .Text      = "  Register",
-                .Size      = New Size(140, 40),
-                .Font      = New Font("Segoe UI", 10, FontStyle.Bold),
+                .Text = "  Register",
+                .Size = New Size(140, 40),
+                .Font = New Font("Segoe UI", 10, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(180, 195, 220),
                 .BackColor = Color.FromArgb(30, 38, 58),
                 .FlatStyle = FlatStyle.Flat,
-                .Cursor    = Cursors.Hand,
+                .Cursor = Cursors.Hand,
                 .TextAlign = ContentAlignment.MiddleCenter
             }
             _btnRegister.FlatAppearance.BorderSize = 1
@@ -432,36 +447,36 @@ Namespace Forms
             AddHandler _btnRegister.Click, AddressOf OnRegisterClick
 
             _lblMemberInfo = New Label() With {
-                .Text      = "",
-                .Font      = New Font("Segoe UI", 11, FontStyle.Bold),
+                .Text = "",
+                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(34, 197, 94),
                 .BackColor = Color.Transparent,
-                .AutoSize  = False,
-                .Size      = New Size(300, 24),
+                .AutoSize = False,
+                .Size = New Size(300, 24),
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .Visible   = False
+                .Visible = False
             }
 
             _lblMemberTime = New Label() With {
-                .Text      = "",
-                .Font      = New Font("Segoe UI", 10),
+                .Text = "",
+                .Font = New Font("Segoe UI", 10),
                 .ForeColor = Color.FromArgb(140, 160, 200),
                 .BackColor = Color.Transparent,
-                .AutoSize  = False,
-                .Size      = New Size(300, 22),
+                .AutoSize = False,
+                .Size = New Size(300, 22),
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .Visible   = False
+                .Visible = False
             }
 
             _btnLogout = New Button() With {
-                .Text      = "Logout",
-                .Size      = New Size(120, 34),
-                .Font      = New Font("Segoe UI", 9, FontStyle.Bold),
+                .Text = "Logout",
+                .Size = New Size(120, 34),
+                .Font = New Font("Segoe UI", 9, FontStyle.Bold),
                 .ForeColor = Color.White,
                 .BackColor = Color.FromArgb(180, 50, 50),
                 .FlatStyle = FlatStyle.Flat,
-                .Cursor    = Cursors.Hand,
-                .Visible   = False
+                .Cursor = Cursors.Hand,
+                .Visible = False
             }
             _btnLogout.FlatAppearance.BorderSize = 0
             _btnLogout.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 60, 60)
@@ -494,24 +509,24 @@ Namespace Forms
             AddHandler _txtMemberConf.KeyDown, Sub(s, e) If e.KeyCode = Keys.Enter Then OnLoginClick(s, e)
 
             _lblInlineError = New Label() With {
-                .Text      = "",
-                .Font      = New Font("Segoe UI", 9),
+                .Text = "",
+                .Font = New Font("Segoe UI", 9),
                 .ForeColor = Color.FromArgb(239, 68, 68),
                 .BackColor = Color.Transparent,
-                .AutoSize  = False,
-                .Size      = New Size(fldW, 18),
+                .AutoSize = False,
+                .Size = New Size(fldW, 18),
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .Visible   = False
+                .Visible = False
             }
 
             _lblModeToggle = New Label() With {
-                .Text      = "Register",
-                .Font      = New Font("Segoe UI", 8.5F, FontStyle.Underline),
+                .Text = "Register",
+                .Font = New Font("Segoe UI", 8.5F, FontStyle.Underline),
                 .ForeColor = MemberAccent,
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Cursor    = Cursors.Hand,
-                .Visible   = False
+                .AutoSize = True,
+                .Cursor = Cursors.Hand,
+                .Visible = False
             }
             AddHandler _lblModeToggle.Click, AddressOf OnModeToggleClick
 
@@ -522,28 +537,28 @@ Namespace Forms
 
             ' ── Receiving-coins indicator (shown when hardware controller is accepting coins for this PC) ──
             _pnlReceivingCoins = New Panel() With {
-                .Size      = New Size(280, 44),
+                .Size = New Size(280, 44),
                 .BackColor = Color.Transparent,
-                .Visible   = False
+                .Visible = False
             }
             AddHandler _pnlReceivingCoins.Paint, AddressOf OnReceivingCoinsPaint
 
             _lblCoinIcon = New Label() With {
-                .Text      = "●",
-                .Font      = New Font("Segoe UI", 14, FontStyle.Bold),
+                .Text = "●",
+                .Font = New Font("Segoe UI", 14, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(250, 204, 21),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(16, 10)
+                .AutoSize = True,
+                .Location = New Point(16, 10)
             }
 
             _lblCoinText = New Label() With {
-                .Text      = "Receiving Coins…",
-                .Font      = New Font("Segoe UI", 12, FontStyle.Bold),
+                .Text = "Receiving Coins…",
+                .Font = New Font("Segoe UI", 12, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(250, 204, 21),
                 .BackColor = Color.Transparent,
-                .AutoSize  = True,
-                .Location  = New Point(42, 11)
+                .AutoSize = True,
+                .Location = New Point(42, 11)
             }
 
             _pnlReceivingCoins.Controls.AddRange({_lblCoinIcon, _lblCoinText})
@@ -554,32 +569,32 @@ Namespace Forms
 
             ' ── Idle auto-shutdown countdown card (minimal, bottom-left) ─────────
             _pnlIdleShutdown = New Panel() With {
-                .Size      = New Size(190, 44),
+                .Size = New Size(190, 44),
                 .BackColor = Color.Transparent,
-                .Visible   = False
+                .Visible = False
             }
             AddHandler _pnlIdleShutdown.Paint, AddressOf OnIdleShutdownPaint
 
             _lblIdleTitle = New Label() With {
-                .Text      = "Shutting down in",
-                .Font      = New Font("Segoe UI", 7, FontStyle.Regular),
+                .Text = "Shutting down in",
+                .Font = New Font("Segoe UI", 7, FontStyle.Regular),
                 .ForeColor = Color.FromArgb(200, 110, 110),
                 .BackColor = Color.Transparent,
-                .AutoSize  = False,
+                .AutoSize = False,
                 .TextAlign = ContentAlignment.MiddleLeft,
-                .Location  = New Point(10, 4),
-                .Size      = New Size(170, 14)
+                .Location = New Point(10, 4),
+                .Size = New Size(170, 14)
             }
 
             _lblIdleCount = New Label() With {
-                .Text      = "00:00",
-                .Font      = New Font("Segoe UI", 13, FontStyle.Regular),
+                .Text = "00:00",
+                .Font = New Font("Segoe UI", 13, FontStyle.Regular),
                 .ForeColor = Color.FromArgb(245, 90, 90),
                 .BackColor = Color.Transparent,
-                .AutoSize  = False,
+                .AutoSize = False,
                 .TextAlign = ContentAlignment.MiddleLeft,
-                .Location  = New Point(8, 18),
-                .Size      = New Size(170, 22)
+                .Location = New Point(8, 18),
+                .Size = New Size(170, 22)
             }
 
             _pnlIdleShutdown.Controls.AddRange({_lblIdleTitle, _lblIdleCount})
@@ -588,7 +603,7 @@ Namespace Forms
             _idlePulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
             AddHandler _idlePulseTimer.Tick, AddressOf OnIdlePulseTick
 
-            Me.Controls.AddRange({_pnlServerLicenseWarn, _lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
+            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
         End Sub
 
         Private Sub OnStatusPillPaint(sender As Object, e As PaintEventArgs)
@@ -610,6 +625,34 @@ Namespace Forms
                     g.FillPath(br, path)
                 End Using
                 Using pen = New Pen(Color.FromArgb(60, 80, 110, 180), 1)
+                    g.DrawPath(pen, path)
+                End Using
+            End Using
+        End Sub
+
+        Private Sub OnPCBadgePaint(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g = e.Graphics
+            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+            Const Radius As Integer = 16
+            Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
+            Dim d = Radius * 2
+
+            Using path = New Drawing2D.GraphicsPath()
+                path.AddArc(rect.X, rect.Y, d, d, 180, 90)
+                path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+                path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+                path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+
+                ' Dark semi-transparent fill
+                Using br = New SolidBrush(Color.FromArgb(200, 8, 12, 26))
+                    g.FillPath(br, path)
+                End Using
+
+                ' Subtle blue border
+                Using pen = New Pen(Color.FromArgb(140, 59, 130, 246), 1.5F)
                     g.DrawPath(pen, path)
                 End Using
             End Using
@@ -649,13 +692,13 @@ Namespace Forms
                 ' DirectX exclusive-fullscreen apps (e.g. CS:S) need ~400 ms to release
                 ' the display before another window can paint over them.
                 Task.Delay(400).ContinueWith(Sub(t)
-                    Try
-                        If Me.IsHandleCreated AndAlso Me.Visible Then
-                            Me.Invoke(Sub() ForceToFront())
-                        End If
-                    Catch
-                    End Try
-                End Sub)
+                                                 Try
+                                                     If Me.IsHandleCreated AndAlso Me.Visible Then
+                                                         Me.Invoke(Sub() ForceToFront())
+                                                     End If
+                                                 Catch
+                                                 End Try
+                                             End Sub)
             Else
                 UninstallHook()
                 StopFocusTimer()
@@ -679,13 +722,13 @@ Namespace Forms
             If _hookHandle = IntPtr.Zero Then Return
             UnhookWindowsHookEx(_hookHandle)
             _hookHandle = IntPtr.Zero
-            _altDown    = False
-            _winDown    = False
+            _altDown = False
+            _winDown = False
         End Sub
 
         Private Function KeyboardHookProc(nCode As Integer, wParam As IntPtr, lParam As IntPtr) As IntPtr
             If nCode >= 0 Then
-                Dim kb    = Marshal.PtrToStructure(Of KBDLLHOOKSTRUCT)(lParam)
+                Dim kb = Marshal.PtrToStructure(Of KBDLLHOOKSTRUCT)(lParam)
 
                 ' Never block synthetic (injected) key events — these come from our own
                 ' ForceToFront() helper (keybd_event Alt-trick) and must not be swallowed.
@@ -693,7 +736,7 @@ Namespace Forms
                     Return CallNextHookEx(_hookHandle, nCode, wParam, lParam)
                 End If
 
-                Dim vk    = CType(kb.vkCode, Keys)
+                Dim vk = CType(kb.vkCode, Keys)
                 Dim wpInt = wParam.ToInt32()
                 Dim isDown = (wpInt = WM_KEYDOWN OrElse wpInt = WM_SYSKEYDOWN)
 
@@ -770,16 +813,16 @@ Namespace Forms
             If Not Me.IsHandleCreated OrElse Not Me.Visible Then Return
             Try
                 Me.Invoke(Sub()
-                    Dim fg = GetForegroundWindow()
-                    Dim fgPid As Integer = 0
-                    GetWindowThreadProcessId(fg, fgPid)
-                    ' Only intervene if the foreground belongs to another process
-                    ' (we don't steal focus from our own admin PASSWORD dialog, etc.)
-                    If fgPid <> Process.GetCurrentProcess().Id Then
-                        ShowWindow(fg, SW_MINIMIZE)
-                        ForceToFront()
-                    End If
-                End Sub)
+                              Dim fg = GetForegroundWindow()
+                              Dim fgPid As Integer = 0
+                              GetWindowThreadProcessId(fg, fgPid)
+                              ' Only intervene if the foreground belongs to another process
+                              ' (we don't steal focus from our own admin PASSWORD dialog, etc.)
+                              If fgPid <> Process.GetCurrentProcess().Id Then
+                                  ShowWindow(fg, SW_MINIMIZE)
+                                  ForceToFront()
+                              End If
+                          End Sub)
             Catch
             End Try
         End Sub
@@ -874,7 +917,7 @@ Namespace Forms
             ' Main message: position derived from configured percentages.
             ' XPct = % of the slack space (Width - labelWidth), so 50 = centered.
             ' YPct = % of the slack space (Height - labelHeight), so 47 ≈ slightly above middle.
-            Dim msgSlackX = Math.Max(0, Me.ClientSize.Width  - _lblMessage.Width)
+            Dim msgSlackX = Math.Max(0, Me.ClientSize.Width - _lblMessage.Width)
             Dim msgSlackY = Math.Max(0, Me.ClientSize.Height - _lblMessage.Height)
             Dim msgX = If(AppConfig.LockMsgCenterX,
                           msgSlackX \ 2,
@@ -886,13 +929,8 @@ Namespace Forms
                 (Me.ClientSize.Width - _lblSub.Width) \ 2,
                 _lblMessage.Bottom + 16)
 
-            ' PC label: centered based on rendered width, or % of screen width
-            Dim pcX = If(AppConfig.LockPcLabelCenterX,
-                         (Me.ClientSize.Width - _lblPCNumber.Width) \ 2,
-                         CInt(Me.ClientSize.Width * AppConfig.LockPcLabelXPct / 100.0))
-            _lblPCNumber.Location = New Point(
-                pcX,
-                CInt(Me.ClientSize.Height * AppConfig.LockPcLabelYPct / 100.0))
+            ' PC badge: fixed upper-left position
+            _pnlPCBadge.Location = New Point(24, 24)
 
             If _lblOffline.Visible Then
                 _lblOffline.Location = New Point(Me.ClientSize.Width - _lblOffline.Width - 24, 24)
@@ -1025,10 +1063,14 @@ Namespace Forms
             _lblMessage.Font      = New Font("Segoe UI", AppConfig.LockMsgSize, FontStyle.Bold)
             _lblMessage.ForeColor = Color.FromArgb(AppConfig.LockMsgForeArgb)
 
-            ' PC label — text, font size, and color (position handled by CenterLabels)
-            _lblPCNumber.Text      = $"PC {AppConfig.PCNumber:D2}"
-            _lblPCNumber.Font      = New Font("Segoe UI", AppConfig.LockPcLabelSize)
-            _lblPCNumber.ForeColor = Color.FromArgb(AppConfig.LockPcLabelForeArgb)
+            ' PC badge — update text; resize panel to fit label + padding
+            _lblPCNumber.Text = $"PC {AppConfig.PCNumber:D2}"
+            Const BadgePadH2 As Integer = 22
+            Const BadgePadV2 As Integer = 14
+            _pnlPCBadge.Size = New Size(
+                _lblPCNumber.PreferredWidth  + BadgePadH2 * 2,
+                _lblPCNumber.PreferredHeight + BadgePadV2 * 2)
+            _lblPCNumber.Location = New Point(BadgePadH2, BadgePadV2)
 
             _lblSub.Text = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
             CenterLabels()
