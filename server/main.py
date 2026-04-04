@@ -162,6 +162,15 @@ def _migrate_schema():
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
             migrated.append(f"users.{col_name} (added)")
 
+    # Add new columns to membership_config if missing
+    new_membership_columns = [
+        ("preset_amounts_enabled", "INTEGER"),
+    ]
+    for col_name, col_type in new_membership_columns:
+        if not has_column("membership_config", col_name):
+            cursor.execute(f"ALTER TABLE membership_config ADD COLUMN {col_name} {col_type} DEFAULT 0")
+            migrated.append(f"membership_config.{col_name} (added)")
+
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
         cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")

@@ -34,13 +34,13 @@ function closeModal() {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('preset-active'));
 }
 
-function selectPreset(btn, minutes) {
+function selectPreset(btn, value, mode) {
   // Highlight selected preset
   btn.closest('.preset-grid').querySelectorAll('.preset-btn').forEach(b => b.classList.remove('preset-active'));
   btn.classList.add('preset-active');
   // Set the input value
   const input = document.getElementById('add-time-input');
-  if (input) input.value = minutes;
+  if (input) input.value = value;
 }
 
 // ── Shared auth-aware fetch ───────────────────────────────────────────────────
@@ -96,17 +96,28 @@ document.addEventListener('DOMContentLoaded', () => {
     addTimeForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const pcNumber = addTimeForm.querySelector('[name="pc_number"]').value;
-      const minutes  = addTimeForm.querySelector('[name="minutes"]').value;
+      const amount   = document.getElementById('add-time-input').value;
+      const mode     = document.getElementById('preset-mode')?.value || 'minutes';
 
-      const res = await apiPost('/dashboard/api/pc/add-time', {
-        pc_number: parseInt(pcNumber),
-        minutes: parseInt(minutes),
-      });
+      let res, toastMsg;
+      if (mode === 'pesos') {
+        res = await apiPost('/dashboard/api/pc/add-time-pesos', {
+          pc_number: parseInt(pcNumber),
+          pesos: parseInt(amount),
+        });
+        toastMsg = `Added ₱${amount} to PC ${String(pcNumber).padStart(2, '0')}`;
+      } else {
+        res = await apiPost('/dashboard/api/pc/add-time', {
+          pc_number: parseInt(pcNumber),
+          minutes: parseInt(amount),
+        });
+        toastMsg = `Added ${amount} min to PC ${String(pcNumber).padStart(2, '0')}`;
+      }
       if (!res) return;
 
       if (res.ok) {
         closeModal();
-        showToast(`Added ${minutes} min to PC ${String(pcNumber).padStart(2, '0')}`, 'success');
+        showToast(toastMsg, 'success');
         if (document.getElementById('pc-grid')) {
           htmx.trigger('#pc-grid', 'refresh');
         } else {

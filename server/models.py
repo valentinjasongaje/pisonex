@@ -96,6 +96,7 @@ class MembershipConfig(Base):
     zero_time_auto_logout_seconds   = Column(Integer, default=30, nullable=False)
     idle_auto_shutdown_minutes      = Column(Integer, default=5, nullable=False)
     member_heartbeat_timeout_minutes = Column(Integer, default=60, nullable=False)
+    preset_amounts_enabled          = Column(Boolean, default=False, nullable=False)
 
 
 class SystemLog(Base):

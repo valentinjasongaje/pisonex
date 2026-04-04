@@ -54,15 +54,6 @@
       </div>
 
       <div class="form-group">
-        <label for="cfg-idle-shutdown">Idle Auto-Shutdown</label>
-        <div class="input-suffix">
-          <input type="number" id="cfg-idle-shutdown" min="0" max="60"
-            value="{{ config.idle_auto_shutdown_minutes }}" />
-          <span class="suffix">min</span>
-        </div>
-      </div>
-
-      <div class="form-group">
         <label for="cfg-heartbeat-timeout">Heartbeat Timeout</label>
         <div class="input-suffix">
           <input type="number" id="cfg-heartbeat-timeout" min="5" max="1440"
@@ -211,7 +202,6 @@ async function saveMembershipConfig(e) {
     logout_deduction_minutes: parseInt(document.getElementById('cfg-logout-deduction').value),
     minimum_logout_minutes: parseInt(document.getElementById('cfg-min-logout').value),
     zero_time_auto_logout_seconds: parseInt(document.getElementById('cfg-zero-time').value),
-    idle_auto_shutdown_minutes: parseInt(document.getElementById('cfg-idle-shutdown').value),
     member_heartbeat_timeout_minutes: parseInt(document.getElementById('cfg-heartbeat-timeout').value),
   };
   const res = await fetch('/dashboard/api/membership/config', {

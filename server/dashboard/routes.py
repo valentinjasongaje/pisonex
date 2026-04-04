@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from database import get_db
 from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig
-from schemas import AdminAddTimeRequest
+from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from config import settings
 import command_store
@@ -505,6 +505,36 @@ def dashboard_add_time(
     }
 
 
+@router.post("/api/pc/add-time-pesos", dependencies=[Depends(_require_active_license)])
+def dashboard_add_time_pesos(
+    body: AdminAddPesosRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Admin adds time by PHP amount — creates a CoinTransaction with amount_php."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if body.pesos <= 0:
+        raise HTTPException(status_code=422, detail="Pesos must be greater than 0")
+
+    svc = SessionService(db)
+    pc = svc.get_pc(body.pc_number)
+    if not pc:
+        raise HTTPException(status_code=404, detail=f"PC {body.pc_number} not found")
+
+    try:
+        seconds_added, session = svc.add_time_by_pesos(body.pc_number, body.pesos)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return {
+        "pc_number": body.pc_number,
+        "pesos_added": body.pesos,
+        "seconds_added": seconds_added,
+        "total_seconds": session.granted_seconds,
+    }
+
+
 @router.post("/api/pc/{pc_number}/lock", dependencies=[Depends(_require_active_license)])
 def dashboard_lock_pc(
     pc_number: int,
@@ -713,6 +743,8 @@ def pcs_page(
     pcs = svc.get_all_pcs()
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
     membership_enabled, pc_members = _get_membership_info(db)
+    cfg = db.query(MembershipConfig).first()
+    rates = db.query(CoinRate).filter(CoinRate.is_active == True).order_by(CoinRate.pesos).all()
 
     pc_data = []
     for pc in pcs:
@@ -739,6 +771,8 @@ def pcs_page(
         "pcs": pc_data,
         "total": len(pc_data),
         "membership_enabled": membership_enabled,
+        "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "rates": rates,
     })
 
 
@@ -1141,6 +1175,25 @@ def _list_wallpaper_files() -> list[dict]:
 from models import User, MembershipConfig
 from schemas import MembershipConfigUpdate
 from services.membership_service import MembershipService
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+
+    msvc = MembershipService(db)
+    cfg = msvc.get_config()
+    rates = db.query(CoinRate).filter(CoinRate.is_active == True).order_by(CoinRate.pesos).all()
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "config": cfg,
+        "rates": rates,
+    })
 
 
 @router.get("/membership", response_class=HTMLResponse)

@@ -1,0 +1,134 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Settings</h1>
+</div>
+
+<!-- General -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>General</h2>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-idle-shutdown" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Idle Auto-Shutdown</label>
+    <p style="font-size:.8rem;color:var(--gray);margin:.25rem 0 .5rem;">
+      Automatically shut down a PC that has been locked and idle for this many minutes (0 = disabled).
+    </p>
+    <div class="input-suffix" style="max-width:180px;">
+      <input type="number" id="cfg-idle-shutdown" min="0" max="60"
+        value="{{ config.idle_auto_shutdown_minutes }}" />
+      <span class="suffix">min</span>
+    </div>
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="saveIdleShutdown()">Save</button>
+    <span id="idle-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
+<!-- PC Management Presets -->
+<div class="card" style="max-width:480px;">
+  <h2>PC Management Presets</h2>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label class="toggle-label">
+      <input type="checkbox" id="cfg-preset-amounts"
+        {% if config.preset_amounts_enabled %}checked{% endif %} />
+      <span>Use PHP amount presets</span>
+    </label>
+    <p style="font-size:.8rem;color:var(--gray);margin:.5rem 0 0 24px;">
+      When enabled, the Add Time buttons in PC Management show ₱ amounts from your coin
+      rates instead of fixed minutes. Transactions are recorded with the peso amount paid.
+    </p>
+  </div>
+
+  {% if rates %}
+  <div style="margin-top:.75rem;margin-left:24px;">
+    <p style="font-size:.75rem;color:var(--text-dim);margin-bottom:.4rem;">Active coin rates that will appear as presets:</p>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;">
+      {% for rate in rates %}
+      <span style="font-size:.75rem;padding:.25rem .6rem;background:var(--surface-2,rgba(255,255,255,0.05));border:1px solid var(--border);border-radius:6px;color:var(--text);">
+        ₱{{ rate.pesos }} = {{ rate.seconds // 60 }} min
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <p style="font-size:.8rem;color:var(--gray);margin-top:.5rem;margin-left:24px;">
+    No active coin rates found. Add rates in Coin Rates first.
+  </p>
+  {% endif %}
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="savePresetAmounts()">Save</button>
+    <span id="preset-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
+<style>
+  .input-suffix {
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+  .input-suffix input {
+    width: 100%;
+    padding-right: 40px;
+  }
+  .input-suffix .suffix {
+    position: absolute;
+    right: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim, #94a3b8);
+    pointer-events: none;
+    opacity: 0.7;
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text, #e2e8f0);
+    cursor: pointer;
+  }
+  .toggle-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--blue, #3b82f6);
+  }
+</style>
+
+<script>
+async function _saveConfig(body, statusId) {
+  const el = document.getElementById(statusId);
+  const res = await fetch('/dashboard/api/membership/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) {
+    el.textContent = 'Saved.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 3000);
+}
+
+function saveIdleShutdown() {
+  const val = parseInt(document.getElementById('cfg-idle-shutdown').value);
+  if (isNaN(val) || val < 0) return;
+  _saveConfig({ idle_auto_shutdown_minutes: val }, 'idle-status');
+}
+
+function savePresetAmounts() {
+  const val = document.getElementById('cfg-preset-amounts').checked;
+  _saveConfig({ preset_amounts_enabled: val }, 'preset-status');
+}
+</script>
+
+{% endblock %}

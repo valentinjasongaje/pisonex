@@ -190,6 +190,12 @@ class MembershipConfigUpdate(BaseModel):
     zero_time_auto_logout_seconds: Optional[int] = None
     idle_auto_shutdown_minutes: Optional[int] = None
     member_heartbeat_timeout_minutes: Optional[int] = None
+    preset_amounts_enabled: Optional[bool] = None
+
+
+class AdminAddPesosRequest(BaseModel):
+    pc_number: int
+    pesos: int
 
 class MemberListResponse(BaseModel):
     id: int
