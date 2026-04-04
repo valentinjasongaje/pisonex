@@ -124,6 +124,95 @@ def login_submit(
     return response
 
 
+@router.get("/account", response_class=HTMLResponse)
+def account_page(
+    request: Request,
+    current_user: Optional[str] = Depends(_validate_session),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    return templates.TemplateResponse("account.html", {
+        "request": request,
+        "current_username": current_user,
+        "success": None,
+        "error": None,
+    })
+
+
+@router.post("/account", response_class=HTMLResponse)
+def account_update(
+    request: Request,
+    current_password: str = Form(...),
+    new_username: str = Form(""),
+    new_password: str = Form(""),
+    confirm_password: str = Form(""),
+    current_user: Optional[str] = Depends(_validate_session),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+
+    admin = db.query(AdminUser).filter(AdminUser.username == current_user).first()
+
+    def _render(error=None, success=None):
+        return templates.TemplateResponse("account.html", {
+            "request": request,
+            "current_username": new_username.strip() or current_user,
+            "error": error,
+            "success": success,
+        })
+
+    # Verify current password
+    if not admin or not bcrypt.checkpw(current_password.encode(), admin.password.encode()):
+        return _render(error="Current password is incorrect.")
+
+    new_username = new_username.strip()
+    changed = False
+
+    # Update username if changed
+    if new_username and new_username != current_user:
+        exists = db.query(AdminUser).filter(
+            AdminUser.username == new_username,
+            AdminUser.id != admin.id,
+        ).first()
+        if exists:
+            return _render(error="That username is already taken.")
+        admin.username = new_username
+        changed = True
+
+    # Update password if provided
+    if new_password:
+        if len(new_password) < 6:
+            return _render(error="New password must be at least 6 characters.")
+        if new_password != confirm_password:
+            return _render(error="New passwords do not match.")
+        admin.password = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+        changed = True
+
+    if not changed:
+        return _render(error="No changes were made.")
+
+    db.commit()
+
+    # Re-issue session cookie with updated username
+    token = _create_session_token(admin.username)
+    response = templates.TemplateResponse("account.html", {
+        "request": request,
+        "current_username": admin.username,
+        "error": None,
+        "success": "Credentials updated successfully.",
+    })
+    response.set_cookie(
+        _COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=int(timedelta(hours=settings.TOKEN_EXPIRE_HOURS).total_seconds()),
+    )
+    return response
+
+
 @router.get("/logout")
 def logout():
     response = RedirectResponse("/dashboard/login", status_code=302)

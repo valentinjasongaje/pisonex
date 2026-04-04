@@ -1,5 +1,6 @@
 Imports System.Diagnostics
 Imports System.IO
+Imports System.Runtime.InteropServices
 Imports System.ServiceProcess
 Imports System.Threading
 Imports System.Timers
@@ -13,6 +14,10 @@ Imports Microsoft.Win32
 '''
 ''' Every 5 seconds it checks whether PisoNetClient.exe is running.
 ''' If the process is gone AND there is no recent graceful-shutdown flag, it starts it.
+'''
+''' When running as a Windows Service (Session 0), the client is launched into the
+''' active user's interactive session via WTSQueryUserToken + CreateProcessAsUser,
+''' bypassing Session 0 isolation so the window actually appears on the user's desktop.
 ''' </summary>
 Public Class WatchdogService
     Inherits ServiceBase
@@ -26,10 +31,10 @@ Public Class WatchdogService
     Private Const CLIENT_PROC_NAME  As String  = "PisoNetClient"
 
     Public Sub New()
-        ServiceName          = "pnxsystem"
-        CanStop              = True
-        CanPauseAndContinue  = False
-        AutoLog              = True
+        ServiceName         = "pnxsystem"
+        CanStop             = True
+        CanPauseAndContinue = False
+        AutoLog             = True
     End Sub
 
     ' ── Windows Service entry points ─────────────────────────────────────────
@@ -52,8 +57,6 @@ Public Class WatchdogService
     Public Sub RunConsole()
         Log("Starting in console/backup mode.")
         StartTimer()
-
-        ' Immediate first check (don't wait 5 s)
         EnsureClientRunning()
 
         AddHandler Console.CancelKeyPress, Sub(s, e)
@@ -87,34 +90,96 @@ Public Class WatchdogService
     ' ── Core check ───────────────────────────────────────────────────────────
 
     Private Sub EnsureClientRunning()
-        ' Skip if the client is already running
-        Dim procs = Process.GetProcessesByName(CLIENT_PROC_NAME)
-        If procs.Length > 0 Then Return
+        If Process.GetProcessesByName(CLIENT_PROC_NAME).Length > 0 Then Return
 
-        ' Skip if within the admin graceful-shutdown grace period
         If InGracePeriod() Then
             Log("Client not running but grace period active — skipping restart.")
             Return
         End If
 
-        ' Find the client exe
         Dim exePath = GetClientExePath()
         If String.IsNullOrEmpty(exePath) OrElse Not File.Exists(exePath) Then
             Log($"Client exe not found at: {exePath}")
             Return
         End If
 
-        ' Launch it
-        Try
-            Log($"Client not running — starting: {exePath}")
-            Dim psi = New ProcessStartInfo(exePath) With {
-                .UseShellExecute   = True,
-                .WorkingDirectory  = Path.GetDirectoryName(exePath)
-            }
-            Process.Start(psi)
-        Catch ex As Exception
-            Log($"Failed to start client: {ex.Message}")
-        End Try
+        Log($"Client not running — restarting: {exePath}")
+
+        ' Services run in Session 0 (isolated). Use CreateProcessAsUser to launch
+        ' the client into the active interactive user session so it appears on screen.
+        If Not Environment.UserInteractive Then
+            LaunchInUserSession(exePath)
+        Else
+            ' Console/backup mode — already in the user session, use normal launch
+            Try
+                Process.Start(New ProcessStartInfo(exePath) With {
+                    .UseShellExecute  = True,
+                    .WorkingDirectory = Path.GetDirectoryName(exePath)
+                })
+            Catch ex As Exception
+                Log($"Failed to start client: {ex.Message}")
+            End Try
+        End If
+    End Sub
+
+    ' ── Session-aware launch (fixes Session 0 isolation) ─────────────────────
+
+    ''' <summary>
+    ''' Launches the client exe inside the active console user's session so the
+    ''' window appears on the interactive desktop — not hidden in Session 0.
+    ''' </summary>
+    Private Sub LaunchInUserSession(exePath As String)
+        Dim sessionId As UInteger = WTSGetActiveConsoleSessionId()
+        Dim userToken As IntPtr = IntPtr.Zero
+
+        If Not WTSQueryUserToken(sessionId, userToken) Then
+            Dim err = Marshal.GetLastWin32Error()
+            Log($"WTSQueryUserToken failed (session={sessionId}, error={err}). Falling back to shell launch.")
+            ' Fallback — may not appear on desktop but won't crash
+            Try
+                Process.Start(New ProcessStartInfo(exePath) With {.UseShellExecute = True})
+            Catch ex As Exception
+                Log($"Fallback launch failed: {ex.Message}")
+            End Try
+            Return
+        End If
+
+        Dim envBlock As IntPtr = IntPtr.Zero
+        CreateEnvironmentBlock(envBlock, userToken, False)
+
+        Dim si As New STARTUPINFO()
+        si.cb        = CUInt(Marshal.SizeOf(si))
+        si.lpDesktop = "winsta0\default"   ' interactive desktop
+
+        Dim pi      As New PROCESS_INFORMATION()
+        Dim cmdLine As New System.Text.StringBuilder($"""{exePath}""")
+        Dim workDir As String = Path.GetDirectoryName(exePath)
+
+        Const CREATE_UNICODE_ENVIRONMENT As UInteger = &H400UI
+        Const NORMAL_PRIORITY_CLASS      As UInteger = &H20UI
+
+        Dim ok = CreateProcessAsUser(
+            userToken,
+            Nothing,
+            cmdLine,
+            IntPtr.Zero, IntPtr.Zero,
+            False,
+            CREATE_UNICODE_ENVIRONMENT Or NORMAL_PRIORITY_CLASS,
+            envBlock,
+            workDir,
+            si, pi
+        )
+
+        If ok Then
+            Log($"Client relaunched in user session {sessionId}.")
+            CloseHandle(pi.hProcess)
+            CloseHandle(pi.hThread)
+        Else
+            Log($"CreateProcessAsUser failed (error={Marshal.GetLastWin32Error()}).")
+        End If
+
+        If envBlock <> IntPtr.Zero Then DestroyEnvironmentBlock(envBlock)
+        CloseHandle(userToken)
     End Sub
 
     ' ── Graceful-shutdown grace period ───────────────────────────────────────
@@ -129,7 +194,6 @@ Public Class WatchdogService
         Dim elapsed = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ts
         If elapsed < GRACE_SECONDS Then Return True
 
-        ' Grace period expired — clear the flag so next cycle restarts normally
         WriteReg("ShutdownAt", "")
         Return False
     End Function
@@ -137,13 +201,10 @@ Public Class WatchdogService
     ' ── Client exe path discovery ─────────────────────────────────────────────
 
     Private Function GetClientExePath() As String
-        ' 1. Registry (written by client on each startup)
         Dim regPath = ReadReg("ClientExePath")
         If Not String.IsNullOrEmpty(regPath) Then Return regPath
 
-        ' 2. Same directory as this watchdog exe
-        Dim thisDir = Path.GetDirectoryName(
-            Process.GetCurrentProcess().MainModule?.FileName)
+        Dim thisDir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule?.FileName)
         Return Path.Combine(thisDir, CLIENT_PROC_NAME & ".exe")
     End Function
 
@@ -186,5 +247,73 @@ Public Class WatchdogService
         Catch
         End Try
     End Sub
+
+    ' ── P/Invoke declarations ─────────────────────────────────────────────────
+
+    <DllImport("kernel32.dll")>
+    Private Shared Function WTSGetActiveConsoleSessionId() As UInteger
+    End Function
+
+    <DllImport("wtsapi32.dll", SetLastError:=True)>
+    Private Shared Function WTSQueryUserToken(sessionId As UInteger, ByRef phToken As IntPtr) As Boolean
+    End Function
+
+    <DllImport("userenv.dll", SetLastError:=True)>
+    Private Shared Function CreateEnvironmentBlock(ByRef lpEnvironment As IntPtr, hToken As IntPtr, bInherit As Boolean) As Boolean
+    End Function
+
+    <DllImport("userenv.dll", SetLastError:=True)>
+    Private Shared Function DestroyEnvironmentBlock(lpEnvironment As IntPtr) As Boolean
+    End Function
+
+    <DllImport("advapi32.dll", SetLastError:=True, CharSet:=CharSet.Unicode)>
+    Private Shared Function CreateProcessAsUser(
+        hToken As IntPtr,
+        lpApplicationName As String,
+        lpCommandLine As System.Text.StringBuilder,
+        lpProcessAttributes As IntPtr,
+        lpThreadAttributes As IntPtr,
+        bInheritHandles As Boolean,
+        dwCreationFlags As UInteger,
+        lpEnvironment As IntPtr,
+        lpCurrentDirectory As String,
+        ByRef lpStartupInfo As STARTUPINFO,
+        ByRef lpProcessInformation As PROCESS_INFORMATION
+    ) As Boolean
+    End Function
+
+    <DllImport("kernel32.dll", SetLastError:=True)>
+    Private Shared Function CloseHandle(hObject As IntPtr) As Boolean
+    End Function
+
+    <StructLayout(LayoutKind.Sequential, CharSet:=CharSet.Unicode)>
+    Private Structure STARTUPINFO
+        Public cb             As UInteger
+        Public lpReserved     As String
+        Public lpDesktop      As String
+        Public lpTitle        As String
+        Public dwX            As UInteger
+        Public dwY            As UInteger
+        Public dwXSize        As UInteger
+        Public dwYSize        As UInteger
+        Public dwXCountChars  As UInteger
+        Public dwYCountChars  As UInteger
+        Public dwFillAttribute As UInteger
+        Public dwFlags        As UInteger
+        Public wShowWindow    As UShort
+        Public cbReserved2    As UShort
+        Public lpReserved2    As IntPtr
+        Public hStdInput      As IntPtr
+        Public hStdOutput     As IntPtr
+        Public hStdError      As IntPtr
+    End Structure
+
+    <StructLayout(LayoutKind.Sequential)>
+    Private Structure PROCESS_INFORMATION
+        Public hProcess   As IntPtr
+        Public hThread    As IntPtr
+        Public dwProcessId As UInteger
+        Public dwThreadId  As UInteger
+    End Structure
 
 End Class
