@@ -46,6 +46,16 @@ _ALGORITHM = "HS256"
 _COOKIE_NAME = "pisonet_session"
 
 
+def _require_active_license():
+    """Dependency that blocks action endpoints when the license is expired."""
+    from main import license_service
+    if license_service and not license_service.is_active():
+        raise HTTPException(
+            status_code=403,
+            detail="License expired or not activated. Please activate your software.",
+        )
+
+
 # ── Session cookie helpers ────────────────────────────────────────────────────
 
 def _validate_session(pisonet_session: str = Cookie(default=None)) -> Optional[str]:
@@ -377,7 +387,7 @@ def logs_page(
 # These endpoints are called by admin.js — they use the session cookie
 # instead of a JWT Bearer header, so no token management is needed in JS.
 
-@router.post("/api/pc/add-time")
+@router.post("/api/pc/add-time", dependencies=[Depends(_require_active_license)])
 def dashboard_add_time(
     body: AdminAddTimeRequest,
     db: Session = Depends(get_db),
@@ -403,7 +413,7 @@ def dashboard_add_time(
     }
 
 
-@router.post("/api/pc/{pc_number}/lock")
+@router.post("/api/pc/{pc_number}/lock", dependencies=[Depends(_require_active_license)])
 def dashboard_lock_pc(
     pc_number: int,
     db: Session = Depends(get_db),
@@ -420,7 +430,7 @@ def dashboard_lock_pc(
     return {"status": "locked", "pc_number": pc_number}
 
 
-@router.post("/api/pc/{pc_number}/rename")
+@router.post("/api/pc/{pc_number}/rename", dependencies=[Depends(_require_active_license)])
 def dashboard_rename_pc(
     pc_number: int,
     body: RenamePcBody,
@@ -778,7 +788,7 @@ def reports_export_csv(
 
 # ── Remote control endpoints ─────────────────────────────────────────────────
 
-@router.post("/api/pc/{pc_number}/message")
+@router.post("/api/pc/{pc_number}/message", dependencies=[Depends(_require_active_license)])
 def send_pc_message(
     pc_number: int,
     body: SendMessageBody,
@@ -792,7 +802,7 @@ def send_pc_message(
     return {"status": "queued", "pc_number": pc_number}
 
 
-@router.post("/api/pc/{pc_number}/command")
+@router.post("/api/pc/{pc_number}/command", dependencies=[Depends(_require_active_license)])
 def send_pc_command(
     pc_number: int,
     body: SendCommandBody,
@@ -809,7 +819,7 @@ def send_pc_command(
     return {"status": "queued", "pc_number": pc_number, "command": body.type}
 
 
-@router.post("/api/announcement")
+@router.post("/api/announcement", dependencies=[Depends(_require_active_license)])
 def set_announcement(
     body: AnnouncementBody,
     current_user: Optional[str] = Depends(_validate_session),
@@ -822,7 +832,7 @@ def set_announcement(
     return {"status": "set"}
 
 
-@router.delete("/api/announcement")
+@router.delete("/api/announcement", dependencies=[Depends(_require_active_license)])
 def clear_announcement(
     current_user: Optional[str] = Depends(_validate_session),
 ):
@@ -850,7 +860,7 @@ def get_coin_slot_state(
     }
 
 
-@router.post("/api/hardware/coin-slot")
+@router.post("/api/hardware/coin-slot", dependencies=[Depends(_require_active_license)])
 def set_global_coin_slot(
     body: CoinSlotBody,
     current_user: Optional[str] = Depends(_validate_session),
@@ -861,7 +871,7 @@ def set_global_coin_slot(
     return {"status": "ok", "global_enabled": body.enabled}
 
 
-@router.post("/api/pc/{pc_number}/coin-slot")
+@router.post("/api/pc/{pc_number}/coin-slot", dependencies=[Depends(_require_active_license)])
 def set_pc_coin_slot(
     pc_number: int,
     body: CoinSlotBody,
@@ -902,7 +912,7 @@ def wallpaper_page(
     })
 
 
-@router.post("/api/wallpaper/upload")
+@router.post("/api/wallpaper/upload", dependencies=[Depends(_require_active_license)])
 async def upload_wallpaper(
     file: UploadFile = File(...),
     current_user: Optional[str] = Depends(_validate_session),
@@ -938,7 +948,7 @@ class SetWallpaperBody(BaseModel):
     pc_number: Optional[int] = None  # None = global, number = per-PC
 
 
-@router.post("/api/wallpaper/set")
+@router.post("/api/wallpaper/set", dependencies=[Depends(_require_active_license)])
 def set_wallpaper(
     body: SetWallpaperBody,
     current_user: Optional[str] = Depends(_validate_session),
@@ -962,7 +972,7 @@ def set_wallpaper(
     return {"status": "ok", "url": url, "hash": file_hash}
 
 
-@router.delete("/api/wallpaper")
+@router.delete("/api/wallpaper", dependencies=[Depends(_require_active_license)])
 def clear_wallpaper(
     current_user: Optional[str] = Depends(_validate_session),
 ):
@@ -972,7 +982,7 @@ def clear_wallpaper(
     return {"status": "cleared"}
 
 
-@router.delete("/api/wallpaper/pc/{pc_number}")
+@router.delete("/api/wallpaper/pc/{pc_number}", dependencies=[Depends(_require_active_license)])
 def clear_pc_wallpaper(
     pc_number: int,
     current_user: Optional[str] = Depends(_validate_session),
@@ -992,7 +1002,7 @@ def list_wallpapers(
     return _list_wallpaper_files()
 
 
-@router.delete("/api/wallpaper/file/{filename}")
+@router.delete("/api/wallpaper/file/{filename}", dependencies=[Depends(_require_active_license)])
 def delete_wallpaper_file(
     filename: str,
     current_user: Optional[str] = Depends(_validate_session),
@@ -1088,7 +1098,7 @@ def membership_page(
     })
 
 
-@router.post("/api/membership/config")
+@router.post("/api/membership/config", dependencies=[Depends(_require_active_license)])
 def update_membership_config(
     body: MembershipConfigUpdate,
     db: Session = Depends(get_db),
@@ -1114,7 +1124,7 @@ class AdjustBalanceBody(BaseModel):
     seconds: int
 
 
-@router.post("/api/membership/members/{member_id}/deactivate")
+@router.post("/api/membership/members/{member_id}/deactivate", dependencies=[Depends(_require_active_license)])
 def deactivate_member(
     member_id: int,
     db: Session = Depends(get_db),
@@ -1136,7 +1146,7 @@ def deactivate_member(
     return {"status": "deactivated", "member_id": member_id}
 
 
-@router.post("/api/membership/members/{member_id}/activate")
+@router.post("/api/membership/members/{member_id}/activate", dependencies=[Depends(_require_active_license)])
 def activate_member(
     member_id: int,
     db: Session = Depends(get_db),
@@ -1152,7 +1162,7 @@ def activate_member(
     return {"status": "activated", "member_id": member_id}
 
 
-@router.post("/api/membership/members/{member_id}/adjust-balance")
+@router.post("/api/membership/members/{member_id}/adjust-balance", dependencies=[Depends(_require_active_license)])
 def adjust_member_balance(
     member_id: int,
     body: AdjustBalanceBody,
@@ -1170,7 +1180,7 @@ def adjust_member_balance(
     return {"status": "ok", "balance_seconds": user.balance_seconds}
 
 
-@router.post("/api/membership/members/{member_id}/force-logout")
+@router.post("/api/membership/members/{member_id}/force-logout", dependencies=[Depends(_require_active_license)])
 def force_logout_member(
     member_id: int,
     db: Session = Depends(get_db),
