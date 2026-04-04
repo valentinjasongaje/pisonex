@@ -36,6 +36,8 @@ Namespace Forms
         Private _lblStatusDot As Label        ' colored dot inside pill
         Private _lblStatusTxt As Label        ' "Connected" / "Disconnected"
         Private _lblLicenseWarn As Label
+        Private _pnlServerLicenseWarn As Panel   ' top banner when server license is expired
+        Private _serverDashboardUrl As String = ""
         Private _bgImage      As Image
         Private _allowClose   As Boolean = False
         Private _isConnected  As Boolean = True
@@ -57,6 +59,10 @@ Namespace Forms
         Private _canLogout            As Boolean = False
         Private _minimumLogoutMinutes As Integer = 0
         Private _lastLayoutKey As String = ""
+        ' Tracks current member-panel mode so layout is only rebuilt on actual transitions,
+        ' not on every 1-second heartbeat tick.
+        ' Values: "" (uninitialised) | "off" | "member" | "login" | "register"
+        Private _lastMemberFormMode As String = ""
         Private _lblModeToggle        As Label       ' "Register" / "Back to Login" link
         Private _lblUsernameHint      As Label
         Private _txtMemberUser        As TextBox
@@ -297,6 +303,61 @@ Namespace Forms
                 .Visible   = False
             }
 
+            ' Server license expired banner — shown at top of screen
+            _pnlServerLicenseWarn = New Panel() With {
+                .BackColor = Color.FromArgb(220, 120, 53, 15),
+                .Visible   = False,
+                .Dock      = DockStyle.Top,
+                .Height    = 40
+            }
+            Dim _lblSrvWarnIcon = New Label() With {
+                .Text      = "⚠",
+                .Font      = New Font("Segoe UI", 12),
+                .ForeColor = Color.FromArgb(251, 191, 36),
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Location  = New Point(16, 8)
+            }
+            Dim _lblSrvWarnText = New Label() With {
+                .Text      = "Server license expired",
+                .Font      = New Font("Segoe UI", 9, FontStyle.Bold),
+                .ForeColor = Color.White,
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Location  = New Point(42, 4)
+            }
+            Dim _lblSrvWarnSub = New Label() With {
+                .Text      = "Open the server dashboard to activate — Ctrl+Shift+F12 for admin panel",
+                .Font      = New Font("Segoe UI", 8),
+                .ForeColor = Color.FromArgb(253, 230, 138),
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Location  = New Point(42, 22)
+            }
+            Dim _lblSrvWarnLink = New Label() With {
+                .Text      = "Open Dashboard",
+                .Font      = New Font("Segoe UI", 8, FontStyle.Underline),
+                .ForeColor = Color.FromArgb(147, 210, 255),
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Cursor    = Cursors.Hand
+            }
+            AddHandler _lblSrvWarnLink.Click, Sub(s, ev)
+                If Not String.IsNullOrEmpty(_serverDashboardUrl) Then
+                    Try
+                        Process.Start(New ProcessStartInfo(_serverDashboardUrl) With {.UseShellExecute = True})
+                    Catch
+                    End Try
+                End If
+            End Sub
+            ' Position the link label after the sub text is laid out
+            AddHandler _pnlServerLicenseWarn.Layout, Sub(s, ev)
+                _lblSrvWarnLink.Location = New Point(
+                    _pnlServerLicenseWarn.Width - _lblSrvWarnLink.Width - 16,
+                    (_pnlServerLicenseWarn.Height - _lblSrvWarnLink.Height) \ 2)
+            End Sub
+            _pnlServerLicenseWarn.Controls.AddRange({_lblSrvWarnIcon, _lblSrvWarnText, _lblSrvWarnSub, _lblSrvWarnLink})
+
             ' ── Membership UI ────────────────────────────────────────────────────
             _pnlMember = New Panel() With {
                 .Size      = New Size(340, 160),
@@ -304,6 +365,15 @@ Namespace Forms
                 .Visible   = False
             }
             AddHandler _pnlMember.Paint, AddressOf OnMemberPanelPaint
+
+            ' Enable double buffering on the member panel to prevent repaint flicker.
+            ' Panel.DoubleBuffered is a protected property; reflection is the standard
+            ' WinForms trick to enable it without needing a subclass.
+            Dim _pnlMemberDblBuf = GetType(Control).GetProperty("DoubleBuffered",
+                System.Reflection.BindingFlags.Instance Or System.Reflection.BindingFlags.NonPublic)
+            If _pnlMemberDblBuf IsNot Nothing Then
+                _pnlMemberDblBuf.SetValue(_pnlMember, True, Nothing)
+            End If
 
             _lblMemberTitle = New Label() With {
                 .Text      = "Member Access",
@@ -466,7 +536,7 @@ Namespace Forms
             _coinPulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
             AddHandler _coinPulseTimer.Tick, AddressOf OnCoinPulseTick
 
-            Me.Controls.AddRange({_lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlStatus, _lblLicenseWarn})
+            Me.Controls.AddRange({_pnlServerLicenseWarn, _lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlStatus, _lblLicenseWarn})
         End Sub
 
         Private Sub OnStatusPillPaint(sender As Object, e As PaintEventArgs)
@@ -815,6 +885,18 @@ Namespace Forms
             CenterLabels()
         End Sub
 
+        Public Sub ShowServerLicenseWarning(dashboardUrl As String)
+            If Me.InvokeRequired Then Me.Invoke(Sub() ShowServerLicenseWarning(dashboardUrl)) : Return
+            _serverDashboardUrl = dashboardUrl
+            _pnlServerLicenseWarn.Visible = True
+        End Sub
+
+        Public Sub HideServerLicenseWarning()
+            If Me.InvokeRequired Then Me.Invoke(Sub() HideServerLicenseWarning()) : Return
+            _serverDashboardUrl = ""
+            _pnlServerLicenseWarn.Visible = False
+        End Sub
+
         Public ReadOnly Property IsLicenseActive As Boolean
             Get
                 Return _licenseActive
@@ -938,12 +1020,17 @@ Namespace Forms
 
         Private Sub OnModeToggleClick(sender As Object, e As EventArgs)
             _isRegisterMode = Not _isRegisterMode
-            _txtMemberUser.Text = ""
-            _txtMemberPass.Text = ""
-            _txtMemberConf.Text = ""
+            _txtMemberUser.Text     = ""
+            _txtMemberPass.Text     = ""
+            _txtMemberConf.Text     = ""
             _lblInlineError.Visible = False
-            _lblInlineError.Text = ""
+            _lblInlineError.Text    = ""
+            _pnlMember.SuspendLayout()
             LayoutMemberForm()
+            _pnlMember.ResumeLayout(True)
+            ' Keep the mode cache in sync so the next heartbeat doesn't re-run LayoutMemberForm
+            _lastMemberFormMode = If(_isRegisterMode, "register", "login")
+            _pnlMember.Invalidate()
             CenterLabels()
         End Sub
 
@@ -1073,34 +1160,104 @@ Namespace Forms
             _lblInlineError.Visible  = False
         End Sub
 
+        ''' <summary>
+        ''' Clears all login/register form fields and resets the inline error.
+        ''' Called after a successful login or registration to ensure stale
+        ''' credentials are not left in the text boxes when the form is next shown.
+        ''' </summary>
+        Public Sub ClearMemberForm()
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() ClearMemberForm())
+                Return
+            End If
+            _txtMemberUser.Text     = ""
+            _txtMemberPass.Text     = ""
+            _txtMemberConf.Text     = ""
+            _lblInlineError.Visible = False
+            _lblInlineError.Text    = ""
+            _isRegisterMode         = False
+            ' Reset mode cache so next heartbeat rebuilds the login layout fresh
+            _lastMemberFormMode = ""
+        End Sub
+
         Private Function ConfirmLogout() As Boolean
-            Dim dlg = New Form() With {
-                .Size = New Size(340, 130),
-                .TopMost = True
+            ' Content coordinates are pre-shift (MakeBorderless adds 38px to every Y).
+            ' Final window: 440 × 264 px (226 content + 38 title bar).
+            Dim dlg = New Form() With {.Size = New Size(440, 226), .TopMost = True}
+
+            ' ── Icon circle ──────────────────────────────────────────────────────
+            Dim iconPanel = New Panel() With {
+                .Size      = New Size(52, 52),
+                .Location  = New Point((440 - 52) \ 2, 18),
+                .BackColor = Color.Transparent
+            }
+            AddHandler iconPanel.Paint, Sub(s2, ev)
+                Dim g = ev.Graphics
+                g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+                Using br = New SolidBrush(Color.FromArgb(40, 220, 60, 60))
+                    g.FillEllipse(br, 0, 0, 51, 51)
+                End Using
+                Using pen = New Pen(Color.FromArgb(80, 220, 60, 60), 1.5F)
+                    g.DrawEllipse(pen, 1, 1, 49, 49)
+                End Using
+            End Sub
+            Dim iconLbl = New Label() With {
+                .Text      = ChrW(&H2715),
+                .Font      = New Font("Segoe UI", 16, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(220, 90, 90),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(52, 52),
+                .Location  = New Point(0, 0),
+                .TextAlign = ContentAlignment.MiddleCenter
+            }
+            iconPanel.Controls.Add(iconLbl)
+
+            ' ── Title ────────────────────────────────────────────────────────────
+            Dim lblTitle = New Label() With {
+                .Text      = "Log out?",
+                .Font      = New Font("Segoe UI", 14, FontStyle.Bold),
+                .ForeColor = FormStyles.TextPrimary,
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(400, 30),
+                .Location  = New Point(20, 82),
+                .TextAlign = ContentAlignment.MiddleCenter
             }
 
-            Dim lbl = New Label() With {
-                .Text = "Are you sure you want to logout?" & vbCrLf & "Your remaining time will be saved to your account.",
-                .Font = New Font("Segoe UI", 9.5F),
+            ' ── Message ──────────────────────────────────────────────────────────
+            Dim lblMsg = New Label() With {
+                .Text      = "Your remaining time will be saved to your member account.",
+                .Font      = New Font("Segoe UI", 9.5F),
                 .ForeColor = FormStyles.TextDim,
-                .Location = New Point(24, 16), .Size = New Size(280, 42),
-                .AutoSize = False
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(380, 36),
+                .Location  = New Point(30, 118),
+                .TextAlign = ContentAlignment.TopCenter
             }
 
-            Dim btnYes = FormStyles.CreateButton("Logout", 130, 34, FormStyles.DangerRed, Color.White, Color.FromArgb(220, 60, 60))
-            btnYes.DialogResult = DialogResult.Yes
-            btnYes.Location = New Point(24, 68)
+            ' ── Buttons ──────────────────────────────────────────────────────────
+            Const BtnW As Integer = 160
+            Const BtnH As Integer = 38
+            Const BtnGap As Integer = 16
+            Dim btnsX = (440 - BtnW * 2 - BtnGap) \ 2
 
-            Dim btnNo = FormStyles.CreateButton("Cancel", 130, 34, Color.FromArgb(30, 38, 58),
-                FormStyles.TextDim, Color.FromArgb(40, 50, 72))
-            btnNo.DialogResult = DialogResult.No
-            btnNo.Location = New Point(166, 68)
-            btnNo.FlatAppearance.BorderSize = 1
-            btnNo.FlatAppearance.BorderColor = Color.FromArgb(60, 80, 120, 200)
+            Dim btnCancel = FormStyles.CreateButton("Cancel", BtnW, BtnH,
+                Color.FromArgb(30, 38, 58), FormStyles.TextDim, Color.FromArgb(40, 50, 72))
+            btnCancel.DialogResult = DialogResult.No
+            btnCancel.Location = New Point(btnsX, 156)
+            btnCancel.FlatAppearance.BorderSize = 1
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(50, 80, 120, 200)
 
-            dlg.Controls.AddRange({lbl, btnYes, btnNo})
-            dlg.AcceptButton = btnNo
-            dlg.CancelButton = btnNo
+            Dim btnLogout = FormStyles.CreateButton("Log Out", BtnW, BtnH,
+                FormStyles.DangerRed, Color.White, Color.FromArgb(220, 60, 60))
+            btnLogout.DialogResult = DialogResult.Yes
+            btnLogout.Location = New Point(btnsX + BtnW + BtnGap, 156)
+
+            dlg.Controls.AddRange({iconPanel, lblTitle, lblMsg, btnCancel, btnLogout})
+            dlg.AcceptButton = btnCancel
+            dlg.CancelButton = btnCancel
 
             FormStyles.MakeBorderless(dlg, "Confirm Logout", closable:=False)
 
@@ -1109,14 +1266,23 @@ Namespace Forms
 
         ' ── Membership UI update (called from heartbeat) ─────────────────────
 
+        ''' <summary>
+        ''' Only writes to _lblSub when text or fore-color actually changed.
+        ''' Prevents AutoSize label reflows and parent-form repaints on every heartbeat.
+        ''' </summary>
+        Private Sub SetSubLabel(text As String, fore As Color)
+            If _lblSub.Text      <> text Then _lblSub.Text      = text
+            If _lblSub.ForeColor <> fore  Then _lblSub.ForeColor = fore
+        End Sub
+
         Public Sub UpdateMembershipUI(enabled As Boolean, absorption As Boolean, username As String,
                                        balanceSeconds As Integer, canLogout As Boolean,
                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                       minimumLogoutMinutes As Integer)
+                                       minimumLogoutMinutes As Integer, serverLicensed As Boolean)
             If Me.InvokeRequired Then
                 Me.Invoke(Sub() UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                                     canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
-                                                    minimumLogoutMinutes))
+                                                    minimumLogoutMinutes, serverLicensed))
                 Return
             End If
 
@@ -1125,84 +1291,138 @@ Namespace Forms
             _canLogout            = canLogout
             _minimumLogoutMinutes = minimumLogoutMinutes
 
-            If Not enabled Then
-                _pnlMember.Visible = False
+            ' ── Server license expired — hide member panel entirely ───────────
+            If Not serverLicensed Then
+                If _pnlMember.Visible Then
+                    _pnlMember.Visible  = False
+                    _lastMemberFormMode = "off"
+                End If
                 Return
             End If
 
-            _pnlMember.Visible = True
+            ' ── Membership disabled ───────────────────────────────────────────
+            If Not enabled Then
+                If _pnlMember.Visible Then
+                    _pnlMember.Visible  = False
+                    _lastMemberFormMode = "off"
+                End If
+                Return
+            End If
+
+            If Not _pnlMember.Visible Then _pnlMember.Visible = True
+
             Const PW As Integer = 360
             Dim cx = PW \ 2
+            Dim panelNeedsRepaint As Boolean = False
 
             If _memberLoggedIn Then
-                ' ── Logged-in state — hide inline form, show member info ─────
-                HideMemberFormControls()
-                _btnRegister.Visible = False
+                ' ── Logged-in state ───────────────────────────────────────────
+                ' Only rebuild the full control layout when switching INTO this mode.
+                ' On every subsequent heartbeat only text / color values are checked.
+                If _lastMemberFormMode <> "member" Then
+                    _pnlMember.SuspendLayout()
+                    HideMemberFormControls()
+                    _btnRegister.Visible = False
+                    _btnLogin.Visible    = False
 
-                _lblMemberTitle.Text      = "Member"
-                _lblMemberTitle.AutoSize  = False
-                _lblMemberTitle.Size      = New Size(PW - 40, 20)
-                _lblMemberTitle.TextAlign = ContentAlignment.MiddleCenter
-                _lblMemberTitle.Location  = New Point(20, 14)
-                _lblMemberTitle.Visible   = True
-                _btnLogin.Visible         = False
+                    _lblMemberTitle.AutoSize  = False
+                    _lblMemberTitle.Size      = New Size(PW - 40, 20)
+                    _lblMemberTitle.TextAlign = ContentAlignment.MiddleCenter
+                    _lblMemberTitle.Location  = New Point(20, 14)
+                    _lblMemberTitle.Visible   = True
 
-                ' Username
-                _lblMemberInfo.Visible   = True
-                _lblMemberInfo.Text      = username
-                _lblMemberInfo.ForeColor = Color.FromArgb(34, 197, 94)
-                _lblMemberInfo.Location  = New Point(20, 38)
-                _lblMemberInfo.Size      = New Size(PW - 40, 24)
+                    _lblMemberInfo.Location = New Point(20, 38)
+                    _lblMemberInfo.Size     = New Size(PW - 40, 24)
+                    _lblMemberInfo.Visible  = True
 
-                ' Time / status
-                _lblMemberTime.Visible = True
+                    _lblMemberTime.Location = New Point(20, 64)
+                    _lblMemberTime.Size     = New Size(PW - 40, 22)
+                    _lblMemberTime.Visible  = True
+
+                    _btnLogout.Location = New Point(cx - _btnLogout.Width \ 2, 96)
+                    _btnLogout.Visible  = True
+                    _btnLogout.Enabled  = True
+
+                    _pnlMember.Size = New Size(PW, 144)
+                    _pnlMember.ResumeLayout(True)
+                    _lastMemberFormMode = "member"
+                    panelNeedsRepaint   = True
+                End If
+
+                ' Title — update only when changed
+                If _lblMemberTitle.Text <> "Member" Then
+                    _lblMemberTitle.Text = "Member"
+                    panelNeedsRepaint    = True
+                End If
+
+                ' Username — update only when changed
+                If _lblMemberInfo.Text <> username Then
+                    _lblMemberInfo.Text      = username
+                    _lblMemberInfo.ForeColor = Color.FromArgb(34, 197, 94)
+                    panelNeedsRepaint        = True
+                End If
+
+                ' Time / status — compute desired text+color, write only when different
+                Dim newTimeText As String
+                Dim newTimeFore As Color
                 If zeroTimeLogoutSeconds > 0 Then
-                    _lblMemberTime.Text      = $"No time — auto-logout in {zeroTimeLogoutSeconds}s"
-                    _lblMemberTime.ForeColor = Color.FromArgb(245, 158, 11)
-                    _lblSub.Text = "Insert coin to add time"
+                    newTimeText = $"No time — auto-logout in {zeroTimeLogoutSeconds}s"
+                    newTimeFore = Color.FromArgb(245, 158, 11)
+                    SetSubLabel("Insert coin to add time", Color.FromArgb(140, 160, 200))
                 ElseIf balanceSeconds > 0 Then
                     Dim mins = balanceSeconds \ 60
                     Dim secs = balanceSeconds Mod 60
-                    _lblMemberTime.Text      = $"Balance: {mins}m {secs}s"
-                    _lblMemberTime.ForeColor = Color.FromArgb(140, 160, 200)
+                    newTimeText = $"Balance: {mins}m {secs}s"
+                    newTimeFore = Color.FromArgb(140, 160, 200)
                 Else
-                    _lblMemberTime.Text      = "No time remaining"
-                    _lblMemberTime.ForeColor = Color.FromArgb(160, 120, 140, 170)
+                    newTimeText = "No time remaining"
+                    newTimeFore = Color.FromArgb(160, 120, 140, 170)
                 End If
-                _lblMemberTime.Location = New Point(20, 64)
-                _lblMemberTime.Size     = New Size(PW - 40, 22)
+                If _lblMemberTime.Text <> newTimeText OrElse _lblMemberTime.ForeColor <> newTimeFore Then
+                    _lblMemberTime.Text      = newTimeText
+                    _lblMemberTime.ForeColor = newTimeFore
+                    panelNeedsRepaint        = True
+                End If
 
-                ' Logout button — always enabled; canLogout is checked at click time
-                _btnLogout.Visible   = True
-                _btnLogout.Enabled   = True
-                _btnLogout.Location  = New Point(cx - _btnLogout.Width \ 2, 96)
-
-                _pnlMember.Size = New Size(PW, 144)
             Else
-                ' ── Not logged in — show inline login / register form ─────────
-                _lblMemberInfo.Visible = False
-                _lblMemberTime.Visible = False
-                _btnLogout.Visible     = False
-                _btnRegister.Visible   = False
-                LayoutMemberForm()
+                ' ── Not logged in — inline login / register form ──────────────
+                ' Hide info controls (guard each to avoid redundant property sets)
+                If _lblMemberInfo.Visible  Then _lblMemberInfo.Visible  = False
+                If _lblMemberTime.Visible  Then _lblMemberTime.Visible  = False
+                If _btnLogout.Visible      Then _btnLogout.Visible      = False
+                If _btnRegister.Visible    Then _btnRegister.Visible    = False
+
+                ' Only re-run LayoutMemberForm() when the mode actually transitions
+                ' (login → register or first time). Static idle heartbeats skip it entirely.
+                Dim newMode = If(_isRegisterMode, "register", "login")
+                If _lastMemberFormMode <> newMode Then
+                    _pnlMember.SuspendLayout()
+                    LayoutMemberForm()
+                    _pnlMember.ResumeLayout(True)
+                    _lastMemberFormMode = newMode
+                    panelNeedsRepaint   = True
+                End If
+
+                ' Sub-message: idle-shutdown countdown or default — only write when changed
+                If idleShutdownSeconds > 0 Then
+                    SetSubLabel($"PC will shut down in {idleShutdownSeconds}s",
+                                Color.FromArgb(239, 68, 68))
+                Else
+                    SetSubLabel($"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}",
+                                Color.FromArgb(140, 160, 200))
+                End If
             End If
 
-            ' Idle-shutdown warning in sub-message (only when not logged in)
-            If idleShutdownSeconds > 0 AndAlso Not _memberLoggedIn Then
-                _lblSub.Text      = $"PC will shut down in {idleShutdownSeconds}s"
-                _lblSub.ForeColor = Color.FromArgb(239, 68, 68)
-            ElseIf Not _memberLoggedIn Then
-                _lblSub.Text      = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
-                _lblSub.ForeColor = Color.FromArgb(140, 160, 200)
-            End If
+            ' Repaint panel only when something visual actually changed
+            If panelNeedsRepaint Then _pnlMember.Invalidate()
 
-            _pnlMember.Invalidate()
+            ' Full layout pass only when structural dimensions changed;
+            ' otherwise re-center just the sub-message (its AutoSize width may shift).
             Dim lk = GetLayoutKey()
             If lk <> _lastLayoutKey Then
                 _lastLayoutKey = lk
                 CenterLabels()
             Else
-                ' Layout unchanged — only re-center sub-message (text may have changed width)
                 _lblSub.Location = New Point(
                     (Me.ClientSize.Width - _lblSub.Width) \ 2,
                     _lblSub.Location.Y)

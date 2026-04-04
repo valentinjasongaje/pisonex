@@ -55,6 +55,17 @@ Module Program
         LicenseService.StartVerificationTimer()
         LicenseService.StartBetaCheckTimer()
 
+        ' Periodic license enforcement — catches expiry during active sessions
+        Dim licenseEnforcementTimer = New System.Timers.Timer(10 * 60 * 1000) ' every 10 min
+        AddHandler licenseEnforcementTimer.Elapsed, Sub(s, e)
+            If Not LicenseService.IsActive() Then
+                _lockMgr.LockPC()
+                CheckLicenseStatus()
+            End If
+        End Sub
+        licenseEnforcementTimer.AutoReset = True
+        licenseEnforcementTimer.Start()
+
         ' ── Apply Windows restrictions ────────────────────────────────────
         WindowsPolicy.Apply()
 
@@ -65,7 +76,7 @@ Module Program
         _api = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
         _memberSvc = New MemberService(AppConfig.ServerUrl)
         _lockMgr = New LockManager()
-        _session = New SessionManager(_api, _lockMgr)
+        _session = New SessionManager(_api, _lockMgr, Function() LicenseService.IsActive())
         _overlay = New TimerOverlay()
         _tray = New SystemTray()
         _notifs = New NotificationService(_overlay)
@@ -150,6 +161,7 @@ Module Program
         ' Block session start if license is not active
         If Not LicenseService.IsActive() Then
             CheckLicenseStatus()
+            _lockMgr.LockPC()   ' re-lock — UnlockPC was already called in SessionManager
             Return
         End If
 
@@ -213,7 +225,7 @@ Module Program
     End Sub
 
     Private Sub OnReceivingCoinsChanged(isReceiving As Boolean)
-        _lockMgr.ShowReceivingCoins(isReceiving)
+        _lockMgr.ShowReceivingCoins(If(LicenseService.IsActive(), isReceiving, False))
     End Sub
 
     ' ── Remote control handlers ────────────────────────────────────────────
@@ -325,35 +337,55 @@ Module Program
     Private Sub OnMembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                      balanceSeconds As Integer, canLogout As Boolean,
                                      zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                     minimumLogoutMinutes As Integer)
+                                     minimumLogoutMinutes As Integer, serverLicensed As Boolean)
         _lockMgr.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                      canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
-                                     minimumLogoutMinutes)
+                                     minimumLogoutMinutes, serverLicensed)
         _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout)
+
+        ' Show/hide server license warning independently of the client license check
+        If Not serverLicensed Then
+            Dim dashboardUrl = AppConfig.ServerUrl.TrimEnd("/"c) & "/dashboard"
+            _lockMgr.ShowServerLicenseWarning(dashboardUrl)
+        Else
+            _lockMgr.HideServerLicenseWarning()
+        End If
     End Sub
 
     Private Sub OnMemberLogin(username As String, password As String)
+        If Not LicenseService.IsActive() Then
+            _lockMgr.ShowMemberError("License expired. Contact administrator to activate this PC.")
+            Return
+        End If
         Task.Run(Async Function()
             Dim result = Await _memberSvc.LoginAsync(AppConfig.PCNumber, username, password)
             If result.success Then
-                Dim absMsg = ""
-                If result.absorbed_seconds > 0 Then
-                    Dim aMins = result.absorbed_seconds \ 60
-                    absMsg = $" (+{aMins}m absorbed from previous session)"
-                End If
-                _notifs.Show("Login Successful", $"Welcome back, {username}!{absMsg}", ToastType.Success)
-            Else
-                _lockMgr.ShowMemberError(If(result.[error], "Login failed"))
-            End If
-        End Function)
+                         ' Clear credentials from the form immediately — do not leave them in the text boxes
+                         _lockMgr.ClearMemberForm()
+                         Dim absMsg = ""
+                         If result.absorbed_seconds > 0 Then
+                             Dim aMins = result.absorbed_seconds \ 60
+                             absMsg = $" (+{aMins}m absorbed from previous session)"
+                         End If
+                         _notifs.Show("Login Successful", $"Welcome back, {username}!{absMsg}", ToastType.Success)
+                     Else
+                         _lockMgr.ShowMemberError(If(result.[error], "Login failed"))
+                     End If
+                 End Function)
     End Sub
 
     Private Sub OnMemberRegister(username As String, password As String)
+        If Not LicenseService.IsActive() Then
+            _lockMgr.ShowMemberError("License expired. Contact administrator to activate this PC.")
+            Return
+        End If
         Task.Run(Async Function()
-            Dim result = Await _memberSvc.RegisterAsync(AppConfig.PCNumber, username, password)
-            If result.success Then
-                Dim absMsg = ""
-                If result.absorbed_seconds > 0 Then
+                     Dim result = Await _memberSvc.RegisterAsync(AppConfig.PCNumber, username, password)
+                     If result.success Then
+                         ' Clear credentials from the form immediately after successful registration
+                         _lockMgr.ClearMemberForm()
+                         Dim absMsg = ""
+                         If result.absorbed_seconds > 0 Then
                     Dim aMins = result.absorbed_seconds \ 60
                     absMsg = $" (+{aMins}m absorbed)"
                 End If

@@ -23,7 +23,7 @@ Namespace Services
         Public Sub New()
             _notify = New NotifyIcon()
             _notify.Icon  = LogoHelper.GetIcon()
-            _notify.Text  = "PisoNet — Waiting"
+            _notify.Text  = "Pisonex — Waiting"
             _notify.Visible = True
 
             Dim menu = New ContextMenuStrip()
@@ -31,7 +31,7 @@ Namespace Services
             menu.ForeColor = Color.White
             menu.Renderer  = New DarkMenuRenderer()
 
-            Dim title = CType(menu.Items.Add("PisoNet Client v1.0"), ToolStripMenuItem)
+            Dim title = CType(menu.Items.Add("Pisonex Client v1.0"), ToolStripMenuItem)
             title.Enabled  = False
             title.ForeColor = Color.FromArgb(100, 116, 139)
 

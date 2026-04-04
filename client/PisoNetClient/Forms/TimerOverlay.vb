@@ -64,6 +64,18 @@ Namespace Forms
 
         Private Const WM_NCLBUTTONDOWN As Integer = &HA1
         Private Const HTCAPTION        As Integer = 2
+        Private Const WS_EX_TOOLWINDOW As Integer = &H80
+        Private Const WS_EX_APPWINDOW  As Integer = &H40000
+
+        ' Exclude from Alt+Tab switcher (WS_EX_TOOLWINDOW hides it; removing WS_EX_APPWINDOW
+        ' prevents Windows from forcing it back into the list).
+        Protected Overrides ReadOnly Property CreateParams As CreateParams
+            Get
+                Dim cp = MyBase.CreateParams
+                cp.ExStyle = (cp.ExStyle Or WS_EX_TOOLWINDOW) And (Not WS_EX_APPWINDOW)
+                Return cp
+            End Get
+        End Property
 
         Public Sub New()
             InitializeComponent()
@@ -368,13 +380,89 @@ Namespace Forms
 
         ' ── Logout confirmation ──────────────────────────────────────
         Private Sub OnLogoutClick(sender As Object, e As EventArgs)
-            Dim result = MessageBox.Show(
-                "Are you sure you want to logout?" & vbCrLf & "Your remaining time will be saved.",
-                "Confirm Logout", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-            If result = DialogResult.Yes Then
+            If ConfirmLogout() Then
                 RaiseEvent MemberLogoutRequested()
             End If
         End Sub
+
+        Private Function ConfirmLogout() As Boolean
+            Dim dlg = New Form() With {
+                .Size          = New Size(440, 226),
+                .TopMost       = True,
+                .StartPosition = FormStartPosition.CenterScreen
+            }
+
+            ' Icon circle
+            Dim iconPanel = New Panel() With {
+                .Size      = New Size(52, 52),
+                .Location  = New Point((440 - 52) \ 2, 18),
+                .BackColor = Color.Transparent
+            }
+            AddHandler iconPanel.Paint, Sub(s2, ev)
+                Dim g = ev.Graphics
+                g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+                Using br = New SolidBrush(Color.FromArgb(40, 220, 60, 60))
+                    g.FillEllipse(br, 0, 0, 51, 51)
+                End Using
+                Using pen = New Pen(Color.FromArgb(80, 220, 60, 60), 1.5F)
+                    g.DrawEllipse(pen, 1, 1, 49, 49)
+                End Using
+            End Sub
+            Dim iconLbl = New Label() With {
+                .Text      = ChrW(&H2715),
+                .Font      = New Font("Segoe UI", 16, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(220, 90, 90),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(52, 52),
+                .Location  = New Point(0, 0),
+                .TextAlign = ContentAlignment.MiddleCenter
+            }
+            iconPanel.Controls.Add(iconLbl)
+
+            Dim lblTitle = New Label() With {
+                .Text      = "Log out?",
+                .Font      = New Font("Segoe UI", 14, FontStyle.Bold),
+                .ForeColor = FormStyles.TextPrimary,
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(400, 30),
+                .Location  = New Point(20, 82),
+                .TextAlign = ContentAlignment.MiddleCenter
+            }
+
+            Dim lblMsg = New Label() With {
+                .Text      = "Your remaining time will be saved to your member account.",
+                .Font      = New Font("Segoe UI", 9.5F),
+                .ForeColor = FormStyles.TextDim,
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(380, 36),
+                .Location  = New Point(30, 118),
+                .TextAlign = ContentAlignment.TopCenter
+            }
+
+            Const BtnW As Integer = 160, BtnH As Integer = 38, BtnGap As Integer = 16
+            Dim btnsX = (440 - BtnW * 2 - BtnGap) \ 2
+
+            Dim btnCancel = FormStyles.CreateButton("Cancel", BtnW, BtnH,
+                Color.FromArgb(30, 38, 58), FormStyles.TextDim, Color.FromArgb(40, 50, 72))
+            btnCancel.DialogResult = DialogResult.No
+            btnCancel.Location = New Point(btnsX, 156)
+            btnCancel.FlatAppearance.BorderSize = 1
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(50, 80, 120, 200)
+
+            Dim btnLogout = FormStyles.CreateButton("Log Out", BtnW, BtnH,
+                FormStyles.DangerRed, Color.White, Color.FromArgb(220, 60, 60))
+            btnLogout.DialogResult = DialogResult.Yes
+            btnLogout.Location = New Point(btnsX + BtnW + BtnGap, 156)
+
+            dlg.Controls.AddRange({iconPanel, lblTitle, lblMsg, btnCancel, btnLogout})
+            dlg.AcceptButton = btnCancel
+            dlg.CancelButton = btnCancel
+            FormStyles.MakeBorderless(dlg, "Confirm Logout", closable:=False)
+            Return dlg.ShowDialog() = DialogResult.Yes
+        End Function
 
         ' ── Mouse handling ────────────────────────────────────────────
 

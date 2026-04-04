@@ -38,6 +38,8 @@ Namespace Services
                 _lockForm.Invoke(Sub() UnlockPC())
                 Return
             End If
+            ' Defense-in-depth: never unlock if license is not active
+            If Not LicenseService.IsActive() Then Return
             If _lockForm.Visible Then _lockForm.Hide()
         End Sub
 
@@ -61,13 +63,21 @@ Namespace Services
             _lockForm.HideLicenseWarning()
         End Sub
 
+        Public Sub ShowServerLicenseWarning(dashboardUrl As String)
+            _lockForm.ShowServerLicenseWarning(dashboardUrl)
+        End Sub
+
+        Public Sub HideServerLicenseWarning()
+            _lockForm.HideServerLicenseWarning()
+        End Sub
+
         Public Sub UpdateMembershipUI(enabled As Boolean, absorption As Boolean, username As String,
                                        balanceSeconds As Integer, canLogout As Boolean,
                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                       minimumLogoutMinutes As Integer)
+                                       minimumLogoutMinutes As Integer, serverLicensed As Boolean)
             _lockForm.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                           canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
-                                          minimumLogoutMinutes)
+                                          minimumLogoutMinutes, serverLicensed)
         End Sub
 
         Public Sub ShowReceivingCoins(isReceiving As Boolean)
@@ -76,6 +86,14 @@ Namespace Services
 
         Public Sub ShowMemberError(message As String)
             _lockForm.ShowMemberError(message)
+        End Sub
+
+        ''' <summary>
+        ''' Clears login/register form fields after a successful authentication
+        ''' so the previous user's credentials are not left visible on the form.
+        ''' </summary>
+        Public Sub ClearMemberForm()
+            _lockForm.ClearMemberForm()
         End Sub
 
         Public Sub ShowMemberSuccess(message As String)

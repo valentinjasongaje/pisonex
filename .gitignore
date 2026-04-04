@@ -22,7 +22,7 @@ obj/
 publish/
 *.ncrunchproject
 *.ncrunchsolution
-
+build/
 # ── OS ───────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

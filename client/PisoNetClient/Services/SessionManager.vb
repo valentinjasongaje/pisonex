@@ -7,6 +7,7 @@ Namespace Services
 
         Private ReadOnly _api As ApiService
         Private ReadOnly _lock As LockManager
+        Private ReadOnly _canUnlock As Func(Of Boolean)
 
         Private _heartbeatTimer As Timer
         Private _countdownTimer As Timer
@@ -57,7 +58,7 @@ Namespace Services
         Public Event MembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                         balanceSeconds As Integer, canLogout As Boolean,
                                         zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                        minimumLogoutMinutes As Integer)
+                                        minimumLogoutMinutes As Integer, serverLicensed As Boolean)
 
         ' ── Heartbeat interval ───────────────────────────────────────
         ' 1-second poll in all states.  On a local LAN with FastAPI +
@@ -67,9 +68,10 @@ Namespace Services
         Private Const HEARTBEAT_LOCKED_MS As Integer = 1_000    ' 1 s (waiting for coins)
         Private Const HEARTBEAT_ACTIVE_MS As Integer = 1_000    ' 1 s (session running)
 
-        Public Sub New(api As ApiService, lockMgr As LockManager)
+        Public Sub New(api As ApiService, lockMgr As LockManager, canUnlock As Func(Of Boolean))
             _api = api
             _lock = lockMgr
+            _canUnlock = canUnlock
         End Sub
 
         Public Sub Start()
@@ -95,6 +97,14 @@ Namespace Services
 
         Private Sub OnLocalTick(sender As Object, e As ElapsedEventArgs)
             SyncLock _stateLock
+                ' If license expired mid-session, force lock
+                If Not _canUnlock() AndAlso Not _isLocked Then
+                    _isLocked = True
+                    _lock.LockPC()
+                    RaiseEvent SessionEnded()
+                    Return
+                End If
+
                 If _isLocked OrElse _remainingSeconds <= 0 Then Return
 
                 _remainingSeconds -= 1
@@ -150,8 +160,11 @@ Namespace Services
             Dim lockedNow As Boolean   ' captured inside the lock, used below
 
             SyncLock _stateLock
-                ' Server is always the source of truth for remaining time
-                _remainingSeconds = response.remaining_seconds
+                ' Server is always the source of truth for remaining time.
+                ' Only sync remaining_seconds when not held locked by an expired license.
+                If Not _isLocked OrElse _canUnlock() Then
+                    _remainingSeconds = response.remaining_seconds
+                End If
                 _sessionToken = response.session_token
 
                 Dim serverSaysLocked = response.is_locked
@@ -164,11 +177,14 @@ Namespace Services
 
                 ElseIf Not serverSaysLocked AndAlso _isLocked Then
                     ' Server unlocked us (coins inserted) — reset warning flags for the new session
-                    _isLocked   = False
-                    _warned5Min = False
-                    _warned1Min = False
-                    _lock.UnlockPC()
-                    RaiseEvent SessionStarted()
+                    If _canUnlock() Then
+                        _isLocked   = False
+                        _warned5Min = False
+                        _warned1Min = False
+                        _lock.UnlockPC()
+                        RaiseEvent SessionStarted()
+                    End If
+                    ' If _canUnlock() is False, remain locked — license not active
                 End If
 
                 lockedNow = _isLocked
@@ -183,9 +199,12 @@ Namespace Services
                 _heartbeatTimer.Interval = targetMs   ' resets the countdown to new interval
             End If
 
-            ' Notify the user if the server reports that time was added
-            If response.time_added_seconds > 0 Then
-                RaiseEvent TimeAdded(response.time_added_seconds)
+            ' Notify the user if the server reports that time was added.
+            ' Suppress when license is not active — coins must not start a session.
+            If _canUnlock() Then
+                If response.time_added_seconds > 0 Then
+                    RaiseEvent TimeAdded(response.time_added_seconds)
+                End If
             End If
 
             ' ── Remote control delivery ────────────────────────────────────────
@@ -232,7 +251,8 @@ Namespace Services
                 response.member_can_logout,
                 response.zero_time_logout_seconds,
                 response.idle_shutdown_seconds,
-                response.minimum_logout_minutes)
+                response.minimum_logout_minutes,
+                response.server_licensed)
         End Function
 
         ' ── Public state ─────────────────────────────────────────────

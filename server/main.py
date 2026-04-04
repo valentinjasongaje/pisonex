@@ -324,7 +324,7 @@ app.add_middleware(
 
 _LICENSE_EXEMPT_PREFIXES = (
     "/dashboard", "/static", "/api/auth", "/api/license",
-    "/api/pc/heartbeat", "/api/pc/register", "/api/member", "/health", "/",
+    "/api/pc/heartbeat", "/api/pc/register", "/health", "/",
 )
 
 

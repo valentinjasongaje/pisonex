@@ -1,4 +1,5 @@
 Imports System.Drawing
+Imports System.IO
 Imports System.Reflection
 
 Namespace Resources
@@ -11,19 +12,31 @@ Namespace Resources
     Friend Module LogoHelper
 
         Private _cached As Image = Nothing
-        Private _loaded  As Boolean = False
+        Private _loaded As Boolean = False
 
         Public Function GetLogo() As Image
             If _loaded Then Return _cached
             _loaded = True
+
             Try
-                Dim asm    = Assembly.GetExecutingAssembly()
-                Dim stream = asm.GetManifestResourceStream("PisoNetClient.Resources.logo.png")
-                If stream IsNot Nothing Then
-                    _cached = Image.FromStream(stream)
+                Dim asm = Assembly.GetExecutingAssembly()
+
+                ' 1. Find the exact resource name (Case-Insensitive)
+                Dim resourceName = asm.GetManifestResourceNames().
+            FirstOrDefault(Function(r) r.EndsWith("Resources.logo.png", StringComparison.OrdinalIgnoreCase))
+
+                ' 2. If found, open the stream and create the image
+                If Not String.IsNullOrEmpty(resourceName) Then
+                    Using stream As Stream = asm.GetManifestResourceStream(resourceName)
+                        If stream IsNot Nothing Then
+                            _cached = Image.FromStream(stream)
+                        End If
+                    End Using
                 End If
-            Catch
+            Catch ex As Exception
+                ' Optional: Log the error here
             End Try
+
             Return _cached
         End Function
 
@@ -51,7 +64,7 @@ Namespace Resources
             If _iconLoaded Then Return _iconCached
             _iconLoaded = True
             Try
-                Dim asm    = Assembly.GetExecutingAssembly()
+                Dim asm = Assembly.GetExecutingAssembly()
                 Dim stream = asm.GetManifestResourceStream("PisoNetClient.Resources.logo.ico")
                 If stream IsNot Nothing Then
                     _iconCached = New Drawing.Icon(stream)
