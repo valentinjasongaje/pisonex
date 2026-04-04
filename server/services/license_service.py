@@ -1,8 +1,11 @@
 import hashlib
+import hmac
 import json
 import logging
 import os
 import platform
+import sys
+import time
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,7 +17,33 @@ import httpx
 logger = logging.getLogger(__name__)
 
 PISONEX_API = "https://www.pisonex.com"
-LICENSE_FILE = Path(__file__).resolve().parent.parent / "data" / "license.json"
+
+# Resolve the data directory relative to the executable when frozen by PyInstaller,
+# or relative to this source file when running normally.
+# Do NOT use __file__ alone — it's unreliable inside a frozen PyInstaller bundle.
+if getattr(sys, "frozen", False):
+    _APP_DIR = Path(sys.executable).parent
+else:
+    _APP_DIR = Path(__file__).resolve().parent.parent
+
+# Shared secret embedded in the binary — never written to disk or .env.
+# Must match the value configured on the pisonex.com API server.
+# Change this before release; keep it out of version control.
+_CLIENT_HMAC_SECRET = b"PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
+
+
+def _signed_payload(body: dict) -> dict:
+    """Add a timestamp + HMAC-SHA256 signature to an outgoing API payload.
+
+    The pisonex.com API should reject any request whose signature does not
+    match or whose timestamp is more than 5 minutes old, preventing replay
+    attacks from anyone who extracts the license key from license.json.
+    """
+    ts = str(int(time.time()))
+    canonical = json.dumps(body, separators=(",", ":"), sort_keys=True) + ts
+    sig = hmac.new(_CLIENT_HMAC_SECRET, canonical.encode(), hashlib.sha256).hexdigest()
+    return {**body, "_ts": ts, "_sig": sig}
+LICENSE_FILE = _APP_DIR / "data" / "license.json"
 TRIAL_DAYS = 14
 OFFLINE_GRACE_HOURS = 72  # 3 days
 VERIFY_INTERVAL_HOURS = 6
@@ -116,12 +145,12 @@ class LicenseService:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{PISONEX_API}/api/license/activate",
-                json={
+                json=_signed_payload({
                     "license_key": license_key,
                     "device_id": device_id,
                     "device_label": device_label,
                     "device_type": "server",
-                },
+                }),
             )
 
         body = resp.json()
@@ -145,7 +174,7 @@ class LicenseService:
                 async with httpx.AsyncClient(timeout=15) as client:
                     await client.post(
                         f"{PISONEX_API}/api/license/deactivate-device",
-                        json={"license_key": key, "device_id": device_id},
+                        json=_signed_payload({"license_key": key, "device_id": device_id}),
                     )
             except Exception as e:
                 logger.warning("Remote deactivation failed: %s", e)
@@ -170,7 +199,7 @@ class LicenseService:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/license/verify",
-                    json={"license_key": key, "device_id": device_id},
+                    json=_signed_payload({"license_key": key, "device_id": device_id}),
                 )
 
             body = resp.json()

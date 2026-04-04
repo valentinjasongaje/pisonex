@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import logging.handlers
+import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -35,6 +38,11 @@ logging.basicConfig(
         ),
     ],
 )
+# Resolve the directory that contains bundled assets (templates, static files).
+# When frozen by PyInstaller onedir, assets are in sys._MEIPASS (_internal/),
+# not next to the exe. PISONEX_BUNDLE_DIR is set by windows_service.py before import.
+_BUNDLE_DIR = Path(os.environ.get('PISONEX_BUNDLE_DIR', Path(__file__).parent))
+
 logger = logging.getLogger(__name__)
 
 # ── App lifespan (startup / shutdown) ─────────────────────────────────────────
@@ -228,7 +236,7 @@ def _init_wallpapers():
     import hashlib
     import command_store
 
-    wp_dir = os.path.join("dashboard", "static", "wallpapers")
+    wp_dir = str(_BUNDLE_DIR / "dashboard" / "static" / "wallpapers")
     os.makedirs(wp_dir, exist_ok=True)
 
     # Find the most recently modified image and set it as global wallpaper
@@ -366,7 +374,7 @@ app.include_router(dashboard_router)
 
 # ── Static files ───────────────────────────────────────────────────────────────
 
-app.mount("/static", StaticFiles(directory="dashboard/static"), name="static")
+app.mount("/static", StaticFiles(directory=str(_BUNDLE_DIR / "dashboard" / "static")), name="static")
 
 
 @app.get("/")

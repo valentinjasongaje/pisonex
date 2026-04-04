@@ -2,7 +2,9 @@ import csv
 import hashlib
 import io
 import os
+import sys
 from datetime import datetime, date, timedelta
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File
@@ -40,7 +42,8 @@ class CoinSlotBody(BaseModel):
     enabled: bool
 
 router = APIRouter(prefix="/dashboard")
-templates = Jinja2Templates(directory="dashboard/templates")
+_BUNDLE_DIR = Path(os.environ.get('PISONEX_BUNDLE_DIR', Path(__file__).parent.parent))
+templates = Jinja2Templates(directory=str(_BUNDLE_DIR / "dashboard" / "templates"))
 
 _ALGORITHM = "HS256"
 _COOKIE_NAME = "pisonet_session"

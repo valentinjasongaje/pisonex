@@ -42,6 +42,12 @@ def register_pc(
     svc = SessionService(db)
     pc = svc.register_pc(pc_number, mac_address, ip)
 
+    # Client just booted — discard any commands queued before shutdown
+    # (e.g. idle-shutdown command that caused the previous shutdown would
+    # be re-delivered on the first heartbeat and cause an infinite reboot loop).
+    command_store.pop_command(pc_number)
+    command_store.clear_idle_since(pc_number)
+
     return {
         "pc_id": pc.id,
         "pc_number": pc.pc_number,
@@ -88,12 +94,15 @@ def heartbeat(
 
     # Remote-control payloads delivered via heartbeat
     cmd = command_store.pop_command(pc_number)
-    # Discard a stale idle-shutdown/restart command when the PC now has an
-    # active session.  This prevents the race where check_idle_shutdown()
-    # queues "shutdown" just before coins are inserted: without this guard
-    # the PC would unlock and immediately shut down in the same heartbeat.
-    if cmd and cmd["type"] in ("shutdown", "restart") and session is not None:
-        cmd = None
+    # Discard stale shutdown/restart commands when:
+    #   (a) PC has an active session — coins were inserted after the command
+    #       was queued (race condition guard), OR
+    #   (b) PC is locked with no session and no member — it just booted and
+    #       the command is left over from the previous shutdown cycle, which
+    #       would cause an infinite reboot loop.
+    if cmd and cmd["type"] in ("shutdown", "restart"):
+        if session is not None or (is_locked and session is None and member_user_id is None):
+            cmd = None
     msg = command_store.pop_message(pc_number)
     ann = command_store.get_announcement()
     coins_ok = command_store.is_coins_allowed(pc_number)
