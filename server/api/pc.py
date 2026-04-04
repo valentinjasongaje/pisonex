@@ -94,15 +94,6 @@ def heartbeat(
 
     # Remote-control payloads delivered via heartbeat
     cmd = command_store.pop_command(pc_number)
-    # Discard stale shutdown/restart commands when:
-    #   (a) PC has an active session — coins were inserted after the command
-    #       was queued (race condition guard), OR
-    #   (b) PC is locked with no session and no member — it just booted and
-    #       the command is left over from the previous shutdown cycle, which
-    #       would cause an infinite reboot loop.
-    if cmd and cmd["type"] in ("shutdown", "restart"):
-        if session is not None or (is_locked and session is None and member_user_id is None):
-            cmd = None
     msg = command_store.pop_message(pc_number)
     ann = command_store.get_announcement()
     coins_ok = command_store.is_coins_allowed(pc_number)
