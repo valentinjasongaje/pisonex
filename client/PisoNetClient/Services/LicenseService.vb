@@ -355,7 +355,15 @@ Namespace Services
             _verifyTimer = New System.Timers.Timer(6 * 60 * 60 * 1000)  ' 6 hours
             AddHandler _verifyTimer.Elapsed, Async Sub(s, e)
                 If IsActivated() Then
-                    Await VerifyAsync()
+                    Dim valid = Await VerifyAsync()
+                    If Not valid Then
+                        ' Server rejected — device was revoked or license invalidated
+                        Debug.WriteLine("[LICENSE] Verification failed — clearing local license")
+                        AppConfig.SaveLicenseKey("")
+                        AppConfig.SaveLicenseActivatedAt("")
+                        AppConfig.SaveLicenseExpiresAt("")
+                        AppConfig.SaveLicenseLastVerified("")
+                    End If
                 End If
             End Sub
             _verifyTimer.AutoReset = True
