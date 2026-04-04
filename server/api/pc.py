@@ -47,6 +47,7 @@ def register_pc(
     # be re-delivered on the first heartbeat and cause an infinite reboot loop).
     command_store.pop_command(pc_number)
     command_store.clear_idle_since(pc_number)
+    command_store.clear_pc_had_session(pc_number)
 
     return {
         "pc_id": pc.id,

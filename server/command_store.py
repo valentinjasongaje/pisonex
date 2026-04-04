@@ -239,6 +239,28 @@ def clear_idle_since(pc_number: int) -> None:
         _pc_idle_since.pop(pc_number, None)
 
 
+# ── Had-session-since-boot tracking ───────────────────────────────────────────
+# Prevents idle auto-shutdown from looping: a PC that just booted and has not
+# yet had any session will not be idle-shutdown again until it is actually used.
+
+_pc_had_session: dict[int, bool] = {}   # pc_number → True once a session starts
+
+
+def mark_pc_had_session(pc_number: int) -> None:
+    with _lock:
+        _pc_had_session[pc_number] = True
+
+
+def clear_pc_had_session(pc_number: int) -> None:
+    with _lock:
+        _pc_had_session.pop(pc_number, None)
+
+
+def pc_had_session(pc_number: int) -> bool:
+    with _lock:
+        return _pc_had_session.get(pc_number, False)
+
+
 # ── Zero-time auto-logout tracking ───────────────────────────────────────────
 
 def set_zero_time_since(pc_number: int, timestamp: float) -> None:

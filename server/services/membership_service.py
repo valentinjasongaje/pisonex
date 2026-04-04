@@ -462,6 +462,13 @@ class MembershipService:
                 command_store.clear_idle_since(pc.pc_number)
                 continue
 
+            # Don't idle-shutdown a PC that has not yet had any session since
+            # it last booted. This prevents an infinite reboot loop where the
+            # PC shuts down, reboots still idle, and gets shut down again.
+            if not command_store.pc_had_session(pc.pc_number):
+                command_store.clear_idle_since(pc.pc_number)
+                continue
+
             since = command_store.get_idle_since(pc.pc_number)
             if since is None:
                 command_store.set_idle_since(pc.pc_number, now)

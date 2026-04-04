@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session as DBSession
 from models import PC, Session, CoinTransaction, SystemLog
 from services.rate_service import pesos_to_seconds
+import command_store
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ class SessionService:
             self._db.add(session)
             pc.is_locked = False
             _pending_start.add(pc_number)
+            command_store.mark_pc_had_session(pc_number)
 
         _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + seconds
 
@@ -150,6 +152,7 @@ class SessionService:
             self._db.add(session)
             pc.is_locked = False
             _pending_start.add(pc_number)
+            command_store.mark_pc_had_session(pc_number)
 
         _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + seconds
 
