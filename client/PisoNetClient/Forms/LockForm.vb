@@ -80,6 +80,15 @@ Namespace Forms
         Private _coinPulseAlpha    As Integer = 255
         Private _coinPulseUp       As Boolean = False
 
+        ' Idle shutdown countdown UI
+        Private _pnlIdleShutdown  As Panel
+        Private _lblIdleTitle     As Label
+        Private _lblIdleCount     As Label
+        Private _idlePulseTimer   As System.Windows.Forms.Timer
+        Private _idlePulseAlpha   As Integer = 50
+        Private _idlePulseUp      As Boolean = True
+        Private _lastIdleSeconds  As Integer = -1
+
         ' Membership colors
         Private Shared ReadOnly MemberAccent As Color = Color.FromArgb(79, 142, 247)
         Private Shared ReadOnly MemberBg     As Color = Color.FromArgb(220, 8, 12, 24)
@@ -543,7 +552,43 @@ Namespace Forms
             _coinPulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
             AddHandler _coinPulseTimer.Tick, AddressOf OnCoinPulseTick
 
-            Me.Controls.AddRange({_pnlServerLicenseWarn, _lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlStatus, _lblLicenseWarn})
+            ' ── Idle auto-shutdown countdown card (minimal, bottom-left) ─────────
+            _pnlIdleShutdown = New Panel() With {
+                .Size      = New Size(190, 44),
+                .BackColor = Color.Transparent,
+                .Visible   = False
+            }
+            AddHandler _pnlIdleShutdown.Paint, AddressOf OnIdleShutdownPaint
+
+            _lblIdleTitle = New Label() With {
+                .Text      = "Shutting down in",
+                .Font      = New Font("Segoe UI", 7, FontStyle.Regular),
+                .ForeColor = Color.FromArgb(200, 110, 110),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .TextAlign = ContentAlignment.MiddleLeft,
+                .Location  = New Point(10, 4),
+                .Size      = New Size(170, 14)
+            }
+
+            _lblIdleCount = New Label() With {
+                .Text      = "00:00",
+                .Font      = New Font("Segoe UI", 13, FontStyle.Regular),
+                .ForeColor = Color.FromArgb(245, 90, 90),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .TextAlign = ContentAlignment.MiddleLeft,
+                .Location  = New Point(8, 18),
+                .Size      = New Size(170, 22)
+            }
+
+            _pnlIdleShutdown.Controls.AddRange({_lblIdleTitle, _lblIdleCount})
+
+            ' Border pulse animation — slow, subtle breathe
+            _idlePulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
+            AddHandler _idlePulseTimer.Tick, AddressOf OnIdlePulseTick
+
+            Me.Controls.AddRange({_pnlServerLicenseWarn, _lblPCNumber, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
         End Sub
 
         Private Sub OnStatusPillPaint(sender As Object, e As PaintEventArgs)
@@ -758,38 +803,55 @@ Namespace Forms
 
         Protected Overrides Sub OnPaintBackground(e As PaintEventArgs)
             Dim g = e.Graphics
+            Dim cw = Me.ClientSize.Width
+            Dim ch = Me.ClientSize.Height
 
+            Dim drewImage As Boolean = False
             If _bgImage IsNot Nothing Then
-                Dim w As Integer, h As Integer
-                Select Case AppConfig.LockBgImageFit
-                    Case "Cover"
-                        Dim s = Math.Max(CSng(Me.Width) / _bgImage.Width, CSng(Me.Height) / _bgImage.Height)
-                        w = CInt(_bgImage.Width * s) : h = CInt(_bgImage.Height * s)
-                    Case "Stretch"
-                        w = Me.Width : h = Me.Height
-                    Case Else ' Contain (default)
-                        Dim s = Math.Min(CSng(Me.Width) / _bgImage.Width, CSng(Me.Height) / _bgImage.Height)
-                        w = CInt(_bgImage.Width * s) : h = CInt(_bgImage.Height * s)
-                End Select
-                g.DrawImage(_bgImage, (Me.Width - w) \ 2, (Me.Height - h) \ 2, w, h)
-                ' Dark overlay
-                Using br = New SolidBrush(Color.FromArgb(160, 0, 0, 0))
-                    g.FillRectangle(br, Me.ClientRectangle)
-                End Using
-            Else
+                Try
+                    Dim imgW = _bgImage.Width
+                    Dim imgH = _bgImage.Height
+                    If imgW > 0 AndAlso imgH > 0 Then
+                        Dim w As Integer, h As Integer
+                        Select Case AppConfig.LockBgImageFit
+                            Case "Cover"
+                                Dim s = Math.Max(CSng(cw) / imgW, CSng(ch) / imgH)
+                                w = CInt(imgW * s) : h = CInt(imgH * s)
+                            Case "Stretch"
+                                w = cw : h = ch
+                            Case Else ' Contain (default)
+                                Dim s = Math.Min(CSng(cw) / imgW, CSng(ch) / imgH)
+                                w = CInt(imgW * s) : h = CInt(imgH * s)
+                        End Select
+                        g.DrawImage(_bgImage, (cw - w) \ 2, (ch - h) \ 2, w, h)
+                        ' Dark overlay
+                        Using br = New SolidBrush(Color.FromArgb(160, 0, 0, 0))
+                            g.FillRectangle(br, Me.ClientRectangle)
+                        End Using
+                        drewImage = True
+                    End If
+                Catch
+                    ' Image became invalid (disposed or corrupt) — clear and fall through
+                    _bgImage = Nothing
+                End Try
+            End If
+
+            If Not drewImage Then
                 g.Clear(Me.BackColor)
             End If
 
             ' Bottom gradient fade (subtle vignette for status pill area)
             Dim fadeH = 120
-            Dim fadeRect = New Rectangle(0, Me.ClientSize.Height - fadeH, Me.ClientSize.Width, fadeH)
-            Using br = New Drawing2D.LinearGradientBrush(
-                    fadeRect,
-                    Color.FromArgb(0, 0, 0, 0),
-                    Color.FromArgb(100, 0, 0, 0),
-                    Drawing2D.LinearGradientMode.Vertical)
-                g.FillRectangle(br, fadeRect)
-            End Using
+            If ch > fadeH Then
+                Dim fadeRect = New Rectangle(0, ch - fadeH, cw, fadeH)
+                Using br = New Drawing2D.LinearGradientBrush(
+                        fadeRect,
+                        Color.FromArgb(0, 0, 0, 0),
+                        Color.FromArgb(100, 0, 0, 0),
+                        Drawing2D.LinearGradientMode.Vertical)
+                    g.FillRectangle(br, fadeRect)
+                End Using
+            End If
         End Sub
 
         ' ── Layout ───────────────────────────────────────────────────────────
@@ -848,11 +910,23 @@ Namespace Forms
                     _lblSub.Bottom + 20)
             End If
 
-            ' Membership panel — centered, below sub-message (or below receiving-coins)
+            ' Idle shutdown panel — bottom-left corner, minimal
+            If _pnlIdleShutdown.Visible Then
+                _pnlIdleShutdown.Location = New Point(
+                    20,
+                    Me.ClientSize.Height - _pnlIdleShutdown.Height - 20)
+            End If
+
+            ' Membership panel — centered, below idle-shutdown card (or sub-message)
             If _pnlMember.Visible Then
+                Dim memberBaseY = If(_pnlIdleShutdown.Visible,
+                                     _pnlIdleShutdown.Bottom + 16,
+                                     If(_pnlReceivingCoins.Visible,
+                                        _pnlReceivingCoins.Bottom + 16,
+                                        _lblSub.Bottom + 28))
                 _pnlMember.Location = New Point(
                     (Me.ClientSize.Width - _pnlMember.Width) \ 2,
-                    _lblSub.Bottom + 28)
+                    memberBaseY)
                 ' In logged-in state keep the title centered within the panel.
                 ' In inline form state the title is positioned by LayoutMemberForm()
                 ' and must not be overridden here (it's left-aligned with a toggle).
@@ -1293,6 +1367,9 @@ Namespace Forms
                 Return
             End If
 
+            ' ── Idle shutdown — always update, regardless of membership state ──
+            UpdateIdleShutdown(idleShutdownSeconds)
+
             _membershipEnabled    = enabled
             _memberLoggedIn       = Not String.IsNullOrEmpty(username)
             _canLogout            = canLogout
@@ -1410,14 +1487,9 @@ Namespace Forms
                     panelNeedsRepaint   = True
                 End If
 
-                ' Sub-message: idle-shutdown countdown or default — only write when changed
-                If idleShutdownSeconds > 0 Then
-                    SetSubLabel($"PC will shut down in {idleShutdownSeconds}s",
-                                Color.FromArgb(239, 68, 68))
-                Else
-                    SetSubLabel($"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}",
-                                Color.FromArgb(140, 160, 200))
-                End If
+                ' Sub-message: default instruction (idle countdown is shown by _pnlIdleShutdown)
+                SetSubLabel($"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}",
+                            Color.FromArgb(140, 160, 200))
             End If
 
             ' Repaint panel only when something visual actually changed
@@ -1474,6 +1546,99 @@ Namespace Forms
                 End If
             End If
             _lblCoinIcon.ForeColor = Color.FromArgb(_coinPulseAlpha, 250, 204, 21)
+        End Sub
+
+        ' ── Idle shutdown countdown ───────────────────────────────────────────
+
+        Private Sub OnIdleShutdownPaint(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g   = e.Graphics
+            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+            Const R As Integer = 8
+            Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
+
+            ' Rounded rect path
+            Using path = New Drawing2D.GraphicsPath()
+                Dim d = R * 2
+                path.AddArc(rect.X, rect.Y, d, d, 180, 90)
+                path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+                path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+                path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+
+                ' Dark red-tinted background, slightly transparent
+                Using br = New SolidBrush(Color.FromArgb(200, 28, 6, 6))
+                    g.FillPath(br, path)
+                End Using
+
+                ' Subtle pulsing border
+                Using pen = New Pen(Color.FromArgb(_idlePulseAlpha, 200, 50, 50), 1.0F)
+                    g.DrawPath(pen, path)
+                End Using
+            End Using
+        End Sub
+
+        Private Sub OnIdlePulseTick(sender As Object, e As EventArgs)
+            If _idlePulseUp Then
+                _idlePulseAlpha += 3
+                If _idlePulseAlpha >= 120 Then
+                    _idlePulseAlpha = 120 : _idlePulseUp = False
+                End If
+            Else
+                _idlePulseAlpha -= 3
+                If _idlePulseAlpha <= 50 Then
+                    _idlePulseAlpha = 50 : _idlePulseUp = True
+                End If
+            End If
+            _pnlIdleShutdown.Invalidate()
+        End Sub
+
+        ''' <summary>
+        ''' Shows or hides the idle-shutdown countdown card.
+        ''' Called from UpdateMembershipUI before any early-return guards so it
+        ''' works regardless of whether the membership feature is enabled.
+        ''' </summary>
+        Public Sub UpdateIdleShutdown(seconds As Integer)
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() UpdateIdleShutdown(seconds))
+                Return
+            End If
+
+            If seconds <= 0 Then
+                If _pnlIdleShutdown.Visible Then
+                    _idlePulseTimer.Stop()
+                    _pnlIdleShutdown.Visible = False
+                    _lastIdleSeconds = -1
+                    CenterLabels()
+                End If
+                Return
+            End If
+
+            ' Update countdown text only when value actually changed (avoid needless repaints)
+            If seconds <> _lastIdleSeconds Then
+                _lastIdleSeconds = seconds
+                Dim mins = seconds \ 60
+                Dim secs = seconds Mod 60
+                _lblIdleCount.Text = $"{mins:D2}:{secs:D2}"
+
+                ' Urgency: escalate colour when under 60 seconds
+                If seconds <= 60 Then
+                    _lblIdleCount.ForeColor = Color.FromArgb(255, 50, 50)
+                    _lblIdleTitle.ForeColor = Color.FromArgb(255, 120, 120)
+                Else
+                    _lblIdleCount.ForeColor = Color.FromArgb(255, 80, 80)
+                    _lblIdleTitle.ForeColor = Color.FromArgb(240, 100, 100)
+                End If
+            End If
+
+            If Not _pnlIdleShutdown.Visible Then
+                _pnlIdleShutdown.Visible = True
+                _idlePulseAlpha = 50
+                _idlePulseUp    = True
+                _idlePulseTimer.Start()
+                CenterLabels()
+            End If
         End Sub
 
         Public Sub ShowReceivingCoins(isReceiving As Boolean)
@@ -1545,6 +1710,8 @@ Namespace Forms
             _allowClose = True
             UninstallHook()
             StopFocusTimer()
+            _idlePulseTimer?.Stop()
+            _idlePulseTimer?.Dispose()
         End Sub
 
     End Class

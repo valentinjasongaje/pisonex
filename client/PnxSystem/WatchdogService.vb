@@ -26,7 +26,7 @@ Public Class WatchdogService
     Private Const CLIENT_PROC_NAME  As String  = "PisoNetClient"
 
     Public Sub New()
-        ServiceName          = "PisoNetWatchdog"
+        ServiceName          = "pnxsystem"
         CanStop              = True
         CanPauseAndContinue  = False
         AutoLog              = True
@@ -182,7 +182,7 @@ Public Class WatchdogService
     Private Shared Sub Log(msg As String)
         Console.WriteLine($"[Watchdog {DateTime.Now:HH:mm:ss}] {msg}")
         Try
-            EventLog.WriteEntry("PisoNetWatchdog", msg, EventLogEntryType.Information)
+            EventLog.WriteEntry("pnxsystem", msg, EventLogEntryType.Information)
         Catch
         End Try
     End Sub

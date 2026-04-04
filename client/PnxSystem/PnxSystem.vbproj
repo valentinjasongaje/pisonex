@@ -3,7 +3,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>PisoNetWatchdog</RootNamespace>
-    <AssemblyName>PisoNetWatchdog</AssemblyName>
+    <AssemblyName>pnxsystem</AssemblyName>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

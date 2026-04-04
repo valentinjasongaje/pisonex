@@ -1,6 +1,6 @@
 @echo off
 :: ============================================================
-::  PisoNet Watchdog — Service Uninstaller
+::  PisoNet System Service — Uninstaller
 ::  Run this as Administrator.
 :: ============================================================
 
@@ -11,7 +11,7 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-set SERVICE_NAME=PisoNetWatchdog
+set SERVICE_NAME=pnxsystem
 
 echo.
 echo Removing "%SERVICE_NAME%" service...

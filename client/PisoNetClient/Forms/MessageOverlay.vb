@@ -198,96 +198,112 @@ Namespace Forms
             SetupForm()
 
             Dim friendly = If(_isRestart, "RESTARTING", "SHUTTING DOWN")
-            Dim icon = If(_isRestart, "↻", "⏻")
+            Dim icon     = If(_isRestart, "↻", "⏻")
 
-            ' ── Main container (centers everything vertically + horizontally) ──
+            ' ── Compute DPI + screen-size scale factor ────────────────────────
+            Dim dpiScale As Single = 1.0F
+            Using g = Me.CreateGraphics()
+                dpiScale = g.DpiX / 96.0F
+            End Using
+            Dim screenH = Screen.PrimaryScreen.WorkingArea.Height
+            Dim screenW = Screen.PrimaryScreen.WorkingArea.Width
+            ' Scale layout down on small screens (reference = 768p height)
+            Dim sizeScale  = Math.Max(0.60F, Math.Min(1.0F, screenH / 768.0F))
+            Dim layoutScale = Math.Max(0.60F, Math.Min(1.20F, dpiScale * sizeScale))
+            Dim Sv = Function(n As Integer) CInt(Math.Round(n * layoutScale))
+
+            ' Card width: at most 90 % of screen width, capped at 480 scaled
+            Dim cardWidth = Math.Min(Sv(480), CInt(screenW * 0.90F))
+
+            ' ── Main container ────────────────────────────────────────────────
             Dim container As New Panel() With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
             AddHandler container.Paint, AddressOf PaintBackground
             Me.Controls.Add(container)
 
             ' ── Center card (dark glass panel) ────────────────────────────────
-            Dim card As New Panel() With {
-                .Size = New Size(480, 400),
-                .BackColor = Color.FromArgb(14, 17, 28)
-            }
+            Dim card As New Panel() With {.BackColor = Color.FromArgb(14, 17, 28)}
             container.Controls.Add(card)
-            AddHandler container.Resize, Sub(s, e)
-                card.Location = New Point(
-                    (container.Width - card.Width) \ 2,
-                    (container.Height - card.Height) \ 2)
-            End Sub
             AddHandler card.Paint, AddressOf PaintCard
 
-            Dim cy = 36
+            ' We accumulate cy and set card height at the end so nothing overflows.
+            Dim cy = Sv(32)
 
             ' ── Icon circle ───────────────────────────────────────────────────
             Dim iconColor = If(_isRestart, AccentBlue, AccentRed)
-            Dim lblIcon = New Label() With {
-                .Text = icon,
-                .Font = New Font("Segoe UI", 28),
+            Dim iconSize  = Sv(76)
+            Dim lblIcon   = New Label() With {
+                .Text      = icon,
+                .Font      = New Font("Segoe UI", Math.Max(16.0F, 26.0F * layoutScale)),
                 .ForeColor = iconColor,
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .Size = New Size(80, 80),
-                .Location = New Point((card.Width - 80) \ 2, cy)
+                .Size      = New Size(iconSize, iconSize),
+                .Location  = New Point((cardWidth - iconSize) \ 2, cy)
             }
             AddHandler lblIcon.Paint, Sub(s, e)
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
                 Using pen = New Pen(Color.FromArgb(40, iconColor.R, iconColor.G, iconColor.B), 3)
-                    e.Graphics.DrawEllipse(pen, 2, 2, 75, 75)
+                    e.Graphics.DrawEllipse(pen, 2, 2, iconSize - 5, iconSize - 5)
                 End Using
             End Sub
             card.Controls.Add(lblIcon)
-            cy += 92
+            cy += iconSize + Sv(14)
 
             ' ── Title ─────────────────────────────────────────────────────────
+            Dim titleH = Sv(26)
             _lblTitle = New Label() With {
-                .Text = friendly,
-                .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+                .Text      = friendly,
+                .Font      = New Font("Segoe UI", Math.Max(9.0F, 13.0F * layoutScale), FontStyle.Bold),
                 .ForeColor = TextDim,
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .AutoSize = False,
-                .Size = New Size(card.Width, 24),
-                .Location = New Point(0, cy)
+                .AutoSize  = False,
+                .Size      = New Size(cardWidth, titleH),
+                .Location  = New Point(0, cy)
             }
             card.Controls.Add(_lblTitle)
-            cy += 36
+            cy += titleH + Sv(10)
 
             ' ── Big countdown number ──────────────────────────────────────────
+            Dim countdownFontPt = Math.Max(28.0F, 64.0F * layoutScale)
+            ' Allocate enough height for the rendered font (roughly 1.5× the pt size in pixels)
+            Dim countdownH = CInt(Math.Ceiling(countdownFontPt * dpiScale * 1.55F))
             _lblCountdown = New Label() With {
-                .Text = "30",
-                .Font = New Font("Segoe UI", 64, FontStyle.Bold),
+                .Text      = "30",
+                .Font      = New Font("Segoe UI", countdownFontPt, FontStyle.Bold),
                 .ForeColor = TextBright,
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .AutoSize = False,
-                .Size = New Size(card.Width, 90),
-                .Location = New Point(0, cy)
+                .AutoSize  = False,
+                .Size      = New Size(cardWidth, countdownH),
+                .Location  = New Point(0, cy)
             }
             card.Controls.Add(_lblCountdown)
-            cy += 88
+            cy += countdownH + Sv(6)
 
             ' ── "seconds remaining" ───────────────────────────────────────────
+            Dim subH = Sv(24)
             _lblCountdownSub = New Label() With {
-                .Text = "seconds remaining",
-                .Font = New Font("Segoe UI", 11),
+                .Text      = "seconds remaining",
+                .Font      = New Font("Segoe UI", Math.Max(8.0F, 11.0F * layoutScale)),
                 .ForeColor = TextDim,
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .AutoSize = False,
-                .Size = New Size(card.Width, 22),
-                .Location = New Point(0, cy)
+                .AutoSize  = False,
+                .Size      = New Size(cardWidth, subH),
+                .Location  = New Point(0, cy)
             }
             card.Controls.Add(_lblCountdownSub)
-            cy += 40
+            cy += subH + Sv(16)
 
             ' ── Progress bar ──────────────────────────────────────────────────
-            Dim barWidth = card.Width - 80
+            Dim barPad   = Sv(40)
+            Dim barW     = Math.Max(Sv(60), cardWidth - barPad * 2)
+            Dim barH     = Math.Max(4, Sv(6))
             _progressBar = New Panel() With {
-                .Size = New Size(barWidth, 6),
-                .Location = New Point(40, cy),
+                .Size      = New Size(barW, barH),
+                .Location  = New Point(barPad, cy),
                 .BackColor = Color.FromArgb(30, 34, 50)
             }
             _progressFill = New Panel() With {
-                .Size = New Size(barWidth, 6),
-                .Location = New Point(0, 0),
+                .Size      = New Size(barW, barH),
+                .Location  = New Point(0, 0),
                 .BackColor = If(_isRestart, AccentBlue, AccentRed)
             }
             AddHandler _progressFill.Paint, Sub(s, e)
@@ -303,19 +319,33 @@ Namespace Forms
             End Sub
             _progressBar.Controls.Add(_progressFill)
             card.Controls.Add(_progressBar)
-            cy += 24
+            cy += barH + Sv(14)
 
             ' ── "Save your work now" ──────────────────────────────────────────
+            Dim saveH = Sv(22)
             _lblSaveWork = New Label() With {
-                .Text = "Please save all your work",
-                .Font = New Font("Segoe UI", 10),
+                .Text      = "Preparing for shutdown...",
+                .Font      = New Font("Segoe UI", Math.Max(7.5F, 10.0F * layoutScale)),
                 .ForeColor = If(_isRestart, AccentBlue, AccentRed),
                 .TextAlign = ContentAlignment.MiddleCenter,
-                .AutoSize = False,
-                .Size = New Size(card.Width, 20),
-                .Location = New Point(0, cy)
+                .AutoSize  = False,
+                .Size      = New Size(cardWidth, saveH),
+                .Location  = New Point(0, cy)
             }
             card.Controls.Add(_lblSaveWork)
+            cy += saveH + Sv(28)   ' bottom padding
+
+            ' ── Finalise card size and centre it ──────────────────────────────
+            card.Size = New Size(cardWidth, cy)
+            ' Clamp card to screen if it somehow still exceeds it
+            Dim maxCardH = CInt(screenH * 0.92F)
+            If card.Height > maxCardH Then card.Size = New Size(card.Width, maxCardH)
+
+            AddHandler container.Resize, Sub(s, e)
+                card.Location = New Point(
+                    (container.Width  - card.Width)  \ 2,
+                    (container.Height - card.Height) \ 2)
+            End Sub
 
             StartCountdown()
         End Sub

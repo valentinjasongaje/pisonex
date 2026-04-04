@@ -498,10 +498,10 @@ Module Program
     ''' The watchdog is placed next to PisoNetClient.exe in the same directory.
     ''' </summary>
     Private Sub SpawnGuard()
-        If Process.GetProcessesByName("PisoNetWatchdog").Length > 0 Then Return
+        If Process.GetProcessesByName("pnxsystem").Length > 0 Then Return
 
         Dim watchdogExe = Path.Combine(
-            Path.GetDirectoryName(Application.ExecutablePath), "PisoNetWatchdog.exe")
+            Path.GetDirectoryName(Application.ExecutablePath), "pnxsystem.exe")
         If Not File.Exists(watchdogExe) Then Return
 
         Try
@@ -516,7 +516,7 @@ Module Program
 
     ''' <summary>Called every 30 s to restart the watchdog if someone killed it.</summary>
     Private Sub EnsureGuardRunning()
-        If Process.GetProcessesByName("PisoNetWatchdog").Length > 0 Then Return
+        If Process.GetProcessesByName("pnxsystem").Length > 0 Then Return
         SpawnGuard()
     End Sub
 

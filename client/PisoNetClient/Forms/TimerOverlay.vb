@@ -47,8 +47,9 @@ Namespace Forms
         Private _lblMember As Label
         Private _btnLogout As Button
 
-        Private _isConnected As Boolean = True
-        Private _memberName As String = Nothing
+        Private _isConnected    As Boolean = True
+        Private _memberName     As String = Nothing
+        Private _currentMinutes As Integer = Integer.MaxValue  ' tracks last-known minutes for color decisions
 
         Public Event MemberLogoutRequested()
         Public Event TimerHiddenByUser()
@@ -162,45 +163,48 @@ Namespace Forms
 
         ' ── Custom paint: rounded rect + gradient accent + border + dot ──
         Protected Overrides Sub OnPaint(e As PaintEventArgs)
-            Dim g = e.Graphics
+            Dim g  = e.Graphics
             g.SmoothingMode = SmoothingMode.AntiAlias
-            Dim rect = New Rectangle(0, 0, Me.Width - 1, Me.Height - 1)
+            Dim sc = GetLayoutScale()
+            Dim Sv = Function(n As Integer) CInt(Math.Round(n * sc))
 
-            ' Fill background (Region clips to rounded shape)
+            Dim cornerR   = Sv(CORNER_R)
+            Dim accentH   = Math.Max(2, Sv(ACCENT_H))
+            Dim padX      = Sv(PAD_X)
+            Dim dotSize   = Sv(DOT_SIZE)
+            Dim dotMargin = Sv(DOT_MARGIN)
+            Dim memberRowH = Sv(MEMBER_ROW_H)
+
+            Dim rect = New Rectangle(0, 0, Me.Width - 1, Me.Height - 1)
             g.Clear(BgSolid)
 
-            ' Border drawn along rounded path
-            Using path = RoundedRect(rect, CORNER_R)
+            Using path = RoundedRect(rect, cornerR)
                 Using pen = New Pen(BorderColor, 1)
                     g.DrawPath(pen, path)
                 End Using
             End Using
 
-            ' Gradient accent bar at top
-            Dim accentRect = New Rectangle(CORNER_R, 0, Me.Width - CORNER_R * 2, ACCENT_H)
+            Dim accentRect = New Rectangle(cornerR, 0, Me.Width - cornerR * 2, accentH)
             Using br = New LinearGradientBrush(accentRect, AccentBlue, AccentPurple, 0F)
                 g.FillRectangle(br, accentRect)
             End Using
 
-            ' Separator line above member row (when visible)
             If _lblMember.Visible Then
-                Dim sepY = Me.Height - MEMBER_ROW_H - 4
+                Dim sepY = Me.Height - memberRowH - 4
                 Using pen = New Pen(Color.FromArgb(40, 100, 120, 180), 1)
-                    g.DrawLine(pen, PAD_X, sepY, Me.Width - PAD_X, sepY)
+                    g.DrawLine(pen, padX, sepY, Me.Width - padX, sepY)
                 End Using
             End If
 
-            ' Connection dot
             If AppConfig.TimerShowConnDot Then
-                Dim dotX = Me.Width - DOT_SIZE - DOT_MARGIN
-                Dim dotY = DOT_MARGIN
+                Dim dotX   = Me.Width - dotSize - dotMargin
+                Dim dotY   = dotMargin
                 Dim dotClr = If(_isConnected, GreenColor, Color.FromArgb(245, 158, 11))
                 Using br = New SolidBrush(dotClr)
-                    g.FillEllipse(br, dotX, dotY, DOT_SIZE, DOT_SIZE)
+                    g.FillEllipse(br, dotX, dotY, dotSize, dotSize)
                 End Using
-                ' Glow effect
                 Using glowBr = New SolidBrush(Color.FromArgb(40, dotClr))
-                    g.FillEllipse(glowBr, dotX - 2, dotY - 2, DOT_SIZE + 4, DOT_SIZE + 4)
+                    g.FillEllipse(glowBr, dotX - 2, dotY - 2, dotSize + 4, dotSize + 4)
                 End Using
             End If
 
@@ -225,6 +229,31 @@ Namespace Forms
 
         ' ── Layout engine ────────────────────────────────────────────
 
+        ''' <summary>Returns the screen the overlay currently lives on (or primary if not yet shown).</summary>
+        Private Function GetCurrentScreen() As Screen
+            If Me.IsHandleCreated Then Return Screen.FromHandle(Me.Handle)
+            Return Screen.PrimaryScreen
+        End Function
+
+        ''' <summary>
+        ''' Compute a combined DPI + screen-size scale factor so the overlay
+        ''' stays proportional on small or high-DPI monitors.
+        ''' </summary>
+        Private Function GetLayoutScale() As Single
+            Dim dpiScale As Single = 1.0F
+            Using g = Me.CreateGraphics()
+                dpiScale = g.DpiX / 96.0F
+            End Using
+            Dim wa = GetCurrentScreen().WorkingArea
+            ' Shrink proportionally on small screens (reference = 1920 wide).
+            Dim widthScale  = CSng(wa.Width  / 1920.0F)
+            Dim heightScale = CSng(wa.Height / 1080.0F)
+            Dim screenScale = Math.Min(widthScale, heightScale)
+            screenScale = Math.Max(0.55F, Math.Min(1.10F, screenScale))
+            ' Combine DPI + screen scale, then clamp to a sane range.
+            Return Math.Max(0.65F, Math.Min(1.40F, dpiScale * screenScale))
+        End Function
+
         ''' <summary>
         ''' Re-layouts the overlay according to current AppConfig timer settings.
         ''' Safe to call from any thread.
@@ -235,6 +264,39 @@ Namespace Forms
                 Return
             End If
 
+            Dim sc As Single = GetLayoutScale()
+            Dim Sv = Function(n As Integer) CInt(Math.Round(n * sc))
+
+            ' Scaled dimension locals
+            Dim formW     = Sv(FORM_W)
+            Dim formHSlim = Sv(FORM_H_SLIM)
+            Dim formHTall = Sv(FORM_H_TALL)
+            Dim cornerR   = Sv(CORNER_R)
+            Dim accentH   = Math.Max(2, Sv(ACCENT_H))
+            Dim padX      = Sv(PAD_X)
+            Dim padY      = Sv(PAD_Y)
+            Dim dotSize   = Sv(DOT_SIZE)
+            Dim dotMargin = Sv(DOT_MARGIN)
+            Dim memberRowH = Sv(MEMBER_ROW_H)
+            Dim logoSize  = Sv(18)
+
+            ' Clamp formW to working area (leave a margin so it is never clipped)
+            Dim wa = GetCurrentScreen().WorkingArea
+            formW = Math.Min(formW, wa.Width - Sv(24))
+
+            ' Scale fonts
+            _lblTime.Font   = New Font("Segoe UI", Math.Max(9.0F,  18.0F * sc), FontStyle.Bold)
+            _lblPC.Font     = New Font("Segoe UI", Math.Max(6.5F,   8.0F * sc), FontStyle.Bold)
+            _lblMember.Font = New Font("Segoe UI", Math.Max(6.0F,   7.5F * sc))
+            _btnLogout.Font = New Font("Segoe UI", Math.Max(5.5F,   6.5F * sc), FontStyle.Bold)
+            _btnLogout.Size = New Size(Sv(46), Sv(18))
+
+            ' Update logo size
+            If _pbLogo.Image IsNot Nothing OrElse logoSize <> _pbLogo.Width Then
+                _pbLogo.Size  = New Size(logoSize, logoSize)
+                _pbLogo.Image = LogoHelper.GetLogo(logoSize, logoSize)
+            End If
+
             Dim showPc  = AppConfig.TimerShowPcLabel
             Dim pcAbove = (AppConfig.TimerPcLabelPosition = "Above")
 
@@ -243,56 +305,62 @@ Namespace Forms
 
             ' Logo offset
             Dim hasLogo  = (_pbLogo.Image IsNot Nothing)
-            Dim contentX = If(hasLogo, PAD_X + _pbLogo.Width + 6, PAD_X)
-            Dim contentW = FORM_W - contentX - PAD_X
+            Dim contentX = If(hasLogo, padX + _pbLogo.Width + Sv(6), padX)
+            Dim dotReserved = If(AppConfig.TimerShowConnDot, dotSize + dotMargin + Sv(4), 0)
+            Dim contentW = Math.Max(Sv(80), formW - contentX - padX - dotReserved)
 
-            _pbLogo.Location = New Point(PAD_X, PAD_Y + ACCENT_H)
+            _pbLogo.Location = New Point(padX, padY + accentH)
 
             If showPc AndAlso pcAbove Then
                 ' ── PC label above time ──────────────────────────────
-                Me.Size = New Size(FORM_W, FORM_H_TALL)
-                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, FORM_H_TALL), CORNER_R))
+                Me.Size = New Size(formW, formHTall)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, formHTall), cornerR))
 
-                _lblPC.Location  = New Point(contentX, PAD_Y + ACCENT_H)
-                _lblPC.Size      = New Size(contentW - DOT_SIZE - DOT_MARGIN, 16)
-                _lblPC.Font      = New Font("Segoe UI", 8, FontStyle.Bold)
+                Dim pcH = Sv(16)
+                _lblPC.Location  = New Point(contentX, padY + accentH)
+                _lblPC.Size      = New Size(contentW, pcH)
                 _lblPC.TextAlign = ContentAlignment.MiddleCenter
 
-                _lblTime.Location = New Point(contentX, PAD_Y + ACCENT_H + 17)
-                _lblTime.Size     = New Size(contentW, FORM_H_TALL - PAD_Y - ACCENT_H - 17 - PAD_Y)
+                _lblTime.Location = New Point(contentX, padY + accentH + pcH + Sv(1))
+                _lblTime.Size     = New Size(contentW, formHTall - padY - accentH - pcH - Sv(1) - padY)
 
             ElseIf showPc Then
                 ' ── PC label side ────────────────────────────────────
-                Me.Size = New Size(FORM_W, FORM_H_SLIM)
-                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, FORM_H_SLIM), CORNER_R))
+                Me.Size = New Size(formW, formHSlim)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, formHSlim), cornerR))
 
-                Dim timeW = Math.Max(100, contentW - 60)
-                _lblTime.Location = New Point(contentX, PAD_Y + ACCENT_H)
-                _lblTime.Size     = New Size(timeW, FORM_H_SLIM - PAD_Y * 2 - ACCENT_H)
+                Dim pcW   = Sv(56)
+                Dim timeW = Math.Max(Sv(80), contentW - pcW - Sv(4))
+                _lblTime.Location  = New Point(contentX, padY + accentH)
+                _lblTime.Size      = New Size(timeW, formHSlim - padY * 2 - accentH)
+                _lblTime.TextAlign = ContentAlignment.MiddleLeft
 
-                _lblPC.Location  = New Point(contentX + timeW + 4, (FORM_H_SLIM - 20) \ 2)
-                _lblPC.Size      = New Size(56, 20)
-                _lblPC.Font      = New Font("Segoe UI", 8, FontStyle.Bold)
+                _lblPC.Location  = New Point(contentX + timeW + Sv(4), (formHSlim - Sv(20)) \ 2)
+                _lblPC.Size      = New Size(pcW, Sv(20))
                 _lblPC.TextAlign = ContentAlignment.MiddleLeft
 
             Else
                 ' ── No PC label ──────────────────────────────────────
-                Me.Size = New Size(FORM_W, FORM_H_SLIM)
-                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, FORM_H_SLIM), CORNER_R))
+                Me.Size = New Size(formW, formHSlim)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, formHSlim), cornerR))
 
-                _lblTime.Location = New Point(contentX, PAD_Y + ACCENT_H)
-                _lblTime.Size     = New Size(contentW, FORM_H_SLIM - PAD_Y * 2 - ACCENT_H)
+                _lblTime.Location  = New Point(contentX, padY + accentH)
+                _lblTime.Size      = New Size(contentW, formHSlim - padY * 2 - accentH)
+                _lblTime.TextAlign = ContentAlignment.MiddleCenter
             End If
 
-            _lblTime.ForeColor = Color.FromArgb(AppConfig.TimerTimeArgb)
+            _lblTime.ForeColor = If(
+                _currentMinutes < 5,
+                Color.FromArgb(AppConfig.TimerLowTimeArgb),
+                Color.FromArgb(AppConfig.TimerTimeArgb))
 
             ' Expand height for member row if visible
             If _lblMember.Visible Then
                 Dim baseH = Me.Height
-                Dim newH = baseH + MEMBER_ROW_H + 10  ' 4px separator + 6px bottom padding for rounded corner
-                Me.Size = New Size(FORM_W, newH)
-                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, FORM_W, newH), CORNER_R))
-                LayoutMemberControls(baseH)
+                Dim newH  = baseH + memberRowH + Sv(10)
+                Me.Size   = New Size(formW, newH)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, newH), cornerR))
+                LayoutMemberControls(baseH, memberRowH, padX, Sv(46))
             End If
 
             Me.Invalidate()
@@ -300,8 +368,14 @@ Namespace Forms
         End Sub
 
         Private Sub PositionToCorner()
-            Dim wa = Screen.PrimaryScreen.WorkingArea
-            Me.Location = New Point(wa.Right - Me.Width - 12, wa.Top + 12)
+            Dim wa     = GetCurrentScreen().WorkingArea
+            Dim margin = CInt(Math.Round(12 * GetLayoutScale()))
+            Dim x      = wa.Right  - Me.Width  - margin
+            Dim y      = wa.Top    + margin
+            ' Clamp fully within the working area on all four sides
+            x = Math.Max(wa.Left + 4, Math.Min(x, wa.Right  - Me.Width  - 4))
+            y = Math.Max(wa.Top  + 4, Math.Min(y, wa.Bottom - Me.Height - 4))
+            Me.Location = New Point(x, y)
         End Sub
 
         ' ── Public API ────────────────────────────────────────────────
@@ -311,6 +385,7 @@ Namespace Forms
                 Me.Invoke(Sub() UpdateTime(minutes, seconds))
                 Return
             End If
+            _currentMinutes = minutes
             If minutes >= 60 Then
                 Dim hrs  = minutes \ 60
                 Dim mins = minutes Mod 60
@@ -359,24 +434,15 @@ Namespace Forms
                 _btnLogout.Visible = False
             End If
             ' Full re-layout so the form resizes/shrinks correctly
-            If changed Then
-                ApplyConfig()
-            Else
-                ' Just reposition controls without full resize
-                If _lblMember.Visible Then
-                    LayoutMemberControls(Me.Height - MEMBER_ROW_H - 4)
-                End If
-            End If
+            ApplyConfig()
         End Sub
 
-        Private Sub LayoutMemberControls(baseH As Integer)
+        Private Sub LayoutMemberControls(baseH As Integer, memberRowH As Integer, padX As Integer, btnW As Integer)
             If Not _lblMember.Visible Then Return
-            ' Member row sits below a subtle separator line
-            Dim y = baseH + 4  ' 4px gap after separator
-            _lblMember.Location = New Point(PAD_X, y)
-            _lblMember.Size = New Size(Me.Width - PAD_X - 60 - PAD_X, MEMBER_ROW_H)
-            ' Keep logout button inside the rounded rect (CORNER_R inset from edge)
-            _btnLogout.Location = New Point(Me.Width - 46 - PAD_X - 4, y + (MEMBER_ROW_H - 18) \ 2)
+            Dim y = baseH + 4
+            _lblMember.Location = New Point(padX, y)
+            _lblMember.Size     = New Size(Math.Max(40, Me.Width - padX - btnW - padX - 4), memberRowH)
+            _btnLogout.Location = New Point(Me.Width - btnW - padX - 4, y + (memberRowH - _btnLogout.Height) \ 2)
         End Sub
 
         ' ── Logout confirmation ──────────────────────────────────────

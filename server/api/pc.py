@@ -88,6 +88,12 @@ def heartbeat(
 
     # Remote-control payloads delivered via heartbeat
     cmd = command_store.pop_command(pc_number)
+    # Discard a stale idle-shutdown/restart command when the PC now has an
+    # active session.  This prevents the race where check_idle_shutdown()
+    # queues "shutdown" just before coins are inserted: without this guard
+    # the PC would unlock and immediately shut down in the same heartbeat.
+    if cmd and cmd["type"] in ("shutdown", "restart") and session is not None:
+        cmd = None
     msg = command_store.pop_message(pc_number)
     ann = command_store.get_announcement()
     coins_ok = command_store.is_coins_allowed(pc_number)

@@ -1,8 +1,8 @@
 @echo off
 :: ============================================================
-::  PisoNet Watchdog — Service Installer
+::  PisoNet System Service — Installer
 ::  Run this as Administrator from the folder where both
-::  PisoNetClient.exe and PisoNetWatchdog.exe live.
+::  PisoNetClient.exe and pnxsystem.exe live.
 :: ============================================================
 
 net session >nul 2>&1
@@ -12,13 +12,13 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-set SERVICE_NAME=PisoNetWatchdog
-set DISPLAY_NAME=PisoNet Watchdog
-set DESCRIPTION=Monitors PisoNetClient.exe and automatically restarts it if the process is killed.
-set EXE_PATH=%~dp0PisoNetWatchdog.exe
+set SERVICE_NAME=pnxsystem
+set DISPLAY_NAME=PNX System Service
+set DESCRIPTION=System monitoring and recovery service.
+set EXE_PATH=%~dp0pnxsystem.exe
 
 if not exist "%EXE_PATH%" (
-    echo ERROR: PisoNetWatchdog.exe not found at %EXE_PATH%
+    echo ERROR: pnxsystem.exe not found at %EXE_PATH%
     echo Make sure you run this script from the same folder as the executables.
     pause
     exit /b 1
