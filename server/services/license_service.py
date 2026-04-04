@@ -120,6 +120,7 @@ class LicenseService:
                     "license_key": license_key,
                     "device_id": device_id,
                     "device_label": device_label,
+                    "device_type": "server",
                 },
             )
 

@@ -143,7 +143,8 @@ Namespace Services
             Dim payload = New Dictionary(Of String, String) From {
                 {"license_key", licenseKey},
                 {"device_id", deviceId},
-                {"device_label", deviceLabel}
+                {"device_label", deviceLabel},
+                {"device_type", "pc"}
             }
 
             Try
