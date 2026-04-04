@@ -97,6 +97,31 @@ Namespace Resources
             Return _iconCached
         End Function
 
+        Private _wallpaperCached As Image = Nothing
+        Private _wallpaperLoaded As Boolean = False
+
+        ''' <summary>
+        ''' Returns the embedded default wallpaper, or Nothing on failure.
+        ''' </summary>
+        Public Function GetDefaultWallpaper() As Image
+            If _wallpaperLoaded Then Return _wallpaperCached
+            _wallpaperLoaded = True
+            Try
+                Dim asm = Assembly.GetExecutingAssembly()
+                Dim resourceName = asm.GetManifestResourceNames().
+                    FirstOrDefault(Function(r) r.EndsWith("pisonet_wallpaper_1920x1080.png", StringComparison.OrdinalIgnoreCase))
+                If Not String.IsNullOrEmpty(resourceName) Then
+                    Using stream As Stream = asm.GetManifestResourceStream(resourceName)
+                        If stream IsNot Nothing Then
+                            _wallpaperCached = Image.FromStream(stream)
+                        End If
+                    End Using
+                End If
+            Catch
+            End Try
+            Return _wallpaperCached
+        End Function
+
     End Module
 
 End Namespace

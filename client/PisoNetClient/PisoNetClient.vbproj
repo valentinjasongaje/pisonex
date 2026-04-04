@@ -24,6 +24,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\logo.png" />
     <EmbeddedResource Include="Resources\logo.ico" />
+    <EmbeddedResource Include="Resources\pisonet_wallpaper_1920x1080.png" />
   </ItemGroup>
 
 </Project>

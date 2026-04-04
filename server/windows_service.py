@@ -33,8 +33,8 @@ class PisoNetService(win32serviceutil.ServiceFramework):
     """Windows Service for PisoNet Server."""
 
     _svc_name_ = "PisoNetServer"
-    _svc_display_name_ = "PisoNet Internet Café Server"
-    _svc_description_ = "PisoNet server for managing internet café sessions and hardware"
+    _svc_display_name_ = "Pisonex Internet Café Server"
+    _svc_description_ = "Pisonex server for managing internet café sessions and hardware"
 
     def __init__(self, args):
         win32serviceutil.ServiceFramework.__init__(self, args)
@@ -86,7 +86,7 @@ def handle_command_line():
     if len(sys.argv) == 1:
         # Run as service (no args)
         servicemanager.Initialize()
-        servicemanager.PrepareToHostSingleService(PisoNetService)
+        servicemanager.PrepareToHostSingle(PisoNetService)
         servicemanager.StartServiceCtrlDispatcher()
     else:
         # Handle install/remove/start/stop

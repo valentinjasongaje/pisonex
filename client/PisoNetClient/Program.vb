@@ -150,7 +150,7 @@ Module Program
 
     Private Sub OnTimeUpdated(minutes As Integer, seconds As Integer)
         _overlay.UpdateTime(minutes, seconds)
-        _tray.UpdateStatus($"PisoNet — {minutes:D2}:{seconds:D2} remaining")
+        _tray.UpdateStatus($"Pisonex — {minutes:D2}:{seconds:D2} remaining")
     End Sub
 
     Private Sub OnSessionStarted()
@@ -168,7 +168,7 @@ Module Program
 
         If Not _overlay.Visible Then _overlay.Show()
         _tray.SetTimerVisible(True)
-        _tray.UpdateStatus("PisoNet — Session active")
+        _tray.UpdateStatus("Pisonex — Session active")
     End Sub
 
     Private Sub OnSessionEnded()
@@ -178,7 +178,7 @@ Module Program
         End If
         _overlay.Hide()
         _tray.SetTimerVisible(False)
-        _tray.UpdateStatus("PisoNet — Waiting for coins")
+        _tray.UpdateStatus("Pisonex — Waiting for coins")
     End Sub
 
     Private Sub OnTimerToggleRequested()
@@ -198,7 +198,7 @@ Module Program
     Private Sub OnConnectionLost()
         _overlay.ShowOffline()
         _lockMgr.ShowOfflineStatus()
-        _tray.UpdateStatus("PisoNet — Server offline")
+        _tray.UpdateStatus("Pisonex — Server offline")
     End Sub
 
     Private Sub OnConnectionRestored()
@@ -313,7 +313,7 @@ Module Program
         Task.Run(Async Function()
             Dim cacheDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "PisoNet", "wallpapers")
+                "Pisonex", "wallpapers")
             Directory.CreateDirectory(cacheDir)
 
             Dim ext = ".jpg"

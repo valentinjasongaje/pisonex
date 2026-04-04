@@ -111,7 +111,7 @@ class LicenseService:
 
     async def activate(self, license_key: str) -> dict:
         device_id = self.get_device_id()
-        device_label = f"PisoNet Server ({platform.node()})"
+        device_label = f"Pisonex Server ({platform.node()})"
 
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(

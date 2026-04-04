@@ -178,7 +178,7 @@ Namespace Forms
 
             ' Title text
             Dim lbl = New Label() With {
-                .Text      = "PisoNet — Admin Panel",
+                .Text      = "Pisonex — Admin Panel",
                 .Font      = New Font("Segoe UI", 8.5F, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(140, 160, 200),
                 .BackColor = Color.Transparent,
@@ -698,7 +698,7 @@ Namespace Forms
                     ' Generate a gradient wallpaper and save it
                     Dim cacheDir = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "PisoNet", "wallpapers")
+                        "Pisonex", "wallpapers")
                     Directory.CreateDirectory(cacheDir)
                     Dim savePath = Path.Combine(cacheDir, $"preset-{name.ToLower().Replace(" ", "-")}.png")
                     Using bmp = New Bitmap(1920, 1080)
@@ -1373,7 +1373,7 @@ Namespace Forms
 
         Private Sub OnExitApp(sender As Object, e As EventArgs)
             Dim result = MessageBox.Show(
-                "Exit PisoNet Client?" & vbCrLf &
+                "Exit Pisonex Client?" & vbCrLf &
                 "Windows restrictions will be removed and the lock screen will close.",
                 "Exit Application", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
             If result = DialogResult.Yes Then RaiseEvent ExitRequested()

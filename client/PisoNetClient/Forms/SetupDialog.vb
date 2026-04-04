@@ -29,7 +29,7 @@ Namespace Forms
             Dim y = 20
 
             ' ── Title ─────────────────────────────────────────────────────
-            AddLabel("PisoNet Client Setup", New Font("Segoe UI", 16, FontStyle.Bold),
+            AddLabel("Pisonex Client Setup", New Font("Segoe UI", 16, FontStyle.Bold),
                      Color.White, New Point(24, y))
             y += 44
 
@@ -88,7 +88,7 @@ Namespace Forms
             Me.AcceptButton = btnSave
 
             ' Apply borderless styling (this shifts all controls down and adds title bar)
-            FormStyles.MakeBorderless(Me, "PisoNet — First Time Setup", closable:=False)
+            FormStyles.MakeBorderless(Me, "Pisonex — First Time Setup", closable:=False)
         End Sub
 
         Private Sub OnSave(sender As Object, e As EventArgs)

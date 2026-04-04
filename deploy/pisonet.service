@@ -1,5 +1,5 @@
 [Unit]
-Description=PisoNet Server
+Description=Pisonex Server
 Documentation=https://github.com/yourrepo/pisonet
 After=network.target
 StartLimitIntervalSec=60

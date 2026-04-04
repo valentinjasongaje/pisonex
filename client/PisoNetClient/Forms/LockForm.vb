@@ -193,7 +193,7 @@ Namespace Forms
         End Sub
 
         Private Sub LoadBackground()
-            ' Priority: local admin override > server-pushed wallpaper > local fallback
+            ' Priority: local admin override > server-pushed wallpaper > local fallback > embedded default
             Dim path As String = Nothing
 
             If AppConfig.UseLocalWallpaper AndAlso Not String.IsNullOrEmpty(AppConfig.LockBgImagePath) Then
@@ -210,6 +210,11 @@ Namespace Forms
                 Catch
                     _bgImage = Nothing
                 End Try
+            End If
+
+            ' Fallback to embedded default wallpaper
+            If _bgImage Is Nothing Then
+                _bgImage = Resources.LogoHelper.GetDefaultWallpaper()
             End If
         End Sub
 

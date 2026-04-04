@@ -56,7 +56,7 @@ Public Class WatchdogService
         ' Immediate first check (don't wait 5 s)
         EnsureClientRunning()
 
-        Console.CancelKeyPress += Sub(s, e)
+        AddHandler Console.CancelKeyPress, Sub(s, e)
             e.Cancel = True
             _stopped.Set()
         End Sub

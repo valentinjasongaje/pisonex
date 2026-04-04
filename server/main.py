@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI):
     membership_task.cancel()
     if hw_controller:
         hw_controller.cleanup()
-    logger.info("PisoNet server shut down")
+    logger.info("Pisonex server shut down")
 
 
 def _migrate_schema():
@@ -306,7 +306,7 @@ async def _membership_expiry_loop():
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="PisoNet Server",
+    title="Pisonex Server",
     version="1.0.0",
     lifespan=lifespan,
 )

@@ -7,10 +7,10 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!--
-      System.ServiceProcess.ServiceBase is included in the net8.0-windows TFM.
-      No extra NuGet packages required.
-    -->
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.Compatibility" Version="8.0.8" />
+  </ItemGroup>
 
 </Project>

@@ -138,7 +138,7 @@ Namespace Services
 
         Public Async Function ActivateAsync(licenseKey As String) As Task(Of ActivateResult)
             Dim deviceId = GetDeviceId()
-            Dim deviceLabel = $"PisoNet Client PC{AppConfig.PCNumber:D2} ({Environment.MachineName})"
+            Dim deviceLabel = $"Pisonex Client PC{AppConfig.PCNumber:D2} ({Environment.MachineName})"
 
             Dim payload = New Dictionary(Of String, String) From {
                 {"license_key", licenseKey},
