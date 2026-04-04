@@ -218,9 +218,26 @@ class HardwareController:
         time.sleep(2)
         self._show_idle()
 
+    def _is_license_active(self) -> bool:
+        """Check whether the software license/trial is still active."""
+        try:
+            from main import license_service
+            if license_service and not license_service.is_active():
+                return False
+        except ImportError:
+            pass
+        return True
+
     def _confirm_pc(self):
         if not self._digits:
             self._lcd.show(Screen.error("No PC entered"))
+            threading.Timer(2, self._show_idle).start()
+            return
+
+        # Block coin insertion when trial/license is expired
+        if not self._is_license_active():
+            self._lcd.show(Screen.error("License expired"))
+            logger.warning("Coin insertion blocked — license expired or not activated")
             threading.Timer(2, self._show_idle).start()
             return
 
@@ -317,6 +334,8 @@ class HardwareController:
             pc = self._selected_pc
         if not command_store.is_coins_allowed(pc):
             return  # discard pulse — coin slot was disabled mid-session
+        if not self._is_license_active():
+            return  # discard pulse — license/trial expired
         seconds_preview = (pesos // settings.DEFAULT_RATE_PESOS) * settings.DEFAULT_RATE_SECONDS
         self._lcd.show(Screen.inserting_coins(
             pc, pesos, seconds_preview, self._countdown_remaining
@@ -351,6 +370,18 @@ class HardwareController:
 
     def _process_coin(self, pesos: int):
         try:
+            # Block coin processing when trial/license is expired
+            if not self._is_license_active():
+                logger.warning(
+                    "Coin ₱%d for PC %02d rejected — license expired",
+                    pesos, self._selected_pc,
+                )
+                self._lcd.show(Screen.error("License expired"))
+                time.sleep(2)
+                with self._lock:
+                    self._show_idle()
+                return
+
             seconds_added, session = self._service.add_time_by_pesos(
                 pc_number=self._selected_pc,
                 pesos=pesos,
