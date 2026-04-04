@@ -297,12 +297,14 @@ def overview(
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
     pcs, online_count, active_count, today_pesos = _pc_overview_data(db)
+    cfg = db.query(MembershipConfig).first()
     return templates.TemplateResponse("overview.html", {
         "request": request,
         "pcs": pcs,
         "online_count": online_count,
         "active_count": active_count,
         "today_pesos": today_pesos,
+        "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
     })
 
 
@@ -744,7 +746,6 @@ def pcs_page(
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
     membership_enabled, pc_members = _get_membership_info(db)
     cfg = db.query(MembershipConfig).first()
-    rates = db.query(CoinRate).filter(CoinRate.is_active == True).order_by(CoinRate.pesos).all()
 
     pc_data = []
     for pc in pcs:
@@ -772,7 +773,6 @@ def pcs_page(
         "total": len(pc_data),
         "membership_enabled": membership_enabled,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
-        "rates": rates,
     })
 
 
@@ -1188,11 +1188,9 @@ def settings_page(
 
     msvc = MembershipService(db)
     cfg = msvc.get_config()
-    rates = db.query(CoinRate).filter(CoinRate.is_active == True).order_by(CoinRate.pesos).all()
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "config": cfg,
-        "rates": rates,
     })
 
 

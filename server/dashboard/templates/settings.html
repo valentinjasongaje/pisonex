@@ -38,27 +38,15 @@
       <span>Use PHP amount presets</span>
     </label>
     <p style="font-size:.8rem;color:var(--gray);margin:.5rem 0 0 24px;">
-      When enabled, the Add Time buttons in PC Management show ₱ amounts from your coin
-      rates instead of fixed minutes. Transactions are recorded with the peso amount paid.
+      When enabled, the Add Time buttons show fixed PHP amounts instead of fixed minutes.
+      Transactions are recorded with the peso amount paid.
     </p>
-  </div>
-
-  {% if rates %}
-  <div style="margin-top:.75rem;margin-left:24px;">
-    <p style="font-size:.75rem;color:var(--text-dim);margin-bottom:.4rem;">Active coin rates that will appear as presets:</p>
-    <div style="display:flex;flex-wrap:wrap;gap:.4rem;">
-      {% for rate in rates %}
-      <span style="font-size:.75rem;padding:.25rem .6rem;background:var(--surface-2,rgba(255,255,255,0.05));border:1px solid var(--border);border-radius:6px;color:var(--text);">
-        ₱{{ rate.pesos }} = {{ rate.seconds // 60 }} min
-      </span>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin:.6rem 0 0 24px;">
+      {% for amt in [1, 5, 10, 15, 20, 25] %}
+      <span style="font-size:.75rem;padding:.25rem .6rem;background:var(--surface-2,rgba(255,255,255,0.05));border:1px solid var(--border);border-radius:6px;color:var(--text);">₱{{ amt }}</span>
       {% endfor %}
     </div>
   </div>
-  {% else %}
-  <p style="font-size:.8rem;color:var(--gray);margin-top:.5rem;margin-left:24px;">
-    No active coin rates found. Add rates in Coin Rates first.
-  </p>
-  {% endif %}
 
   <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
     <button class="btn btn-primary" onclick="savePresetAmounts()">Save</button>
