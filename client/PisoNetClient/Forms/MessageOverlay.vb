@@ -1,15 +1,14 @@
 Imports System.Windows.Forms
 Imports System.Drawing
+Imports System.Drawing.Drawing2D
 Imports PisoNetClient.Resources
 
 Namespace Forms
 
     ''' <summary>
-    ''' Fullscreen, always-on-top overlay used for three purposes:
-    '''   1. Admin messages   — dismissed by the user (OK button).
-    '''   2. Announcements    — dismissed by the user (OK button).
-    '''   3. Shutdown/Restart — non-dismissible countdown (30 s), shows Cancel button
-    '''                         that runs "shutdown /a" to abort.
+    ''' Fullscreen, always-on-top overlay used for:
+    '''   1. Admin messages / Announcements — dismissed by the user (OK button).
+    '''   2. Shutdown/Restart — non-dismissible countdown with large centered UI.
     ''' </summary>
     Public Class MessageOverlay
         Inherits Form
@@ -18,20 +17,34 @@ Namespace Forms
         Private _lblTitle   As Label
         Private _lblMessage As Label
         Private _btnOk      As Button
-        Private _btnCancel  As Button   ' Only visible for shutdown/restart
 
-        ' ── Countdown (shutdown / restart only) ───────────────────────────────
+        ' ── Countdown-specific UI ─────────────────────────────────────────────
+        Private _lblCountdown    As Label      ' Big "30" number
+        Private _lblCountdownSub As Label      ' "seconds remaining"
+        Private _lblSaveWork     As Label      ' "Save your work now"
+        Private _progressBar     As Panel      ' Shrinking bar
+        Private _progressFill    As Panel
+
+        ' ── Countdown state ───────────────────────────────────────────────────
         Private _countdownTimer  As System.Timers.Timer
         Private _secondsLeft     As Integer = 30
         Private ReadOnly _isCountdown As Boolean
-        Private ReadOnly _shutdownCmd As String  ' "shutdown /s /t 0" or "shutdown /r /t 0"
+        Private ReadOnly _shutdownCmd As String
+        Private ReadOnly _isRestart As Boolean
+
+        ' ── Colors ────────────────────────────────────────────────────────────
+        Private Shared ReadOnly BgDark     As Color = Color.FromArgb(8, 10, 20)
+        Private Shared ReadOnly AccentRed  As Color = Color.FromArgb(239, 68, 68)
+        Private Shared ReadOnly AccentBlue As Color = Color.FromArgb(79, 142, 247)
+        Private Shared ReadOnly TextDim    As Color = Color.FromArgb(148, 163, 184)
+        Private Shared ReadOnly TextBright As Color = Color.FromArgb(241, 245, 249)
 
         ''' <summary>
         ''' Show a simple message or announcement.
         ''' </summary>
         Public Sub New(title As String, message As String)
             _isCountdown = False
-            BuildLayout(title, message)
+            BuildMessageLayout(title, message)
         End Sub
 
         ''' <summary>
@@ -40,103 +53,328 @@ Namespace Forms
         ''' </summary>
         Public Sub New(shutdownType As String)
             _isCountdown = True
-            Dim friendly = If(shutdownType = "restart", "Restarting", "Shutting down")
-            _shutdownCmd = If(shutdownType = "restart", "shutdown /r /t 0", "shutdown /s /t 0")
-            BuildLayout($"PC {friendly}", $"PC {friendly} in 30 seconds…{vbCrLf}Save your work now.")
+            _isRestart = (shutdownType = "restart")
+            _shutdownCmd = If(_isRestart, "shutdown /r /f /t 0", "shutdown /s /f /t 0")
+            BuildCountdownLayout()
         End Sub
 
-        Private Sub BuildLayout(title As String, message As String)
-            Me.FormBorderStyle = FormBorderStyle.None
-            Me.WindowState     = FormWindowState.Maximized
-            Me.TopMost         = True
-            Me.BackColor       = Color.FromArgb(10, 14, 26)
-            Me.ForeColor       = Color.White
-            Me.StartPosition   = FormStartPosition.CenterScreen
-            Me.ShowInTaskbar   = False
-            Me.KeyPreview      = True
+        ' ══════════════════════════════════════════════════════════════════════
+        '  Message / Announcement layout (simple centered card)
+        ' ══════════════════════════════════════════════════════════════════════
 
-            Dim panel As New TableLayoutPanel() With {
-                .Dock        = DockStyle.Fill,
-                .RowCount    = 1,
-                .ColumnCount = 1,
-                .Padding     = New Padding(40)
+        Private Sub BuildMessageLayout(title As String, message As String)
+            SetupForm()
+
+            ' ── Background with subtle blue vignette ──────────────────────────
+            Dim container As New Panel() With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
+            AddHandler container.Paint, Sub(s, e)
+                Dim pnl = DirectCast(s, Panel)
+                Dim cx = pnl.Width \ 2
+                Dim cy2 = pnl.Height \ 2
+                Dim radius = Math.Max(pnl.Width, pnl.Height)
+                Using path = New GraphicsPath()
+                    path.AddEllipse(cx - radius, cy2 - radius, radius * 2, radius * 2)
+                    Using br = New PathGradientBrush(path)
+                        br.CenterColor = Color.FromArgb(20, 30, 40, 80)
+                        br.SurroundColors = {BgDark}
+                        e.Graphics.FillRectangle(br, pnl.ClientRectangle)
+                    End Using
+                End Using
+            End Sub
+            Me.Controls.Add(container)
+
+            ' ── Center card ───────────────────────────────────────────────────
+            Dim cardWidth = 520
+            Dim card As New Panel() With {
+                .Size = New Size(cardWidth, 10),  ' height will auto-adjust
+                .BackColor = Color.FromArgb(14, 17, 28)
             }
-            panel.RowStyles.Add(New RowStyle(SizeType.Percent, 100))
-            panel.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 100))
+            container.Controls.Add(card)
+            AddHandler card.Paint, AddressOf PaintCard
 
-            Dim inner As New FlowLayoutPanel() With {
-                .FlowDirection = FlowDirection.TopDown,
-                .Dock          = DockStyle.Fill,
-                .Anchor        = AnchorStyles.None,
-                .AutoSize      = True,
-                .AutoSizeMode  = AutoSizeMode.GrowAndShrink,
-                .WrapContents  = False,
-                .Padding       = New Padding(0)
+            Dim cy = 36
+            Dim pad = 40
+
+            ' ── Envelope icon circle ──────────────────────────────────────────
+            Dim lblIcon = New Label() With {
+                .Text = "✉",
+                .Font = New Font("Segoe UI", 26),
+                .ForeColor = AccentBlue,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Size = New Size(72, 72),
+                .Location = New Point((cardWidth - 72) \ 2, cy)
             }
+            AddHandler lblIcon.Paint, Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using pen = New Pen(Color.FromArgb(40, AccentBlue.R, AccentBlue.G, AccentBlue.B), 3)
+                    e.Graphics.DrawEllipse(pen, 2, 2, 67, 67)
+                End Using
+            End Sub
+            card.Controls.Add(lblIcon)
+            cy += 84
 
-            ' ── Logo ──────────────────────────────────────────────────────────
-            Dim logoImg = LogoHelper.GetLogo(72, 72)
-            If logoImg IsNot Nothing Then
-                Dim pb As New PictureBox() With {
-                    .Image    = logoImg,
-                    .Size     = New Size(72, 72),
-                    .SizeMode = PictureBoxSizeMode.Zoom,
-                    .Margin   = New Padding(0, 0, 0, 12)
-                }
-                inner.Controls.Add(pb)
-            End If
-
-            ' ── Title ─────────────────────────────────────────────────────────
-            _lblTitle = New Label() With {
-                .Text      = title,
-                .Font      = New Font("Segoe UI", 22, FontStyle.Bold),
-                .ForeColor = Color.FromArgb(79, 142, 247),
-                .AutoSize  = True,
-                .Margin    = New Padding(0, 0, 0, 16)
+            ' ── "FROM ADMIN" label ────────────────────────────────────────────
+            Dim lblFrom = New Label() With {
+                .Text = "MESSAGE FROM ADMIN",
+                .Font = New Font("Segoe UI", 9, FontStyle.Bold),
+                .ForeColor = TextDim,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .AutoSize = False,
+                .Size = New Size(cardWidth, 18),
+                .Location = New Point(0, cy)
             }
+            card.Controls.Add(lblFrom)
+            cy += 28
 
-            ' ── Message ───────────────────────────────────────────────────────
+            ' ── Thin accent line ──────────────────────────────────────────────
+            Dim line = New Panel() With {
+                .Size = New Size(60, 2),
+                .Location = New Point((cardWidth - 60) \ 2, cy),
+                .BackColor = AccentBlue
+            }
+            card.Controls.Add(line)
+            cy += 18
+
+            ' ── Message text ──────────────────────────────────────────────────
             _lblMessage = New Label() With {
-                .Text        = message,
-                .Font        = New Font("Segoe UI", 14),
-                .ForeColor   = Color.FromArgb(226, 232, 240),
-                .AutoSize    = True,
-                .MaximumSize = New Size(800, 0),
-                .Margin      = New Padding(0, 0, 0, 32)
+                .Text = message,
+                .Font = New Font("Segoe UI", 14),
+                .ForeColor = TextBright,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .AutoSize = True,
+                .MaximumSize = New Size(cardWidth - (pad * 2), 0),
+                .Location = New Point(pad, cy)
             }
+            card.Controls.Add(_lblMessage)
+            ' Defer final layout until message label is sized
+            AddHandler _lblMessage.Resize, Sub(s, e)
+                _lblMessage.Location = New Point((cardWidth - _lblMessage.Width) \ 2, _lblMessage.Top)
+            End Sub
+            cy += Math.Max(_lblMessage.PreferredHeight, 30) + 32
 
-            ' ── OK button (messages / announcements) ──────────────────────────
+            ' ── Dismiss button ────────────────────────────────────────────────
             _btnOk = New Button() With {
-                .Text      = "OK",
-                .Size      = New Size(120, 42),
-                .BackColor = Color.FromArgb(79, 142, 247),
+                .Text = "Dismiss",
+                .Size = New Size(160, 44),
+                .Location = New Point((cardWidth - 160) \ 2, cy),
+                .BackColor = AccentBlue,
                 .ForeColor = Color.White,
                 .FlatStyle = FlatStyle.Flat,
-                .Visible   = Not _isCountdown
+                .Font = New Font("Segoe UI", 10, FontStyle.Bold),
+                .Cursor = Cursors.Hand
             }
             _btnOk.FlatAppearance.BorderSize = 0
             AddHandler _btnOk.Click, Sub(s, e) Me.Close()
+            card.Controls.Add(_btnOk)
+            cy += 60
 
-            ' ── Cancel button (shutdown/restart countdown only) ────────────────
-            _btnCancel = New Button() With {
-                .Text      = "Cancel",
-                .Size      = New Size(120, 42),
-                .BackColor = Color.FromArgb(239, 68, 68),
-                .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat,
-                .Visible   = _isCountdown
+            ' ── Pisonex branding at bottom of card ────────────────────────────
+            Dim lblBrand = New Label() With {
+                .Text = "Pisonex",
+                .Font = New Font("Segoe UI", 8),
+                .ForeColor = Color.FromArgb(60, 70, 90),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .AutoSize = False,
+                .Size = New Size(cardWidth, 16),
+                .Location = New Point(0, cy)
             }
-            _btnCancel.FlatAppearance.BorderSize = 0
-            AddHandler _btnCancel.Click, AddressOf CancelShutdown
+            card.Controls.Add(lblBrand)
+            cy += 30
 
-            inner.Controls.AddRange({_lblTitle, _lblMessage, _btnOk, _btnCancel})
-            ' (logo PictureBox was already added above, before the title)
-            panel.Controls.Add(inner, 0, 0)
-            inner.Anchor = AnchorStyles.None
-            Me.Controls.Add(panel)
-
-            If _isCountdown Then StartCountdown()
+            ' ── Finalize card height and center ───────────────────────────────
+            card.Size = New Size(cardWidth, cy)
+            AddHandler container.Resize, Sub(s, e)
+                card.Location = New Point(
+                    (container.Width - card.Width) \ 2,
+                    (container.Height - card.Height) \ 2)
+            End Sub
         End Sub
+
+        ' ══════════════════════════════════════════════════════════════════════
+        '  Shutdown / Restart countdown layout
+        ' ══════════════════════════════════════════════════════════════════════
+
+        Private Sub BuildCountdownLayout()
+            SetupForm()
+
+            Dim friendly = If(_isRestart, "RESTARTING", "SHUTTING DOWN")
+            Dim icon = If(_isRestart, "↻", "⏻")
+
+            ' ── Main container (centers everything vertically + horizontally) ──
+            Dim container As New Panel() With {.Dock = DockStyle.Fill, .BackColor = Color.Transparent}
+            AddHandler container.Paint, AddressOf PaintBackground
+            Me.Controls.Add(container)
+
+            ' ── Center card (dark glass panel) ────────────────────────────────
+            Dim card As New Panel() With {
+                .Size = New Size(480, 400),
+                .BackColor = Color.FromArgb(14, 17, 28)
+            }
+            container.Controls.Add(card)
+            AddHandler container.Resize, Sub(s, e)
+                card.Location = New Point(
+                    (container.Width - card.Width) \ 2,
+                    (container.Height - card.Height) \ 2)
+            End Sub
+            AddHandler card.Paint, AddressOf PaintCard
+
+            Dim cy = 36
+
+            ' ── Icon circle ───────────────────────────────────────────────────
+            Dim iconColor = If(_isRestart, AccentBlue, AccentRed)
+            Dim lblIcon = New Label() With {
+                .Text = icon,
+                .Font = New Font("Segoe UI", 28),
+                .ForeColor = iconColor,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Size = New Size(80, 80),
+                .Location = New Point((card.Width - 80) \ 2, cy)
+            }
+            AddHandler lblIcon.Paint, Sub(s, e)
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+                Using pen = New Pen(Color.FromArgb(40, iconColor.R, iconColor.G, iconColor.B), 3)
+                    e.Graphics.DrawEllipse(pen, 2, 2, 75, 75)
+                End Using
+            End Sub
+            card.Controls.Add(lblIcon)
+            cy += 92
+
+            ' ── Title ─────────────────────────────────────────────────────────
+            _lblTitle = New Label() With {
+                .Text = friendly,
+                .Font = New Font("Segoe UI", 13, FontStyle.Bold),
+                .ForeColor = TextDim,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .AutoSize = False,
+                .Size = New Size(card.Width, 24),
+                .Location = New Point(0, cy)
+            }
+            card.Controls.Add(_lblTitle)
+            cy += 36
+
+            ' ── Big countdown number ──────────────────────────────────────────
+            _lblCountdown = New Label() With {
+                .Text = "30",
+                .Font = New Font("Segoe UI", 64, FontStyle.Bold),
+                .ForeColor = TextBright,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .AutoSize = False,
+                .Size = New Size(card.Width, 90),
+                .Location = New Point(0, cy)
+            }
+            card.Controls.Add(_lblCountdown)
+            cy += 88
+
+            ' ── "seconds remaining" ───────────────────────────────────────────
+            _lblCountdownSub = New Label() With {
+                .Text = "seconds remaining",
+                .Font = New Font("Segoe UI", 11),
+                .ForeColor = TextDim,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .AutoSize = False,
+                .Size = New Size(card.Width, 22),
+                .Location = New Point(0, cy)
+            }
+            card.Controls.Add(_lblCountdownSub)
+            cy += 40
+
+            ' ── Progress bar ──────────────────────────────────────────────────
+            Dim barWidth = card.Width - 80
+            _progressBar = New Panel() With {
+                .Size = New Size(barWidth, 6),
+                .Location = New Point(40, cy),
+                .BackColor = Color.FromArgb(30, 34, 50)
+            }
+            _progressFill = New Panel() With {
+                .Size = New Size(barWidth, 6),
+                .Location = New Point(0, 0),
+                .BackColor = If(_isRestart, AccentBlue, AccentRed)
+            }
+            AddHandler _progressFill.Paint, Sub(s, e)
+                Dim pnl = DirectCast(s, Panel)
+                If pnl.Width > 0 Then
+                    Using br = New LinearGradientBrush(
+                        New Point(0, 0), New Point(pnl.Width, 0),
+                        If(_isRestart, AccentBlue, AccentRed),
+                        If(_isRestart, Color.FromArgb(56, 189, 248), Color.FromArgb(251, 146, 60)))
+                        e.Graphics.FillRectangle(br, 0, 0, pnl.Width, pnl.Height)
+                    End Using
+                End If
+            End Sub
+            _progressBar.Controls.Add(_progressFill)
+            card.Controls.Add(_progressBar)
+            cy += 24
+
+            ' ── "Save your work now" ──────────────────────────────────────────
+            _lblSaveWork = New Label() With {
+                .Text = "Please save all your work",
+                .Font = New Font("Segoe UI", 10),
+                .ForeColor = If(_isRestart, AccentBlue, AccentRed),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .AutoSize = False,
+                .Size = New Size(card.Width, 20),
+                .Location = New Point(0, cy)
+            }
+            card.Controls.Add(_lblSaveWork)
+
+            StartCountdown()
+        End Sub
+
+        Private Sub SetupForm()
+            Me.FormBorderStyle = FormBorderStyle.None
+            Me.WindowState = FormWindowState.Maximized
+            Me.TopMost = True
+            Me.BackColor = BgDark
+            Me.ForeColor = Color.White
+            Me.StartPosition = FormStartPosition.CenterScreen
+            Me.ShowInTaskbar = False
+            Me.KeyPreview = True
+            Me.DoubleBuffered = True
+        End Sub
+
+        Private Sub PaintBackground(sender As Object, e As PaintEventArgs)
+            ' Subtle radial vignette
+            Dim pnl = DirectCast(sender, Panel)
+            Dim cx = pnl.Width \ 2
+            Dim cy = pnl.Height \ 2
+            Dim radius = Math.Max(pnl.Width, pnl.Height)
+            Using path = New GraphicsPath()
+                path.AddEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
+                Using br = New PathGradientBrush(path)
+                    br.CenterColor = Color.FromArgb(20, If(_isRestart, 30, 40), If(_isRestart, 40, 20), If(_isRestart, 60, 30))
+                    br.SurroundColors = {BgDark}
+                    e.Graphics.FillRectangle(br, pnl.ClientRectangle)
+                End Using
+            End Using
+        End Sub
+
+        Private Sub PaintCard(sender As Object, e As PaintEventArgs)
+            Dim pnl = DirectCast(sender, Panel)
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
+            Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
+            Dim borderColor = Color.FromArgb(40, 255, 255, 255)
+            Using pen = New Pen(borderColor, 1)
+                Dim r = 16
+                Using gp = RoundRect(rect, r)
+                    e.Graphics.DrawPath(pen, gp)
+                End Using
+            End Using
+        End Sub
+
+        Private Shared Function RoundRect(rect As Rectangle, r As Integer) As GraphicsPath
+            Dim gp = New GraphicsPath()
+            Dim d = r * 2
+            gp.AddArc(rect.X, rect.Y, d, d, 180, 90)
+            gp.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+            gp.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+            gp.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+            gp.CloseFigure()
+            Return gp
+        End Function
+
+        ' ══════════════════════════════════════════════════════════════════════
+        '  Countdown logic
+        ' ══════════════════════════════════════════════════════════════════════
 
         Private Sub StartCountdown()
             _secondsLeft = 30
@@ -147,16 +385,14 @@ Namespace Forms
 
         Private Sub CountdownTick(sender As Object, e As System.Timers.ElapsedEventArgs)
             _secondsLeft -= 1
-            Dim friendly = If(_shutdownCmd.Contains("/r"), "Restarting", "Shutting down")
-            Dim newText = $"PC {friendly} in {_secondsLeft} seconds…{vbCrLf}Save your work now."
 
             If _secondsLeft <= 0 Then
                 _countdownTimer?.Stop()
                 Try
                     System.Diagnostics.Process.Start(New System.Diagnostics.ProcessStartInfo() With {
-                        .FileName        = "cmd.exe",
-                        .Arguments       = $"/c {_shutdownCmd}",
-                        .CreateNoWindow  = True,
+                        .FileName = "cmd.exe",
+                        .Arguments = $"/c {_shutdownCmd}",
+                        .CreateNoWindow = True,
                         .UseShellExecute = False
                     })
                 Catch
@@ -166,25 +402,37 @@ Namespace Forms
             End If
 
             If Me.InvokeRequired Then
-                Me.Invoke(Sub() _lblMessage.Text = newText)
+                Me.Invoke(Sub() UpdateCountdownUI())
             Else
-                _lblMessage.Text = newText
+                UpdateCountdownUI()
             End If
         End Sub
 
-        Private Sub CancelShutdown(sender As Object, e As EventArgs)
-            _countdownTimer?.Stop()
-            Try
-                System.Diagnostics.Process.Start(New System.Diagnostics.ProcessStartInfo() With {
-                    .FileName        = "cmd.exe",
-                    .Arguments       = "/c shutdown /a",
-                    .CreateNoWindow  = True,
-                    .UseShellExecute = False
-                })
-            Catch
-            End Try
-            Me.Close()
+        Private Sub UpdateCountdownUI()
+            If _lblCountdown IsNot Nothing Then
+                _lblCountdown.Text = _secondsLeft.ToString()
+            End If
+
+            ' Update progress bar
+            If _progressFill IsNot Nothing AndAlso _progressBar IsNot Nothing Then
+                Dim pct = _secondsLeft / 30.0
+                _progressFill.Width = CInt(_progressBar.Width * pct)
+                _progressFill.Invalidate()
+            End If
+
+            ' Urgency: change color in last 10 seconds
+            If _secondsLeft <= 10 AndAlso Not _isRestart Then
+                _lblCountdown.ForeColor = AccentRed
+                _lblSaveWork.Text = "Shutting down soon!"
+            ElseIf _secondsLeft <= 10 AndAlso _isRestart Then
+                _lblCountdown.ForeColor = AccentBlue
+                _lblSaveWork.Text = "Restarting soon!"
+            End If
         End Sub
+
+        ' ══════════════════════════════════════════════════════════════════════
+        '  Overrides
+        ' ══════════════════════════════════════════════════════════════════════
 
         Protected Overrides Sub OnKeyDown(e As KeyEventArgs)
             If e.KeyCode = Keys.Escape AndAlso Not _isCountdown Then Me.Close()

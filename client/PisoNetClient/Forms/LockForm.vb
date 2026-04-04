@@ -350,6 +350,8 @@ Namespace Forms
             AddHandler _lblSrvWarnLink.Click, Sub(s, ev)
                 If Not String.IsNullOrEmpty(_serverDashboardUrl) Then
                     Try
+                        Me.TopMost = False
+                        Me.WindowState = FormWindowState.Minimized
                         Process.Start(New ProcessStartInfo(_serverDashboardUrl) With {.UseShellExecute = True})
                     Catch
                     End Try
