@@ -9,6 +9,7 @@ Imports PisoNetClient.Forms
 
 Module Program
 
+    Private _singleInstanceMutex As System.Threading.Mutex
     Private _api As ApiService
     Private _memberSvc As MemberService
     Private _lockMgr As LockManager
@@ -22,6 +23,24 @@ Module Program
 
     <STAThread>
     Sub Main()
+        ' ── Single-instance guard ─────────────────────────────────────────────
+        ' Prevents a second copy from starting when both the Run-key entry and the
+        ' pnxsystem watchdog service fire at boot before the process is visible in
+        ' the process list. The mutex is Global\ so it is visible across sessions.
+        Dim ownsMutex As Boolean = False
+        _singleInstanceMutex = New System.Threading.Mutex(
+            False, "Global\PisoNetClient_SingleInstance")
+        Try
+            ownsMutex = _singleInstanceMutex.WaitOne(0, False)
+        Catch ex As System.Threading.AbandonedMutexException
+            ' Previous instance crashed without releasing — we now own it
+            ownsMutex = True
+        End Try
+        If Not ownsMutex Then
+            _singleInstanceMutex.Dispose()
+            Return   ' Another instance is already running — exit silently
+        End If
+
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2)
         Application.EnableVisualStyles()
         Application.SetCompatibleTextRenderingDefault(False)
@@ -460,6 +479,11 @@ Module Program
         _metrics?.Dispose()
         _memberSvc?.Dispose()
         _tray?.Dispose()
+        Try
+            _singleInstanceMutex?.ReleaseMutex()
+            _singleInstanceMutex?.Dispose()
+        Catch
+        End Try
         _lockMgr.AllowExit()
         Application.Exit()
     End Sub

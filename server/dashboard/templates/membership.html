@@ -73,55 +73,114 @@
 <!-- Members List -->
 <div class="card">
   <h2>Members ({{ members | length }})</h2>
+
   {% if members %}
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Username</th>
-        <th>Balance</th>
-        <th>Status</th>
-        <th>Logged In</th>
-        <th>Remaining</th>
-        <th>Last Login</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for m in members %}
-      <tr id="member-row-{{ m.id }}">
-        <td>{{ m.username }}</td>
-        <td>{{ m.balance_seconds // 60 }}m {{ m.balance_seconds % 60 }}s</td>
-        <td>
+
+  <!-- ── Desktop table (hidden on mobile) ──────────────────── -->
+  <div class="members-desktop-view">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Balance</th>
+          <th>Status</th>
+          <th>Logged In</th>
+          <th>Remaining</th>
+          <th>Last Login</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in members %}
+        <tr id="member-row-{{ m.id }}">
+          <td>{{ m.username }}</td>
+          <td>{{ m.balance_seconds // 60 }}m {{ m.balance_seconds % 60 }}s</td>
+          <td>
+            {% if m.is_active %}
+              <span class="badge badge-success">Active</span>
+            {% else %}
+              <span class="badge badge-danger">Inactive</span>
+            {% endif %}
+          </td>
+          <td>{% if m.logged_in_pc %}PC {{ "%02d" | format(m.logged_in_pc) }}{% else %}&mdash;{% endif %}</td>
+          <td>{% if m.remaining_seconds > 0 %}{{ m.remaining_seconds // 60 }}m {{ m.remaining_seconds % 60 }}s{% else %}&mdash;{% endif %}</td>
+          <td>{% if m.last_login_at %}{{ m.last_login_at.strftime('%m/%d %H:%M') }}{% else %}&mdash;{% endif %}</td>
+          <td>
+            {% if m.is_active %}
+              <button class="btn btn-sm btn-warning" onclick="deactivateMember({{ m.id }})">Deactivate</button>
+            {% else %}
+              <button class="btn btn-sm btn-success" onclick="activateMember({{ m.id }})">Activate</button>
+            {% endif %}
+            {% if m.logged_in_pc %}
+              <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
+            {% endif %}
+            <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Mobile tile list (hidden on desktop) ───────────────── -->
+  <div class="members-mobile-view">
+    {% for m in members %}
+    <div class="member-tile" id="member-tile-{{ m.id }}">
+
+      <div class="member-tile-header">
+        <div>
+          <div class="member-tile-username">{{ m.username }}</div>
+          {% if m.logged_in_pc %}
+          <div class="member-tile-pc">📍 PC {{ "%02d" | format(m.logged_in_pc) }}</div>
+          {% endif %}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
           {% if m.is_active %}
             <span class="badge badge-success">Active</span>
           {% else %}
             <span class="badge badge-danger">Inactive</span>
           {% endif %}
-        </td>
-        <td>{% if m.logged_in_pc %}PC {{ "%02d" | format(m.logged_in_pc) }}{% else %}&mdash;{% endif %}</td>
-        <td>{% if m.remaining_seconds > 0 %}{{ m.remaining_seconds // 60 }}m {{ m.remaining_seconds % 60 }}s{% else %}&mdash;{% endif %}</td>
-        <td>{% if m.last_login_at %}{{ m.last_login_at.strftime('%m/%d %H:%M') }}{% else %}&mdash;{% endif %}</td>
-        <td>
-          {% if m.is_active %}
-            <button class="btn btn-sm btn-warning" onclick="deactivateMember({{ m.id }})">Deactivate</button>
-          {% else %}
-            <button class="btn btn-sm btn-success" onclick="activateMember({{ m.id }})">Activate</button>
-          {% endif %}
-          {% if m.logged_in_pc %}
-            <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
-          {% endif %}
-          <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+        </div>
+      </div>
+
+      <div class="member-tile-body">
+        <div class="member-tile-row">
+          <span class="member-tile-label">Balance</span>
+          <span>{{ m.balance_seconds // 60 }}m {{ m.balance_seconds % 60 }}s</span>
+        </div>
+        <div class="member-tile-row">
+          <span class="member-tile-label">Remaining</span>
+          <span>{% if m.remaining_seconds > 0 %}{{ m.remaining_seconds // 60 }}m {{ m.remaining_seconds % 60 }}s{% else %}—{% endif %}</span>
+        </div>
+        <div class="member-tile-row">
+          <span class="member-tile-label">Last Login</span>
+          <span style="color:var(--text-dim);font-size:12px">{% if m.last_login_at %}{{ m.last_login_at.strftime('%m/%d %H:%M') }}{% else %}—{% endif %}</span>
+        </div>
+      </div>
+
+      <div class="member-tile-actions">
+        {% if m.is_active %}
+          <button class="btn btn-sm btn-warning" onclick="deactivateMember({{ m.id }})">Deactivate</button>
+        {% else %}
+          <button class="btn btn-sm btn-success" onclick="activateMember({{ m.id }})">Activate</button>
+        {% endif %}
+        {% if m.logged_in_pc %}
+          <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
+        {% endif %}
+        <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+
   {% else %}
   <p style="color:var(--gray)">No registered members yet.</p>
   {% endif %}
 </div>
 
 <style>
+  /* ── Config form ─────────────────────────────────────────── */
   .membership-toggles {
     display: flex;
     gap: 24px;
@@ -190,6 +249,92 @@
   }
   .membership-actions #config-status {
     font-size: 0.85rem;
+  }
+
+  /* ── Members list responsive layout ─────────────────────── */
+  .members-mobile-view { display: none; }
+
+  @media (max-width: 768px) {
+    .members-desktop-view { display: none; }
+    .members-mobile-view {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 4px;
+    }
+
+    .member-tile {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .member-tile-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+    }
+    .member-tile-username {
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+    }
+    .member-tile-pc {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .member-tile-body {
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .member-tile-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      min-height: 20px;
+    }
+    .member-tile-label {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .member-tile-actions {
+      padding: 10px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .member-tile-actions .btn {
+      flex: 1;
+      min-width: 100px;
+      text-align: center;
+    }
+
+    /* Config form tweaks on mobile */
+    .membership-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    .membership-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .membership-actions .btn {
+      width: 100%;
+      text-align: center;
+    }
   }
 </style>
 

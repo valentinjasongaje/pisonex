@@ -34,8 +34,8 @@ Namespace Forms
         Private Const ACCENT_H      As Integer = 3
         Private Const PAD_X         As Integer = 14
         Private Const PAD_Y         As Integer = 10
-        Private Const FORM_H_SLIM   As Integer = 52
-        Private Const FORM_H_TALL   As Integer = 72
+        Private Const FORM_H_SLIM   As Integer = 66
+        Private Const FORM_H_TALL   As Integer = 88
         Private Const DOT_SIZE      As Integer = 8
         Private Const DOT_MARGIN    As Integer = 10
         Private Const MEMBER_ROW_H  As Integer = 24
@@ -50,6 +50,7 @@ Namespace Forms
         Private _isConnected    As Boolean = True
         Private _memberName     As String = Nothing
         Private _currentMinutes As Integer = Integer.MaxValue  ' tracks last-known minutes for color decisions
+        Private _userMoved      As Boolean = False             ' True once user drags the overlay
 
         Public Event MemberLogoutRequested()
         Public Event TimerHiddenByUser()
@@ -364,7 +365,7 @@ Namespace Forms
             End If
 
             Me.Invalidate()
-            PositionToCorner()
+            If Not _userMoved Then PositionToCorner()
         End Sub
 
         Private Sub PositionToCorner()
@@ -535,6 +536,7 @@ Namespace Forms
 
         Private Sub HandleMouseDown(sender As Object, e As MouseEventArgs)
             If e.Button = MouseButtons.Left Then
+                _userMoved = True
                 ReleaseCapture()
                 SendMessage(Me.Handle, WM_NCLBUTTONDOWN, New IntPtr(HTCAPTION), IntPtr.Zero)
 
@@ -561,7 +563,10 @@ Namespace Forms
             Dim itemReset = New ToolStripMenuItem("Reset Position") With {
                 .ForeColor = Color.FromArgb(220, 228, 240)
             }
-            AddHandler itemReset.Click, Sub(s, ev) PositionToCorner()
+            AddHandler itemReset.Click, Sub(s, ev)
+                                           _userMoved = False
+                                           PositionToCorner()
+                                       End Sub
 
             menu.Items.Add(itemHide)
             menu.Items.Add(New ToolStripSeparator())

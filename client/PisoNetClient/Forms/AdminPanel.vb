@@ -432,8 +432,9 @@ Namespace Forms
             Dim card = CardPanel(New Point(LM, y), New Size(IW, 160))
             Dim cy = 14
 
-            card.Controls.Add(SectionLabel("Server URL", New Point(14, cy))) : cy += 22
-            _txtUrl = DarkTextBox(New Point(14, cy), IW - 32, AppConfig.ServerUrl)
+            card.Controls.Add(SectionLabel("Server IP Address", New Point(14, cy))) : cy += 22
+            _txtUrl = DarkTextBox(New Point(14, cy), IW - 32, AppConfig.ServerIp)
+            _txtUrl.PlaceholderText = "e.g. 192.168.1.100"
             card.Controls.Add(_txtUrl) : cy += 38
 
             card.Controls.Add(SectionLabel("PC Number", New Point(14, cy))) : cy += 22
@@ -444,7 +445,7 @@ Namespace Forms
 
             Dim infoCard = CardPanel(New Point(LM, y), New Size(IW, 48))
             infoCard.Controls.Add(InfoLabel(
-                "Server URL and PC Number take effect after restarting the client.",
+                "Server IP Address and PC Number take effect after restarting the client.",
                 New Point(14, 10)))
             page.Controls.Add(infoCard)
 
@@ -1321,7 +1322,7 @@ Namespace Forms
                 AppConfig.SaveAdminPin(newPin)
             End If
 
-            AppConfig.SaveServerUrl(_txtUrl.Text.Trim())
+            AppConfig.SaveServerUrl("http://" & _txtUrl.Text.Trim() & ":8000")
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
             AppConfig.SaveLockBgArgb(_currentBgColor.ToArgb())
             AppConfig.SaveLockBgImagePath(_txtImgPath.Text.Trim())
@@ -1367,7 +1368,7 @@ Namespace Forms
             RaiseEvent SettingsSaved()
 
             MessageBox.Show("Settings saved." & vbCrLf &
-                            "Note: Server URL and PC Number require a client restart.",
+                            "Note: Server IP Address and PC Number require a client restart.",
                             "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information)
         End Sub
 

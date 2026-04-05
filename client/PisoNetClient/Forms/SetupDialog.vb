@@ -37,11 +37,12 @@ Namespace Forms
                      New Font("Segoe UI", 9), Color.FromArgb(120, 140, 180), New Point(24, y))
             y += 30
 
-            ' ── Server URL ─────────────────────────────────────────────────
-            AddLabel("Server URL", New Font("Segoe UI", 9, FontStyle.Bold),
+            ' ── Server IP ──────────────────────────────────────────────────
+            AddLabel("Server IP Address", New Font("Segoe UI", 9, FontStyle.Bold),
                      Color.FromArgb(148, 163, 184), New Point(24, y))
             y += 18
-            _txtUrl = AddTextBox(New Point(24, y), 384, AppConfig.ServerUrl)
+            _txtUrl = AddTextBox(New Point(24, y), 384, AppConfig.ServerIp)
+            _txtUrl.PlaceholderText = "e.g. 192.168.1.100"
             y += 36
 
             ' ── PC Number ──────────────────────────────────────────────────
@@ -92,12 +93,12 @@ Namespace Forms
         End Sub
 
         Private Sub OnSave(sender As Object, e As EventArgs)
-            Dim url = _txtUrl.Text.Trim()
+            Dim ip = _txtUrl.Text.Trim()
             Dim pin = _txtPin.Text.Trim()
             Dim pin2 = _txtPin2.Text.Trim()
 
-            If String.IsNullOrWhiteSpace(url) Then
-                Warn("Server URL cannot be empty.") : Return
+            If String.IsNullOrWhiteSpace(ip) Then
+                Warn("Server IP Address cannot be empty.") : Return
             End If
             If pin.Length < 4 Then
                 Warn("Admin password must be at least 4 characters.") : Return
@@ -106,7 +107,7 @@ Namespace Forms
                 Warn("Passwords do not match.") : Return
             End If
 
-            AppConfig.SaveServerUrl(url)
+            AppConfig.SaveServerUrl("http://" & ip & ":8000")
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
             AppConfig.SaveAdminPin(pin)
             AppConfig.SaveApiKey(_txtApiKey.Text.Trim())

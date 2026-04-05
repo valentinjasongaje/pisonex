@@ -15,7 +15,9 @@
   </p>
 </div>
 {% else %}
-<div class="card">
+
+<!-- ── Desktop table (hidden on mobile) ─────────────────────────── -->
+<div class="card pcs-desktop-view">
   <table class="data-table">
     <thead>
       <tr>
@@ -49,7 +51,7 @@
         <td class="col-hide-sm" style="color: var(--text-dim);">{{ pc.ip_address }}</td>
         <td class="col-hide-sm" style="color: var(--text-dim); font-size: 12px;">{{ pc.mac_address or "—" }}</td>
         <td>
-          {% if not pc.is_locked and pc.remaining_minutes > 0 %}
+          {% if not pc.is_locked and (pc.remaining_minutes > 0 or pc.remaining_seconds > 0) %}
           {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
           {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
           <span class="money" data-remaining-sec="{{ _tsec }}">{{ _h }}h {{ _m }}m {{ "%02d" | format(_s) }}s</span>
@@ -72,6 +74,7 @@
         <td>
           <button
             id="pc-coin-btn-{{ pc.pc_number }}"
+            data-coin-pc="{{ pc.pc_number }}"
             class="btn btn-sm coin-toggle-btn coin-enabled"
             onclick="togglePcCoinSlot({{ pc.pc_number }})"
             title="Toggle coin slot for this PC"
@@ -103,6 +106,73 @@
     </tbody>
   </table>
 </div>
+
+<!-- ── Mobile tile grid (hidden on desktop) ──────────────────────── -->
+<div class="pcs-mobile-view">
+  {% for pc in pcs %}
+  {% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
+  <div class="pc-mgmt-tile">
+
+    <div class="pc-mgmt-tile-header">
+      <div>
+        <div class="pc-mgmt-tile-number">PC {{ "%02d" | format(pc.pc_number) }}</div>
+        <div class="pc-mgmt-tile-name">{{ pc.name }}</div>
+      </div>
+      <span class="pc-badge badge-{{ state }}">
+        {% if not pc.is_online %}OFFLINE
+        {% elif not pc.is_locked %}ACTIVE
+        {% else %}LOCKED{% endif %}
+      </span>
+    </div>
+
+    <div class="pc-mgmt-tile-body">
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">Remaining</span>
+        {% if not pc.is_locked and (pc.remaining_minutes > 0 or pc.remaining_seconds > 0) %}
+        {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
+        {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
+        <span class="money" data-remaining-sec="{{ _tsec }}">{{ _h }}h {{ _m }}m {{ "%02d" | format(_s) }}s</span>
+        {% else %}
+        <span style="color:var(--gray)">—</span>
+        {% endif %}
+      </div>
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">IP Address</span>
+        <span style="color:var(--text-dim);font-size:13px">{{ pc.ip_address or "—" }}</span>
+      </div>
+      {% if membership_enabled %}
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">Member</span>
+        {% if pc.member_username %}
+        <span style="color:var(--green,#22c55e);font-size:13px">👤 {{ pc.member_username }}</span>
+        {% else %}
+        <span style="color:var(--text-dim)">—</span>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">Last Seen</span>
+        <span style="color:var(--text-dim);font-size:12px">{{ pc.last_seen.strftime('%b %d %H:%M') if pc.last_seen else "Never" }}</span>
+      </div>
+    </div>
+
+    <div class="pc-mgmt-tile-actions">
+      <button
+        data-coin-pc="{{ pc.pc_number }}"
+        class="btn btn-sm coin-toggle-btn coin-enabled"
+        onclick="togglePcCoinSlot({{ pc.pc_number }})"
+      >ON</button>
+      <button class="btn btn-sm btn-primary" onclick="openAddTime({{ pc.pc_number }})">+ Time</button>
+      <button class="btn btn-sm btn-default" onclick="openRename({{ pc.pc_number }}, '{{ pc.name | replace("'", "\\'") }}')">Rename</button>
+      {% if not pc.is_locked %}
+      <button class="btn btn-sm btn-danger" onclick="lockPc({{ pc.pc_number }})">Lock</button>
+      {% endif %}
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+
 {% endif %}
 
 <!-- Add Time Modal (shared with overview) -->
@@ -193,5 +263,77 @@
     </form>
   </div>
 </div>
+
+<style>
+/* ── PC Management responsive layout ─────────────────────── */
+.pcs-mobile-view { display: none; }
+
+@media (max-width: 768px) {
+  .pcs-desktop-view { display: none; }
+  .pcs-mobile-view {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pc-mgmt-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .pc-mgmt-tile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+  }
+  .pc-mgmt-tile-number {
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--text);
+  }
+  .pc-mgmt-tile-name {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-top: 2px;
+  }
+
+  .pc-mgmt-tile-body {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .pc-mgmt-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 20px;
+  }
+  .pc-mgmt-label {
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .pc-mgmt-tile-actions {
+    padding: 10px 14px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .pc-mgmt-tile-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+</style>
 
 {% endblock %}

@@ -64,6 +64,11 @@ Namespace Forms
         ' not on every 1-second heartbeat tick.
         ' Values: "" (uninitialised) | "off" | "member" | "login" | "register"
         Private _lastMemberFormMode As String = ""
+        ' Debounce counter: how many consecutive heartbeats have returned membership_enabled=False.
+        ' The panel is only hidden when this reaches MEMBERSHIP_HIDE_THRESHOLD, preventing
+        ' a single transient False from the server causing a visible blink.
+        Private _membershipFalseCount As Integer = 0
+        Private Const MEMBERSHIP_HIDE_THRESHOLD As Integer = 3
         Private _lblModeToggle        As Label       ' "Register" / "Back to Login" link
         Private _lblUsernameHint      As Label
         Private _txtMemberUser        As TextBox
@@ -569,7 +574,7 @@ Namespace Forms
 
             ' ── Idle auto-shutdown countdown card (minimal, bottom-left) ─────────
             _pnlIdleShutdown = New Panel() With {
-                .Size = New Size(190, 44),
+                .Size = New Size(200, 60),
                 .BackColor = Color.Transparent,
                 .Visible = False
             }
@@ -583,7 +588,7 @@ Namespace Forms
                 .AutoSize = False,
                 .TextAlign = ContentAlignment.MiddleLeft,
                 .Location = New Point(10, 4),
-                .Size = New Size(170, 14)
+                .Size = New Size(180, 18)
             }
 
             _lblIdleCount = New Label() With {
@@ -593,8 +598,8 @@ Namespace Forms
                 .BackColor = Color.Transparent,
                 .AutoSize = False,
                 .TextAlign = ContentAlignment.MiddleLeft,
-                .Location = New Point(8, 18),
-                .Size = New Size(170, 22)
+                .Location = New Point(8, 22),
+                .Size = New Size(180, 32)
             }
 
             _pnlIdleShutdown.Controls.AddRange({_lblIdleTitle, _lblIdleCount})
@@ -1417,17 +1422,19 @@ Namespace Forms
             _canLogout            = canLogout
             _minimumLogoutMinutes = minimumLogoutMinutes
 
-            ' ── Server license expired — hide member panel entirely ───────────
-            If Not serverLicensed Then
-                If _pnlMember.Visible Then
-                    _pnlMember.Visible  = False
-                    _lastMemberFormMode = "off"
-                End If
-                Return
-            End If
-
-            ' ── Membership disabled ───────────────────────────────────────────
+            ' ── Membership enabled/disabled with debounce ─────────────────────
+            ' A single False from the server (network hiccup, slow DB query, concurrent
+            ' heartbeat overlap) must not cause a visible blink.  We only hide the panel
+            ' after MEMBERSHIP_HIDE_THRESHOLD consecutive False readings (~3 seconds).
+            ' When True arrives, the counter resets immediately and the panel shows.
+            ' Note: serverLicensed is intentionally NOT used to gate panel visibility —
+            ' the ShowServerLicenseWarning banner handles that separately.
             If Not enabled Then
+                _membershipFalseCount += 1
+                If _membershipFalseCount < MEMBERSHIP_HIDE_THRESHOLD Then
+                    Return   ' transient — keep panel in its current state
+                End If
+                ' Sustained False — hide the panel
                 If _pnlMember.Visible Then
                     _pnlMember.Visible  = False
                     _lastMemberFormMode = "off"
@@ -1435,6 +1442,8 @@ Namespace Forms
                 Return
             End If
 
+            ' enabled = True: reset debounce and ensure panel is visible
+            _membershipFalseCount = 0
             If Not _pnlMember.Visible Then _pnlMember.Visible = True
 
             Const PW As Integer = 360

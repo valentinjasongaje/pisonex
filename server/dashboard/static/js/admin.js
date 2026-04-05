@@ -247,10 +247,11 @@ function _applyGlobalCoinBtn(on) {
 }
 
 function _applyPcCoinBtn(pcNumber, on) {
-  const btn = document.getElementById(`pc-coin-btn-${pcNumber}`);
-  if (!btn) return;
-  btn.textContent = on ? 'ON' : 'OFF';
-  btn.className = `btn btn-sm coin-toggle-btn ${on ? 'coin-enabled' : 'coin-disabled'}`;
+  // Update every coin button for this PC (desktop table + mobile tile both use data-coin-pc)
+  document.querySelectorAll(`[data-coin-pc="${pcNumber}"]`).forEach(btn => {
+    btn.textContent = on ? 'ON' : 'OFF';
+    btn.className = `btn btn-sm coin-toggle-btn ${on ? 'coin-enabled' : 'coin-disabled'}`;
+  });
 }
 
 async function toggleGlobalCoinSlot() {

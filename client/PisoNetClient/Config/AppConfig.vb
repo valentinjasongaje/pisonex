@@ -13,6 +13,25 @@ Namespace Config
             End Get
         End Property
 
+        ''' <summary>
+        ''' Returns just the IP address portion of ServerUrl for display in settings UI.
+        ''' Strips "http://" prefix and ":port" suffix.
+        ''' </summary>
+        Public ReadOnly Property ServerIp As String
+            Get
+                Dim url = ServerUrl
+                ' Strip scheme
+                If url.StartsWith("http://") Then url = url.Substring(7)
+                If url.StartsWith("https://") Then url = url.Substring(8)
+                ' Strip port (e.g. ":8000") and any trailing path
+                Dim colonIdx = url.IndexOf(":")
+                If colonIdx >= 0 Then url = url.Substring(0, colonIdx)
+                Dim slashIdx = url.IndexOf("/")
+                If slashIdx >= 0 Then url = url.Substring(0, slashIdx)
+                Return url
+            End Get
+        End Property
+
         Public ReadOnly Property PCNumber As Integer
             Get
                 Dim val = ReadReg("PCNumber")
