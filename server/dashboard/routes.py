@@ -1224,7 +1224,47 @@ def settings_page(
         "config": cfg,
         "api_key_enabled": bool(api_key),
         "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
+        "branch_name": settings.BRANCH_NAME,
     })
+
+
+class BranchNameBody(BaseModel):
+    branch_name: str
+
+
+@router.post("/api/settings/branch-name")
+def save_branch_name(
+    body: BranchNameBody,
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Save BRANCH_NAME to .env so it persists across server restarts."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    name = body.branch_name.strip()
+
+    # Write to .env (same pattern as _enforce_secure_defaults in main.py)
+    env_path = Path(__file__).parent.parent / ".env"
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    found = False
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("BRANCH_NAME="):
+            lines[i] = f"BRANCH_NAME={name}\n"
+            found = True
+            break
+    if not found:
+        lines.append(f"BRANCH_NAME={name}\n")
+
+    env_path.write_text("".join(lines), encoding="utf-8")
+
+    # Apply immediately without restart
+    settings.BRANCH_NAME = name
+    return {"status": "ok", "branch_name": name}
 
 
 @router.post("/api/security/generate-key")

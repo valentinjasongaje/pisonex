@@ -168,6 +168,10 @@ def heartbeat(
     # Minimum logout minutes (from membership config, 0 if not configured)
     minimum_logout_minutes = cfg.minimum_logout_minutes if cfg else 0
 
+    # Today's earnings for this PC — piggybacked onto heartbeat so the
+    # client can forward them to pisonex.com on its hourly status ping.
+    today_earnings = svc.get_today_earnings(pc_number)
+
     return PCHeartbeatResponse(
         is_locked=is_locked,
         remaining_seconds=remaining_sec,
@@ -190,6 +194,10 @@ def heartbeat(
         idle_shutdown_seconds=idle_shutdown_seconds,
         receiving_coins=receiving_coins,
         minimum_logout_minutes=minimum_logout_minutes,
+        branch_name=settings.BRANCH_NAME,
+        today_pesos=today_earnings["total_pesos"],
+        today_sessions=today_earnings["total_sessions"],
+        today_minutes=today_earnings["total_minutes"],
     )
 
 

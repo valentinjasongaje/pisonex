@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"
 
+    # Branch name for this installation — shown in pisonex.com customer portal.
+    # Set this so the portal can group PCs by branch (e.g. "Tomas Morato Branch").
+    # Leave empty to show PCs under "Unassigned" in the portal.
+    BRANCH_NAME: str = ""
+
     # PC client API key — shared secret sent in X-API-Key header by all clients.
     # Leave empty ("") to disable auth (default, backward-compatible).
     # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here

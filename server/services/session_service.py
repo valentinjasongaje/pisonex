@@ -1,7 +1,8 @@
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session as DBSession
+from sqlalchemy import func
 from models import PC, Session, CoinTransaction, SystemLog
 from services.rate_service import pesos_to_seconds
 import command_store
@@ -194,6 +195,94 @@ class SessionService:
         self._log("INFO", "session", f"Session ended for PC {pc_number:02d}")
         self._db.commit()
         return True
+
+    def get_today_earnings(self, pc_number: int | None = None) -> dict:
+        """
+        Returns today's session earnings (since midnight UTC) for a specific PC
+        or for all PCs if pc_number is None.
+
+        The earnings are derived from CoinTransaction records — amount_php is the
+        peso amount collected, seconds_added / 60 gives approximate minutes.
+
+        Returns {"total_pesos": int, "total_sessions": int, "total_minutes": int}.
+        """
+        today_midnight = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
+        query = self._db.query(CoinTransaction).filter(
+            CoinTransaction.created_at >= today_midnight
+        )
+
+        pc_obj = None
+        if pc_number is not None:
+            pc_obj = self.get_pc(pc_number)
+            if not pc_obj:
+                return {"total_pesos": 0, "total_sessions": 0, "total_minutes": 0}
+            query = query.filter(CoinTransaction.pc_id == pc_obj.id)
+
+        rows = query.all()
+        total_pesos = sum(r.amount_php for r in rows)
+        total_minutes = sum(r.seconds_added for r in rows) // 60
+
+        # Count distinct sessions started today for this PC (or all PCs)
+        session_query = self._db.query(func.count(Session.id)).filter(
+            Session.started_at >= today_midnight
+        )
+        if pc_number is not None:
+            if pc_obj:
+                session_query = session_query.filter(Session.pc_id == pc_obj.id)
+            else:
+                session_query = session_query.filter(False)
+
+        total_sessions = session_query.scalar() or 0
+
+        return {
+            "total_pesos": int(total_pesos),
+            "total_sessions": int(total_sessions),
+            "total_minutes": int(total_minutes),
+        }
+
+    def get_all_pcs_today_earnings(self) -> list[dict]:
+        """
+        Returns yesterday's (UTC) earnings for every PC — used by the nightly
+        archive task to sync to pisonex.com.
+
+        Returns a list of dicts:
+          {"pc_number": int, "total_pesos": int, "total_sessions": int, "total_minutes": int}
+        """
+        from datetime import timedelta
+        today_midnight = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        yesterday_start = today_midnight - timedelta(days=1)
+        yesterday_end = today_midnight
+
+        pcs = self.get_all_pcs()
+        result = []
+        for pc in pcs:
+            tx_rows = self._db.query(CoinTransaction).filter(
+                CoinTransaction.pc_id == pc.id,
+                CoinTransaction.created_at >= yesterday_start,
+                CoinTransaction.created_at < yesterday_end,
+            ).all()
+
+            total_pesos = sum(r.amount_php for r in tx_rows)
+            total_minutes = sum(r.seconds_added for r in tx_rows) // 60
+
+            total_sessions = self._db.query(func.count(Session.id)).filter(
+                Session.pc_id == pc.id,
+                Session.started_at >= yesterday_start,
+                Session.started_at < yesterday_end,
+            ).scalar() or 0
+
+            result.append({
+                "pc_number": pc.pc_number,
+                "total_pesos": int(total_pesos),
+                "total_sessions": int(total_sessions),
+                "total_minutes": int(total_minutes),
+            })
+        return result
 
     def expire_sessions(self):
         """Called periodically to expire sessions whose time has run out."""

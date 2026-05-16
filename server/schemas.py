@@ -35,6 +35,11 @@ class PCHeartbeatResponse(BaseModel):
     idle_shutdown_seconds: int = 0
     receiving_coins: bool = False
     minimum_logout_minutes: int = 0
+    # Branch / earnings fields — piggybacked onto the hourly pisonex.com status ping
+    branch_name: str = ""
+    today_pesos: int = 0
+    today_sessions: int = 0
+    today_minutes: int = 0
 
 class PCStatusResponse(BaseModel):
     pc_number: int

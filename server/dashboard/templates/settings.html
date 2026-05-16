@@ -5,6 +5,29 @@
   <h1>Settings</h1>
 </div>
 
+<!-- Branch Name -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Branch</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Identifies this café installation in the pisonex.com customer portal.
+    PCs with the same branch name are grouped together.
+    Leave blank to appear under "Unassigned".
+  </p>
+
+  <div class="form-group">
+    <label for="cfg-branch-name" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Branch Name</label>
+    <input type="text" id="cfg-branch-name" maxlength="120"
+      placeholder="e.g. Tomas Morato Branch"
+      value="{{ branch_name }}"
+      style="margin-top:.4rem;width:100%;" />
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="saveBranchName()">Save</button>
+    <span id="branch-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
 <!-- General -->
 <div class="card" style="max-width:480px;margin-bottom:1.25rem;">
   <h2>General</h2>
@@ -137,6 +160,24 @@
 </style>
 
 <script>
+async function saveBranchName() {
+  const val = document.getElementById('cfg-branch-name').value.trim();
+  const el = document.getElementById('branch-status');
+  const res = await fetch('/dashboard/api/settings/branch-name', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branch_name: val }),
+  });
+  if (res.ok) {
+    el.textContent = 'Saved.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 3000);
+}
+
 async function _saveConfig(body, statusId) {
   const el = document.getElementById(statusId);
   const res = await fetch('/dashboard/api/membership/config', {

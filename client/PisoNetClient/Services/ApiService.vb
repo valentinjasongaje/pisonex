@@ -32,6 +32,11 @@ Namespace Services
         Public Property idle_shutdown_seconds As Integer = 0
         Public Property receiving_coins As Boolean = False
         Public Property minimum_logout_minutes As Integer = 0
+        ' Branch / earnings fields — piggybacked to forward on the hourly pisonex.com ping
+        Public Property branch_name As String = ""
+        Public Property today_pesos As Integer = 0
+        Public Property today_sessions As Integer = 0
+        Public Property today_minutes As Integer = 0
     End Class
 
     Public Class ApiService

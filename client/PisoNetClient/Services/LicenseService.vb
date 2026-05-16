@@ -36,6 +36,26 @@ Namespace Services
             End Get
         End Property
 
+        ' ── Branch / earnings cache (updated by SessionManager on every heartbeat) ──
+        ' These are forwarded to pisonex.com on the hourly /api/status ping so the
+        ' customer portal can display today's running totals grouped by branch.
+        Private _branchName As String = ""
+        Private _todayPesos As Integer = 0
+        Private _todaySessions As Integer = 0
+        Private _todayMinutes As Integer = 0
+
+        ''' <summary>
+        ''' Called by SessionManager after every successful heartbeat so the latest
+        ''' branch name and today's earnings are available for the next pisonex.com ping.
+        ''' </summary>
+        Public Sub UpdateBranchEarnings(branchName As String, todayPesos As Integer,
+                                         todaySessions As Integer, todayMinutes As Integer)
+            _branchName = If(branchName, "")
+            _todayPesos = todayPesos
+            _todaySessions = todaySessions
+            _todayMinutes = todayMinutes
+        End Sub
+
         Private ReadOnly _httpClient As New HttpClient() With {
             .Timeout = TimeSpan.FromSeconds(15)
         }
@@ -105,17 +125,26 @@ Namespace Services
 
         ''' <summary>
         ''' Returns a dictionary of telemetry fields that pisonex.com records on
-        ''' every license API call — version, status, trial days, PC info.
+        ''' every license API call — version, status, trial days, PC info,
+        ''' and today's branch earnings (for the customer portal).
         ''' These fields are ignored by older API versions so they are always safe to send.
         ''' </summary>
         Private Function BuildTelemetry() As Dictionary(Of String, String)
-            Return New Dictionary(Of String, String) From {
+            Dim d = New Dictionary(Of String, String) From {
                 {"app_version", GetAppVersion()},
                 {"license_status", GetStatus().ToString().ToLower()},
                 {"trial_days_remaining", TrialDaysRemaining().ToString()},
                 {"pc_number", AppConfig.PCNumber.ToString()},
                 {"machine_name", Environment.MachineName}
             }
+            ' Branch + today's earnings — forwarded from the last local-server heartbeat
+            If Not String.IsNullOrEmpty(_branchName) Then
+                d("branch_name") = _branchName
+            End If
+            d("today_pesos") = _todayPesos.ToString()
+            d("today_sessions") = _todaySessions.ToString()
+            d("today_minutes") = _todayMinutes.ToString()
+            Return d
         End Function
 
         Private Function GetAppVersion() As String

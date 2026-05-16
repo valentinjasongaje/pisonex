@@ -191,12 +191,16 @@ async def lifespan(app: FastAPI):
     # Background task: membership auto-expiry (heartbeat timeout, zero-time, idle shutdown)
     membership_task = asyncio.create_task(_membership_expiry_loop())
 
+    # Background task: nightly earnings archive to pisonex.com
+    earnings_task = asyncio.create_task(_nightly_earnings_sync_loop())
+
     yield
 
     # Shutdown
     expire_task.cancel()
     license_task.cancel()
     membership_task.cancel()
+    earnings_task.cancel()
     if hw_controller:
         hw_controller.cleanup()
     logger.info("Pisonex server shut down")
@@ -416,6 +420,94 @@ async def _membership_expiry_loop():
                 db.close()
         except Exception as e:
             logger.error("Membership expiry error: %s", e)
+
+
+async def _nightly_earnings_sync_loop():
+    """
+    Once per day, near midnight UTC, POST yesterday's per-PC earnings to
+    pisonex.com /api/sync/earnings.  Authenticated with the server's pisonex.com
+    license key (from data/license.json via LicenseService._data).
+    Skipped if BRANCH_NAME is empty or no license key is found.
+    """
+    import httpx
+    from datetime import datetime as _dt, timedelta
+
+    def _seconds_until_next_midnight() -> float:
+        """Returns seconds remaining until the next UTC midnight."""
+        now = _dt.utcnow()
+        tomorrow = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        return (tomorrow - now).total_seconds()
+
+    # Sleep until next midnight before entering the daily loop
+    initial_sleep = _seconds_until_next_midnight()
+    logger.info("Nightly earnings sync: first run in %.0f seconds (at next UTC midnight)", initial_sleep)
+    await asyncio.sleep(initial_sleep)
+
+    while True:
+        try:
+            branch_name = settings.BRANCH_NAME
+            if not branch_name:
+                logger.debug("Nightly earnings sync skipped — BRANCH_NAME not set")
+            else:
+                db = SessionLocal()
+                try:
+                    # The license key for pisonex.com is held by the server-side LicenseService
+                    # (stored in data/license.json, _data["license_key"]).
+                    license_key = ""
+                    if license_service and hasattr(license_service, "_data"):
+                        license_key = license_service._data.get("license_key", "") or ""
+
+                    if not license_key:
+                        logger.debug("Nightly earnings sync skipped — no pisonex.com license key available")
+                    else:
+                        svc = SessionService(db)
+                        pc_earnings = svc.get_all_pcs_today_earnings()
+
+                        yesterday = (_dt.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+                        payload = {
+                            "license_key": license_key,
+                            "branch_name": branch_name,
+                            "date": yesterday,
+                            "pcs": [
+                                {
+                                    "pc_number": e["pc_number"],
+                                    "total_pesos": e["total_pesos"],
+                                    "total_sessions": e["total_sessions"],
+                                    "total_minutes": e["total_minutes"],
+                                }
+                                for e in pc_earnings
+                            ],
+                        }
+
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.post(
+                                "https://www.pisonex.com/api/sync/earnings",
+                                json=payload,
+                            )
+                            if resp.status_code in (200, 201):
+                                logger.info(
+                                    "Nightly earnings synced to pisonex.com: %s, %d PCs",
+                                    yesterday,
+                                    len(pc_earnings),
+                                )
+                            else:
+                                logger.warning(
+                                    "Nightly earnings sync returned HTTP %d: %s",
+                                    resp.status_code,
+                                    resp.text[:200],
+                                )
+                finally:
+                    db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Nightly earnings sync error: %s", e)
+
+        # Sleep 24 hours until the next midnight cycle
+        await asyncio.sleep(24 * 60 * 60)
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────

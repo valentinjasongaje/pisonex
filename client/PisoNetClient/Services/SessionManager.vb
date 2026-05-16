@@ -264,6 +264,14 @@ Namespace Services
                 response.idle_shutdown_seconds,
                 response.minimum_logout_minutes,
                 response.server_licensed)
+
+            ' Update branch + today's earnings cache in LicenseService so the next
+            ' hourly pisonex.com ping includes them (forwards to customer portal).
+            LicenseService.UpdateBranchEarnings(
+                response.branch_name,
+                response.today_pesos,
+                response.today_sessions,
+                response.today_minutes)
         End Function
 
         ' ── Public state ─────────────────────────────────────────────
