@@ -1,5 +1,9 @@
 Imports System.Windows.Forms
 Imports System.Drawing
+Imports System.Net.Http
+Imports System.Net.NetworkInformation
+Imports System.Net.Sockets
+Imports System.Threading
 Imports PisoNetClient.Config
 
 Namespace Forms
@@ -16,13 +20,15 @@ Namespace Forms
         Private _txtPin   As TextBox
         Private _txtPin2  As TextBox
         Private _txtApiKey As TextBox
+        Private _btnScan  As Button
+        Private _btnTest  As Button
 
         Public Sub New()
             InitializeComponent()
         End Sub
 
         Private Sub InitializeComponent()
-            Me.Size            = New Size(440, 420)
+            Me.Size            = New Size(440, 480)
             Me.BackColor       = FormStyles.DarkBg
             Me.ForeColor       = Color.White
 
@@ -41,9 +47,40 @@ Namespace Forms
             AddLabel("Server IP Address", New Font("Segoe UI", 9, FontStyle.Bold),
                      Color.FromArgb(148, 163, 184), New Point(24, y))
             y += 18
-            _txtUrl = AddTextBox(New Point(24, y), 384, AppConfig.ServerIp)
+            _txtUrl = AddTextBox(New Point(24, y), 280, AppConfig.ServerIp)
             _txtUrl.PlaceholderText = "e.g. 192.168.1.100"
-            y += 36
+
+            ' Test button beside the IP textbox
+            _btnTest = New Button() With {
+                .Text = "Test",
+                .Location = New Point(312, y),
+                .Size = New Size(96, 26),
+                .FlatStyle = FlatStyle.Flat,
+                .BackColor = Color.FromArgb(30, 36, 56),
+                .ForeColor = Color.FromArgb(148, 163, 184),
+                .Font = New Font("Segoe UI", 8),
+                .Cursor = Cursors.Hand
+            }
+            _btnTest.FlatAppearance.BorderColor = FormStyles.BorderClr
+            AddHandler _btnTest.Click, AddressOf OnTestConnection
+            Me.Controls.Add(_btnTest)
+            y += 28
+
+            ' Scan for Server button
+            _btnScan = New Button() With {
+                .Text = "Scan for Server",
+                .Location = New Point(24, y),
+                .Size = New Size(384, 32),
+                .FlatStyle = FlatStyle.Flat,
+                .BackColor = Color.FromArgb(30, 36, 56),
+                .ForeColor = FormStyles.AccentBlue,
+                .Font = New Font("Segoe UI", 9),
+                .Cursor = Cursors.Hand
+            }
+            _btnScan.FlatAppearance.BorderColor = FormStyles.BorderClr
+            AddHandler _btnScan.Click, AddressOf OnScanForServer
+            Me.Controls.Add(_btnScan)
+            y += 40
 
             ' ── PC Number ──────────────────────────────────────────────────
             AddLabel("PC Number  (unique per machine)", New Font("Segoe UI", 9, FontStyle.Bold),
@@ -65,8 +102,9 @@ Namespace Forms
                      New Font("Segoe UI", 9, FontStyle.Bold),
                      Color.FromArgb(148, 163, 184), New Point(24, y))
             y += 18
-            _txtPin  = AddTextBox(New Point(24, y), 120, AppConfig.AdminPin, pwChar:="●"c)
-            _txtPin2 = AddTextBox(New Point(160, y), 120, AppConfig.AdminPin, pwChar:="●"c)
+            Dim legacyPin = Config.LicenseStore.GetLegacyPinForSetup()
+            _txtPin  = AddTextBox(New Point(24, y), 120, legacyPin, pwChar:="●"c)
+            _txtPin2 = AddTextBox(New Point(160, y), 120, legacyPin, pwChar:="●"c)
             AddLabel("↑ Password", New Font("Segoe UI", 8), Color.FromArgb(100, 116, 139), New Point(24, y + 28))
             AddLabel("↑ Confirm", New Font("Segoe UI", 8), Color.FromArgb(100, 116, 139), New Point(160, y + 28))
             y += 56
@@ -107,15 +145,146 @@ Namespace Forms
                 Warn("Passwords do not match.") : Return
             End If
 
-            AppConfig.SaveServerUrl("http://" & ip & ":8000")
+            AppConfig.SaveServerUrl("http://" & ip)
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
-            AppConfig.SaveAdminPin(pin)
+            Config.LicenseStore.SaveAdminPinHash(pin)
             AppConfig.SaveApiKey(_txtApiKey.Text.Trim())
             AppConfig.SaveIsConfigured(True)
 
             Me.DialogResult = DialogResult.OK
             Me.Close()
         End Sub
+
+        ' ── Scan / Test ───────────────────────────────────────────────────
+
+        Private Async Sub OnTestConnection(sender As Object, e As EventArgs)
+            Dim ip = _txtUrl.Text.Trim()
+            If String.IsNullOrWhiteSpace(ip) Then
+                Warn("Enter an IP address first.") : Return
+            End If
+
+            _btnTest.Enabled = False
+            _btnTest.Text = "..."
+            Try
+                Using client As New HttpClient() With {.Timeout = TimeSpan.FromSeconds(3)}
+                    Dim response = Await client.GetAsync($"http://{ip}/health")
+                    If response.IsSuccessStatusCode Then
+                        _btnTest.Text = "OK ✓"
+                        _btnTest.ForeColor = Color.FromArgb(34, 197, 94)
+                    Else
+                        _btnTest.Text = "Fail ✗"
+                        _btnTest.ForeColor = Color.FromArgb(239, 68, 68)
+                    End If
+                End Using
+            Catch
+                _btnTest.Text = "Fail ✗"
+                _btnTest.ForeColor = Color.FromArgb(239, 68, 68)
+            End Try
+
+            _btnTest.Enabled = True
+            ' Reset label after 3 seconds
+            Dim resetTimer = New System.Windows.Forms.Timer() With {.Interval = 3000}
+            AddHandler resetTimer.Tick, Sub(s2, e2)
+                resetTimer.Stop()
+                resetTimer.Dispose()
+                _btnTest.Text = "Test"
+                _btnTest.ForeColor = Color.FromArgb(148, 163, 184)
+            End Sub
+            resetTimer.Start()
+        End Sub
+
+        Private Async Sub OnScanForServer(sender As Object, e As EventArgs)
+            _btnScan.Enabled = False
+            Dim originalText = _btnScan.Text
+            _btnScan.Text = "Scanning..."
+
+            Try
+                Dim subnet = GetLocalSubnet()
+                If subnet Is Nothing Then
+                    Warn("Could not determine local network subnet.")
+                    Return
+                End If
+
+                Dim foundIp = Await ScanSubnetAsync(subnet)
+                If foundIp IsNot Nothing Then
+                    _txtUrl.Text = foundIp
+                    _btnScan.Text = $"Found: {foundIp}"
+                    _btnScan.ForeColor = Color.FromArgb(34, 197, 94)
+                Else
+                    Warn("No Pisonex server found on the local network." & vbCrLf & vbCrLf &
+                         "Make sure the server is running and port 80 is allowed through Windows Firewall.")
+                End If
+            Catch
+                Warn("Scan failed. Check your network connection.")
+            Finally
+                _btnScan.Enabled = True
+                ' Reset after 4 seconds if it showed a found IP
+                Dim resetTimer = New System.Windows.Forms.Timer() With {.Interval = 4000}
+                AddHandler resetTimer.Tick, Sub(s2, e2)
+                    resetTimer.Stop()
+                    resetTimer.Dispose()
+                    _btnScan.Text = originalText
+                    _btnScan.ForeColor = FormStyles.AccentBlue
+                End Sub
+                resetTimer.Start()
+            End Try
+        End Sub
+
+        Private Shared Function GetLocalSubnet() As String
+            For Each nic In NetworkInterface.GetAllNetworkInterfaces()
+                If nic.OperationalStatus <> OperationalStatus.Up Then Continue For
+                If nic.NetworkInterfaceType = NetworkInterfaceType.Loopback Then Continue For
+                For Each addr In nic.GetIPProperties().UnicastAddresses
+                    If addr.Address.AddressFamily = AddressFamily.InterNetwork Then
+                        Dim ip = addr.Address.ToString()
+                        ' Return the first 3 octets, e.g. "192.168.1"
+                        Dim parts = ip.Split("."c)
+                        If parts.Length = 4 Then Return $"{parts(0)}.{parts(1)}.{parts(2)}"
+                    End If
+                Next
+            Next
+            Return Nothing
+        End Function
+
+        Private Shared Async Function ScanSubnetAsync(subnet As String) As Task(Of String)
+            Dim cts As New CancellationTokenSource()
+            Dim semaphore As New SemaphoreSlim(50)
+            Dim foundIp As String = Nothing
+
+            Dim tasks As New List(Of Task)()
+            For i = 1 To 254
+                Dim ip = $"{subnet}.{i}"
+                tasks.Add(Task.Run(Async Function()
+                    If cts.IsCancellationRequested Then Return
+                    Await semaphore.WaitAsync(cts.Token)
+                    Try
+                        If cts.IsCancellationRequested Then Return
+                        Using client As New HttpClient() With {.Timeout = TimeSpan.FromMilliseconds(800)}
+                            Dim response = Await client.GetAsync($"http://{ip}/health", cts.Token)
+                            If response.IsSuccessStatusCode Then
+                                Dim body = Await response.Content.ReadAsStringAsync()
+                                If body.Contains("""status""") Then
+                                    Interlocked.CompareExchange(foundIp, ip, Nothing)
+                                    cts.Cancel()
+                                End If
+                            End If
+                        End Using
+                    Catch
+                        ' Timeout or cancelled — expected for most IPs
+                    Finally
+                        semaphore.Release()
+                    End Try
+                End Function))
+            Next
+
+            Try
+                Await Task.WhenAll(tasks)
+            Catch ex As OperationCanceledException
+                ' Expected when a server is found
+            End Try
+
+            Return foundIp
+        End Function
 
         ' ── UI helpers ────────────────────────────────────────────────────
 

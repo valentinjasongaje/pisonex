@@ -50,9 +50,16 @@ os.environ['PISONEX_BUNDLE_DIR'] = str(_BUNDLE_DIR)
 
 
 def _ensure_env():
-    """Create .env with secure defaults on first install if it doesn't exist."""
+    """Create .env with secure defaults on first install if it doesn't exist.
+    Also migrates SERVER_PORT from the old default (8000) to the current default (80)
+    on existing installations that were set up before the port change.
+    """
     env_path = _BASE_DIR / ".env"
     if env_path.exists():
+        text = env_path.read_text(encoding="utf-8")
+        if "SERVER_PORT=8000" in text:
+            text = text.replace("SERVER_PORT=8000", "SERVER_PORT=80")
+            env_path.write_text(text, encoding="utf-8")
         return
 
     import secrets
@@ -65,7 +72,7 @@ def _ensure_env():
         f"SECRET_KEY={secret_key}\n"
         f"TOKEN_EXPIRE_HOURS=8\n"
         f"SERVER_HOST=0.0.0.0\n"
-        f"SERVER_PORT=8000\n\n"
+        f"SERVER_PORT=80\n\n"
         f"DEFAULT_RATE_PESOS=5\n"
         f"DEFAULT_RATE_SECONDS=1800\n\n"
         f"PC_HEARTBEAT_TIMEOUT=30\n\n"

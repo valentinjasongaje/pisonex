@@ -89,7 +89,7 @@
   <h1>📋 API Reference</h1>
   <div class="header-stats">
     <span class="stat-pill">28 Endpoints</span>
-    <span class="stat-pill online">Base URL: <code style="margin-left:.3rem;font-family:monospace;color:var(--accent)">:8000</code></span>
+    <span class="stat-pill online">Base URL: <code style="margin-left:.3rem;font-family:monospace;color:var(--accent)">:80</code></span>
   </div>
 </div>
 
@@ -97,7 +97,7 @@
   <input id="epSearch" type="text" class="search-input" placeholder="🔍  Search by path or description…" oninput="filterEndpoints(this.value)">
   <div class="base-url-wrap">
     <label>Base URL:</label>
-    <input id="baseUrl" type="text" class="base-url-input" value="http://192.168.1.100:8000" oninput="updateBaseUrl(this.value)">
+    <input id="baseUrl" type="text" class="base-url-input" value="http://192.168.1.100" oninput="updateBaseUrl(this.value)">
   </div>
 </div>
 
@@ -139,7 +139,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/health</pre>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/health</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
           <div class="cb"><pre class="json-block">{"status": "ok", "version": "1.0.0"}</pre></div>
@@ -172,7 +172,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/auth/token \
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/auth/token \
   -d "username=admin&password=admin123"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -209,7 +209,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/register?pc_number=1&mac_address=AA:BB:CC:DD:EE:FF"</pre>
+            <pre class="base-url-aware">curl -X POST "<span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/register?pc_number=1&mac_address=AA:BB:CC:DD:EE:FF"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — new PC</div>
           <div class="cb"><pre class="json-block">{"pc_id": 1, "pc_number": 1, "name": "PC-01", "registered": true}</pre></div>
@@ -236,7 +236,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/heartbeat/1</pre>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/heartbeat/1</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — Active session</div>
           <div class="cb"><pre class="json-block">{"is_locked": false, "remaining_minutes": 28, "remaining_seconds": 45, "session_token": "tok_abc123", "time_added_minutes": 0}</pre></div>
@@ -262,7 +262,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/status</pre>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/status</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
           <div class="cb"><pre class="json-block">[
@@ -296,7 +296,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/1/screenshot \
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/1/screenshot \
   -H "Content-Type: image/jpeg" --data-binary @screenshot.jpg</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -322,7 +322,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/pc/1/lock</pre>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/1/lock</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
           <div class="cb"><pre class="json-block">{"status": "locked", "pc_number": 1}</pre></div>
@@ -356,7 +356,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/session/add-time \
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/add-time \
   -H "Content-Type: application/json" \
   -d '{"pc_number": 1, "pesos": 5}'</pre>
           </div>
@@ -386,7 +386,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/session/1</pre>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/1</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — Active session</div>
           <div class="cb"><pre class="json-block">{"has_session": true, "remaining_minutes": 28, "remaining_seconds": 45, "minutes_granted": 60, "started_at": "2026-03-14T10:00:00", "session_token": "tok_abc123"}</pre></div>
@@ -412,7 +412,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/session/1/end</pre>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/1/end</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
           <div class="cb"><pre class="json-block">{"status": "session ended", "pc_number": 1}</pre></div>
@@ -445,7 +445,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/earnings?days=7" \
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/earnings?days=7" \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -470,7 +470,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/earnings/daily?days=7" \
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/earnings/daily?days=7" \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -500,7 +500,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/transactions?limit=10&offset=0" \
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/transactions?limit=10&offset=0" \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -523,7 +523,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/rates \
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/rates \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -554,7 +554,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/rates \
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/rates \
   -H "Authorization: Bearer &lt;token&gt;" \
   -H "Content-Type: application/json" \
   -d '{"pesos": 5, "minutes": 30}'</pre>
@@ -582,7 +582,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X DELETE <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/rates/1 \
+            <pre class="base-url-aware">curl -X DELETE <span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/rates/1 \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -609,7 +609,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/pc/add-time \
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/pc/add-time \
   -H "Authorization: Bearer &lt;token&gt;" \
   -H "Content-Type: application/json" \
   -d '{"pc_number": 2, "minutes": 30}'</pre>
@@ -636,7 +636,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/pc/2/lock \
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/pc/2/lock \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -663,7 +663,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/logs?level=ERROR&limit=50" \
+            <pre class="base-url-aware">curl "<span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/logs?level=ERROR&limit=50" \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -690,7 +690,7 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X DELETE "<span class="base-url-placeholder">http://192.168.1.100:8000</span>/api/admin/logs?days=7" \
+            <pre class="base-url-aware">curl -X DELETE "<span class="base-url-placeholder">http://192.168.1.100</span>/api/admin/logs?days=7" \
   -H "Authorization: Bearer &lt;token&gt;"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
@@ -826,8 +826,8 @@
       <div class="card" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
         <div>
           <div style="font-size:.85rem;color:var(--text-dim);margin-bottom:.4rem">FastAPI auto-generates interactive docs. Open in browser while the server is running:</div>
-          <a id="swaggerLink" href="http://192.168.1.100:8000/docs" target="_blank" class="btn btn-primary btn-sm" style="margin-right:.5rem">⚡ Swagger UI</a>
-          <a id="redocLink"   href="http://192.168.1.100:8000/redoc" target="_blank" class="btn btn-default btn-sm">📖 ReDoc</a>
+          <a id="swaggerLink" href="http://192.168.1.100/docs" target="_blank" class="btn btn-primary btn-sm" style="margin-right:.5rem">⚡ Swagger UI</a>
+          <a id="redocLink"   href="http://192.168.1.100/redoc" target="_blank" class="btn btn-default btn-sm">📖 ReDoc</a>
         </div>
       </div>
     </div>
@@ -881,7 +881,7 @@ document.querySelectorAll('.json-block').forEach(highlightJson);
 
 // ── Base URL update ───────────────────────────────────────────────
 function updateBaseUrl(val) {
-  const v = val.trim() || 'http://192.168.1.100:8000';
+  const v = val.trim() || 'http://192.168.1.100';
   document.querySelectorAll('.base-url-placeholder').forEach(s => s.textContent = v);
   document.getElementById('swaggerLink').href = v + '/docs';
   document.getElementById('redocLink').href   = v + '/redoc';

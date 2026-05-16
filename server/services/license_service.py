@@ -26,10 +26,12 @@ if getattr(sys, "frozen", False):
 else:
     _APP_DIR = Path(__file__).resolve().parent.parent
 
-# Shared secret embedded in the binary — never written to disk or .env.
-# Must match the value configured on the pisonex.com API server.
-# Change this before release; keep it out of version control.
-_CLIENT_HMAC_SECRET = b"PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
+from config import settings as _settings
+
+
+def _get_hmac_secret() -> bytes:
+    """Return the HMAC secret as bytes, read from Settings (.env)."""
+    return _settings.LICENSE_HMAC_SECRET.encode()
 
 
 def _signed_payload(body: dict) -> dict:
@@ -41,7 +43,7 @@ def _signed_payload(body: dict) -> dict:
     """
     ts = str(int(time.time()))
     canonical = json.dumps(body, separators=(",", ":"), sort_keys=True) + ts
-    sig = hmac.new(_CLIENT_HMAC_SECRET, canonical.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(_get_hmac_secret(), canonical.encode(), hashlib.sha256).hexdigest()
     return {**body, "_ts": ts, "_sig": sig}
 LICENSE_FILE = _APP_DIR / "data" / "license.json"
 TRIAL_DAYS = 14

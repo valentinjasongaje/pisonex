@@ -13,9 +13,12 @@ WorkingDirectory=/home/pi/pisonet/server
 Environment="PATH=/home/pi/pisonet/server/venv/bin"
 ExecStart=/home/pi/pisonet/server/venv/bin/uvicorn main:app \
     --host 0.0.0.0 \
-    --port 8000 \
+    --port 80 \
     --workers 1 \
     --log-level info
+
+# Allow binding to port 80 without running as root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 # Always restart on crash (3 second cooldown)
 Restart=always

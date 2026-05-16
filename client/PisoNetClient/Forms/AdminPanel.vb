@@ -3,6 +3,10 @@ Imports System.Drawing
 Imports System.Drawing.Drawing2D
 Imports System.Drawing.Text
 Imports System.IO
+Imports System.Net.Http
+Imports System.Net.NetworkInformation
+Imports System.Net.Sockets
+Imports System.Threading
 Imports PisoNetClient.Config
 Imports PisoNetClient.Services
 Imports PisoNetClient.Resources
@@ -429,19 +433,113 @@ Namespace Forms
 
             page.Controls.Add(PageTitle("Connection Settings", New Point(LM, y))) : y += 34
 
-            Dim card = CardPanel(New Point(LM, y), New Size(IW, 160))
+            Dim card = CardPanel(New Point(LM, y), New Size(IW, 232))
             Dim cy = 14
 
             card.Controls.Add(SectionLabel("Server IP Address", New Point(14, cy))) : cy += 22
-            _txtUrl = DarkTextBox(New Point(14, cy), IW - 32, AppConfig.ServerIp)
-            _txtUrl.PlaceholderText = "e.g. 192.168.1.100"
-            card.Controls.Add(_txtUrl) : cy += 38
+            _txtUrl = DarkTextBox(New Point(14, cy), IW - 140, AppConfig.ServerIp)
+            _txtUrl.PlaceholderText = "e.g. pisonex.local or 192.168.1.100"
+            card.Controls.Add(_txtUrl)
+
+            ' Test button beside IP textbox
+            Dim btnTest = New Button() With {
+                .Text = "Test",
+                .Location = New Point(IW - 122, cy),
+                .Size = New Size(96, 26),
+                .FlatStyle = FlatStyle.Flat,
+                .BackColor = Color.FromArgb(30, 36, 56),
+                .ForeColor = Color.FromArgb(148, 163, 184),
+                .Font = New Font("Segoe UI", 8),
+                .Cursor = Cursors.Hand
+            }
+            btnTest.FlatAppearance.BorderColor = FormStyles.BorderClr
+            AddHandler btnTest.Click, Async Sub(s, ev)
+                Dim ip = _txtUrl.Text.Trim()
+                If String.IsNullOrWhiteSpace(ip) Then Return
+                btnTest.Enabled = False
+                btnTest.Text = "..."
+                Try
+                    Using client As New HttpClient() With {.Timeout = TimeSpan.FromSeconds(3)}
+                        Dim resp = Await client.GetAsync($"http://{ip}/health")
+                        If resp.IsSuccessStatusCode Then
+                            btnTest.Text = "OK ✓"
+                            btnTest.ForeColor = Color.FromArgb(34, 197, 94)
+                        Else
+                            btnTest.Text = "Fail ✗"
+                            btnTest.ForeColor = Color.FromArgb(239, 68, 68)
+                        End If
+                    End Using
+                Catch
+                    btnTest.Text = "Fail ✗"
+                    btnTest.ForeColor = Color.FromArgb(239, 68, 68)
+                End Try
+                btnTest.Enabled = True
+                Dim rt = New System.Windows.Forms.Timer() With {.Interval = 3000}
+                AddHandler rt.Tick, Sub(s2, e2)
+                    rt.Stop() : rt.Dispose()
+                    btnTest.Text = "Test"
+                    btnTest.ForeColor = Color.FromArgb(148, 163, 184)
+                End Sub
+                rt.Start()
+            End Sub
+            card.Controls.Add(btnTest)
+            cy += 30
+
+            ' Scan for Server button
+            Dim btnScan = New Button() With {
+                .Text = "Scan for Server",
+                .Location = New Point(14, cy),
+                .Size = New Size(IW - 32, 32),
+                .FlatStyle = FlatStyle.Flat,
+                .BackColor = Color.FromArgb(30, 36, 56),
+                .ForeColor = FormStyles.AccentBlue,
+                .Font = New Font("Segoe UI", 9),
+                .Cursor = Cursors.Hand
+            }
+            btnScan.FlatAppearance.BorderColor = FormStyles.BorderClr
+            AddHandler btnScan.Click, Async Sub(s, ev)
+                btnScan.Enabled = False
+                Dim origText = btnScan.Text
+                btnScan.Text = "Scanning..."
+                Try
+                    Dim subnet = GetLocalSubnet()
+                    If subnet Is Nothing Then
+                        MessageBox.Show("Could not determine local network subnet.",
+                                        "Scan", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        Return
+                    End If
+                    Dim foundIp = Await ScanSubnetAsync(subnet)
+                    If foundIp IsNot Nothing Then
+                        _txtUrl.Text = foundIp
+                        btnScan.Text = $"Found: {foundIp}"
+                        btnScan.ForeColor = Color.FromArgb(34, 197, 94)
+                    Else
+                        MessageBox.Show("No Pisonex server found on the local network." & vbCrLf & vbCrLf &
+                                        "Make sure the server is running and port 80 is allowed through Windows Firewall.",
+                                        "Scan", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                    End If
+                Catch
+                    MessageBox.Show("Scan failed. Check your network connection.",
+                                    "Scan", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                Finally
+                    btnScan.Enabled = True
+                    Dim rt = New System.Windows.Forms.Timer() With {.Interval = 4000}
+                    AddHandler rt.Tick, Sub(s2, e2)
+                        rt.Stop() : rt.Dispose()
+                        btnScan.Text = origText
+                        btnScan.ForeColor = FormStyles.AccentBlue
+                    End Sub
+                    rt.Start()
+                End Try
+            End Sub
+            card.Controls.Add(btnScan)
+            cy += 40
 
             card.Controls.Add(SectionLabel("PC Number", New Point(14, cy))) : cy += 22
             _nudPcNum = DarkNud(New Point(14, cy), 80, AppConfig.PCNumber, 1, 99)
             card.Controls.Add(_nudPcNum)
 
-            page.Controls.Add(card) : y += 170
+            page.Controls.Add(card) : y += 242
 
             Dim infoCard = CardPanel(New Point(LM, y), New Size(IW, 48))
             infoCard.Controls.Add(InfoLabel(
@@ -1161,11 +1259,11 @@ Namespace Forms
             statusCard.Controls.Add(SmallLabel("Expires At", New Point(14, cy)))
             statusCard.Controls.Add(SmallLabel("Last Verified", New Point(224, cy))) : cy += 18
             _lblLicExpiry = New Label() With {
-                .Text = If(String.IsNullOrEmpty(AppConfig.LicenseExpiresAt), "Lifetime / N/A", AppConfig.LicenseExpiresAt),
+                .Text = If(String.IsNullOrEmpty(LicenseStore.LicenseExpiresAt), "Lifetime / N/A", LicenseStore.LicenseExpiresAt),
                 .AutoSize = True, .Location = New Point(14, cy), .ForeColor = ColSmall
             }
             _lblLicVerified = New Label() With {
-                .Text = If(String.IsNullOrEmpty(AppConfig.LicenseLastVerified), "—", AppConfig.LicenseLastVerified),
+                .Text = If(String.IsNullOrEmpty(LicenseStore.LicenseLastVerified), "—", LicenseStore.LicenseLastVerified),
                 .AutoSize = True, .Location = New Point(224, cy), .ForeColor = ColSmall
             }
             statusCard.Controls.Add(_lblLicExpiry)
@@ -1307,7 +1405,7 @@ Namespace Forms
             Dim newPin2 = _txtPin2.Text.Trim()
             Dim currentPin = _txtCurrentPin.Text.Trim()
             If newPin.Length > 0 Then
-                If currentPin <> AppConfig.AdminPin Then
+                If Not Config.LicenseStore.VerifyAdminPin(currentPin) Then
                     MessageBox.Show("Current PASSWORD is incorrect.", "Validation",
                                     MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return
                 End If
@@ -1319,10 +1417,10 @@ Namespace Forms
                     MessageBox.Show("Passwords do not match.", "Validation",
                                     MessageBoxButtons.OK, MessageBoxIcon.Warning) : Return
                 End If
-                AppConfig.SaveAdminPin(newPin)
+                Config.LicenseStore.SaveAdminPinHash(newPin)
             End If
 
-            AppConfig.SaveServerUrl("http://" & _txtUrl.Text.Trim() & ":8000")
+            AppConfig.SaveServerUrl("http://" & _txtUrl.Text.Trim())
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
             AppConfig.SaveLockBgArgb(_currentBgColor.ToArgb())
             AppConfig.SaveLockBgImagePath(_txtImgPath.Text.Trim())
@@ -1399,6 +1497,63 @@ Namespace Forms
                 .ForeColor = Color.White
             }
         End Function
+
+        ' ── Network scan helpers ───────────────────────────────────────
+
+        Private Shared Function GetLocalSubnet() As String
+            For Each nic In NetworkInterface.GetAllNetworkInterfaces()
+                If nic.OperationalStatus <> OperationalStatus.Up Then Continue For
+                If nic.NetworkInterfaceType = NetworkInterfaceType.Loopback Then Continue For
+                For Each addr In nic.GetIPProperties().UnicastAddresses
+                    If addr.Address.AddressFamily = AddressFamily.InterNetwork Then
+                        Dim ip = addr.Address.ToString()
+                        Dim parts = ip.Split("."c)
+                        If parts.Length = 4 Then Return $"{parts(0)}.{parts(1)}.{parts(2)}"
+                    End If
+                Next
+            Next
+            Return Nothing
+        End Function
+
+        Private Shared Async Function ScanSubnetAsync(subnet As String) As Task(Of String)
+            Dim cts As New CancellationTokenSource()
+            Dim semaphore As New SemaphoreSlim(50)
+            Dim foundIp As String = Nothing
+
+            Dim tasks As New List(Of Task)()
+            For i = 1 To 254
+                Dim ip = $"{subnet}.{i}"
+                tasks.Add(Task.Run(Async Function()
+                    If cts.IsCancellationRequested Then Return
+                    Await semaphore.WaitAsync(cts.Token)
+                    Try
+                        If cts.IsCancellationRequested Then Return
+                        Using client As New HttpClient() With {.Timeout = TimeSpan.FromMilliseconds(800)}
+                            Dim response = Await client.GetAsync($"http://{ip}/health", cts.Token)
+                            If response.IsSuccessStatusCode Then
+                                Dim body = Await response.Content.ReadAsStringAsync()
+                                If body.Contains("""status""") Then
+                                    Interlocked.CompareExchange(foundIp, ip, Nothing)
+                                    cts.Cancel()
+                                End If
+                            End If
+                        End Using
+                    Catch
+                    Finally
+                        semaphore.Release()
+                    End Try
+                End Function))
+            Next
+
+            Try
+                Await Task.WhenAll(tasks)
+            Catch ex As OperationCanceledException
+            End Try
+
+            Return foundIp
+        End Function
+
+        ' ── UI helpers ────────────────────────────────────────────────────
 
         Private Shared Function CardPanel(loc As Point, sz As Size) As Panel
             Dim pnl = New Panel() With {

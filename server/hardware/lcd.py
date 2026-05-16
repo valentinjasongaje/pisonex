@@ -116,7 +116,7 @@ def _center(text: str) -> str:
     return text.center(COLS)[:COLS]
 
 
-def _bar(char: str = "\u2500") -> str:
+def _bar(char: str = "─") -> str:
     """Full-width horizontal divider."""
     return char * COLS
 

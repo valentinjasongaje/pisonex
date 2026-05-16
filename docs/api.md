@@ -1,6 +1,6 @@
 # PisoNet API Documentation
 
-> **Base URL:** `http://<raspberry-pi-ip>:8000`
+> **Base URL:** `http://<raspberry-pi-ip>`
 > **Version:** 1.0.0
 
 ---
@@ -58,9 +58,11 @@ Authenticate as admin and receive a JWT access token.
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/auth/token \
-  -d "username=admin&password=admin123"
+curl -X POST http://192.168.1.100/api/auth/token \
+  -d "username=admin&password=<your-generated-password>"
 ```
+
+> **Note:** The admin password is auto-generated on first startup. Check `server/.env` for the `ADMIN_PASSWORD` value.
 
 **Response `200 OK`**
 ```json
@@ -83,7 +85,7 @@ curl -X POST http://192.168.1.100:8000/api/auth/token \
 
 ## PC Endpoints
 
-These endpoints are called by the **VB.NET client** running on each PC. No authentication required.
+These endpoints are called by the **VB.NET client** running on each PC. When `CLIENT_API_KEY` is configured (via dashboard Settings), all PC endpoints require the `X-API-Key` header.
 
 ---
 
@@ -100,7 +102,7 @@ Registers a PC with the server on first launch, or updates its MAC and IP on rec
 
 **Example Request**
 ```bash
-curl -X POST "http://192.168.1.100:8000/api/pc/register?pc_number=1&mac_address=AA:BB:CC:DD:EE:FF"
+curl -X POST "http://192.168.1.100/api/pc/register?pc_number=1&mac_address=AA:BB:CC:DD:EE:FF"
 ```
 
 **Response `200 OK`**
@@ -127,7 +129,7 @@ curl -X POST "http://192.168.1.100:8000/api/pc/register?pc_number=1&mac_address=
 
 ### POST `/api/pc/heartbeat/{pc_number}`
 
-Sent by the client every **10 seconds**. Marks the PC as online and returns the current session state. If remaining time changed server-side (e.g. admin added minutes), the client re-syncs its local countdown here.
+Sent by the client every **1 second**. Marks the PC as online and returns the current session state. If remaining time changed server-side (e.g. admin added time), the client re-syncs its local countdown here.
 
 **Path Parameters**
 
@@ -137,17 +139,33 @@ Sent by the client every **10 seconds**. Marks the PC as online and returns the 
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/pc/heartbeat/1
+curl -X POST http://192.168.1.100/api/pc/heartbeat/1
 ```
 
 **Response `200 OK` — Active session, PC unlocked**
 ```json
 {
   "is_locked": false,
-  "remaining_minutes": 28,
-  "remaining_seconds": 45,
+  "remaining_seconds": 1725,
   "session_token": "tok_abc123",
-  "time_added_minutes": 0
+  "time_added_seconds": 0,
+  "pending_command": null,
+  "command_payload": null,
+  "admin_message": null,
+  "announcement": null,
+  "coin_slot_enabled": true,
+  "wallpaper_url": null,
+  "wallpaper_hash": null,
+  "server_licensed": true,
+  "membership_enabled": false,
+  "absorption_enabled": false,
+  "member_username": null,
+  "member_balance_seconds": 0,
+  "member_can_logout": false,
+  "zero_time_logout_seconds": 0,
+  "idle_shutdown_seconds": 0,
+  "receiving_coins": false,
+  "minimum_logout_minutes": 10
 }
 ```
 
@@ -155,10 +173,9 @@ curl -X POST http://192.168.1.100:8000/api/pc/heartbeat/1
 ```json
 {
   "is_locked": true,
-  "remaining_minutes": 0,
   "remaining_seconds": 0,
   "session_token": null,
-  "time_added_minutes": 0
+  "time_added_seconds": 0
 }
 ```
 
@@ -166,10 +183,9 @@ curl -X POST http://192.168.1.100:8000/api/pc/heartbeat/1
 ```json
 {
   "is_locked": false,
-  "remaining_minutes": 60,
-  "remaining_seconds": 0,
+  "remaining_seconds": 3600,
   "session_token": "tok_abc123",
-  "time_added_minutes": 30
+  "time_added_seconds": 1800
 }
 ```
 
@@ -180,7 +196,9 @@ curl -X POST http://192.168.1.100:8000/api/pc/heartbeat/1
 }
 ```
 
-> **Client behavior:** If `is_locked: true` and local timer hits zero → lock screen. If `time_added_minutes > 0` → show notification toast.
+> **v3.0 change:** `remaining_minutes` and `time_added_minutes` removed; replaced by single `remaining_seconds` and `time_added_seconds`. All time values are now seconds-based. Membership, wallpaper, coin slot, and command fields added.
+
+> **Client behavior:** If `is_locked: true` and local timer hits zero → lock screen. If `time_added_seconds > 0` → show notification toast.
 
 ---
 
@@ -190,7 +208,7 @@ Returns a list of all registered PCs with their current online/lock status. PCs 
 
 **Example Request**
 ```bash
-curl http://192.168.1.100:8000/api/pc/status
+curl http://192.168.1.100/api/pc/status
 ```
 
 **Response `200 OK`**
@@ -203,7 +221,7 @@ curl http://192.168.1.100:8000/api/pc/status
     "is_locked": false,
     "ip_address": "192.168.1.101",
     "last_seen": "2026-03-14T10:30:00",
-    "remaining_minutes": 28
+    "remaining_seconds": 1725
   },
   {
     "pc_number": 2,
@@ -212,7 +230,7 @@ curl http://192.168.1.100:8000/api/pc/status
     "is_locked": true,
     "ip_address": "192.168.1.102",
     "last_seen": "2026-03-14T09:15:00",
-    "remaining_minutes": 0
+    "remaining_seconds": 0
   }
 ]
 ```
@@ -221,7 +239,7 @@ curl http://192.168.1.100:8000/api/pc/status
 
 ### POST `/api/pc/{pc_number}/screenshot`
 
-Client uploads a JPEG screenshot every 5 seconds for live monitoring in the dashboard. Stored in memory only (not persisted to disk).
+Client uploads a JPEG screenshot every 3 seconds (default, configurable 3-60s) for live monitoring in the dashboard. Stored in memory only (not persisted to disk).
 
 **Path Parameters**
 
@@ -239,7 +257,7 @@ Client uploads a JPEG screenshot every 5 seconds for live monitoring in the dash
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/pc/1/screenshot \
+curl -X POST http://192.168.1.100/api/pc/1/screenshot \
   -H "Content-Type: image/jpeg" \
   --data-binary @screenshot.jpg
 ```
@@ -272,7 +290,7 @@ Ends the active session and immediately locks the PC. Can be called by admin or 
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/pc/1/lock
+curl -X POST http://192.168.1.100/api/pc/1/lock
 ```
 
 **Response `200 OK`**
@@ -291,7 +309,7 @@ curl -X POST http://192.168.1.100:8000/api/pc/1/lock
 
 ### POST `/api/session/add-time`
 
-Adds time to a PC by converting pesos to minutes using the configured coin rates. Called by the **hardware controller** when coins are inserted, or by admin.
+Adds time to a PC by converting pesos to seconds using the configured coin rates (greedy algorithm). Called by the **hardware controller** when coins are inserted, or by admin.
 
 **Content-Type:** `application/json`
 
@@ -304,7 +322,7 @@ Adds time to a PC by converting pesos to minutes using the configured coin rates
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/session/add-time \
+curl -X POST http://192.168.1.100/api/session/add-time \
   -H "Content-Type: application/json" \
   -d '{"pc_number": 1, "pesos": 5}'
 ```
@@ -314,8 +332,8 @@ curl -X POST http://192.168.1.100:8000/api/session/add-time \
 {
   "pc_number": 1,
   "pesos_added": 5,
-  "minutes_added": 30,
-  "total_minutes": 60,
+  "seconds_added": 1800,
+  "total_seconds": 3600,
   "session_token": "tok_abc123"
 }
 ```
@@ -348,16 +366,15 @@ Returns the current session status for a PC.
 
 **Example Request**
 ```bash
-curl http://192.168.1.100:8000/api/session/1
+curl http://192.168.1.100/api/session/1
 ```
 
 **Response `200 OK` — Active session**
 ```json
 {
   "has_session": true,
-  "remaining_minutes": 28,
-  "remaining_seconds": 45,
-  "minutes_granted": 60,
+  "remaining_seconds": 1725,
+  "granted_seconds": 3600,
   "started_at": "2026-03-14T10:00:00",
   "session_token": "tok_abc123"
 }
@@ -367,9 +384,8 @@ curl http://192.168.1.100:8000/api/session/1
 ```json
 {
   "has_session": false,
-  "remaining_minutes": 0,
   "remaining_seconds": 0,
-  "minutes_granted": 0,
+  "granted_seconds": 0,
   "started_at": null,
   "session_token": null
 }
@@ -389,7 +405,7 @@ Ends the active session and locks the PC.
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/session/1/end
+curl -X POST http://192.168.1.100/api/session/1/end
 ```
 
 **Response `200 OK`**
@@ -420,7 +436,7 @@ Returns total revenue for the last N days.
 
 **Example Request**
 ```bash
-curl http://192.168.1.100:8000/api/admin/earnings?days=7 \
+curl http://192.168.1.100/api/admin/earnings?days=7 \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -447,7 +463,7 @@ Returns per-day earnings breakdown for charting.
 
 **Example Request**
 ```bash
-curl http://192.168.1.100:8000/api/admin/earnings/daily?days=7 \
+curl http://192.168.1.100/api/admin/earnings/daily?days=7 \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -479,7 +495,7 @@ Returns paginated list of coin transactions, newest first.
 
 **Example Request**
 ```bash
-curl "http://192.168.1.100:8000/api/admin/transactions?limit=10&offset=0" \
+curl "http://192.168.1.100/api/admin/transactions?limit=10&offset=0" \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -489,15 +505,15 @@ curl "http://192.168.1.100:8000/api/admin/transactions?limit=10&offset=0" \
   {
     "id": 42,
     "pc_id": 1,
-    "amount_pesos": 10,
-    "minutes_added": 60,
+    "amount_php": 10,
+    "seconds_added": 3600,
     "created_at": "2026-03-14T10:05:00"
   },
   {
     "id": 41,
     "pc_id": 3,
-    "amount_pesos": 5,
-    "minutes_added": 30,
+    "amount_php": 5,
+    "seconds_added": 1800,
     "created_at": "2026-03-14T09:45:00"
   }
 ]
@@ -511,15 +527,15 @@ Returns all active coin rates ordered by peso amount.
 
 **Example Request**
 ```bash
-curl http://192.168.1.100:8000/api/admin/rates \
+curl http://192.168.1.100/api/admin/rates \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
 **Response `200 OK`**
 ```json
 [
-  { "id": 1, "pesos": 5,  "minutes": 30, "label": "₱5 = 30 minutes",  "is_active": true },
-  { "id": 2, "pesos": 10, "minutes": 60, "label": "₱10 = 60 minutes", "is_active": true }
+  { "id": 1, "pesos": 5,  "seconds": 1800, "label": "₱5 = 30 minutes",  "is_active": true },
+  { "id": 2, "pesos": 10, "seconds": 3600, "label": "₱10 = 60 minutes", "is_active": true }
 ]
 ```
 
@@ -536,15 +552,15 @@ Creates a new coin rate. If a rate for the same peso amount already exists, the 
 | Field     | Type   | Required | Description                        |
 |-----------|--------|----------|------------------------------------|
 | `pesos`   | int    | ✅       | Coin denomination (e.g. `5`)       |
-| `minutes` | int    | ✅       | Minutes granted (e.g. `30`)        |
+| `seconds` | int    | ✅       | Seconds granted (e.g. `1800`)      |
 | `label`   | string | ❌       | Display label; auto-generated if omitted |
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/admin/rates \
+curl -X POST http://192.168.1.100/api/admin/rates \
   -H "Authorization: Bearer eyJhbGci..." \
   -H "Content-Type: application/json" \
-  -d '{"pesos": 5, "minutes": 30}'
+  -d '{"pesos": 5, "seconds": 1800}'
 ```
 
 **Response `200 OK`**
@@ -552,7 +568,7 @@ curl -X POST http://192.168.1.100:8000/api/admin/rates \
 {
   "id": 3,
   "pesos": 5,
-  "minutes": 30,
+  "seconds": 1800,
   "label": "₱5 = 30 minutes",
   "is_active": true
 }
@@ -572,7 +588,7 @@ Soft-deletes a coin rate (marks `is_active = false`).
 
 **Example Request**
 ```bash
-curl -X DELETE http://192.168.1.100:8000/api/admin/rates/1 \
+curl -X DELETE http://192.168.1.100/api/admin/rates/1 \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -587,31 +603,31 @@ curl -X DELETE http://192.168.1.100:8000/api/admin/rates/1 \
 
 ### POST `/api/admin/pc/add-time`
 
-Admin manually adds minutes to a PC without going through coin conversion.
+Admin manually adds time to a PC without going through coin conversion.
 
 **Content-Type:** `application/json`
 
 **Request Body**
 
-| Field       | Type | Required | Description                     |
-|-------------|------|----------|---------------------------------|
-| `pc_number` | int  | ✅       | Target PC number                |
-| `minutes`   | int  | ✅       | Minutes to add (e.g. `30`)      |
+| Field       | Type | Required | Description                        |
+|-------------|------|----------|------------------------------------|
+| `pc_number` | int  | ✅       | Target PC number                   |
+| `seconds`   | int  | ✅       | Seconds to add (e.g. `1800`)       |
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/admin/pc/add-time \
+curl -X POST http://192.168.1.100/api/admin/pc/add-time \
   -H "Authorization: Bearer eyJhbGci..." \
   -H "Content-Type: application/json" \
-  -d '{"pc_number": 2, "minutes": 30}'
+  -d '{"pc_number": 2, "seconds": 1800}'
 ```
 
 **Response `200 OK`**
 ```json
 {
   "pc_number": 2,
-  "minutes_added": 30,
-  "total_minutes": 90
+  "seconds_added": 1800,
+  "total_seconds": 5400
 }
 ```
 
@@ -629,7 +645,7 @@ End session and lock a PC immediately.
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/api/admin/pc/2/lock \
+curl -X POST http://192.168.1.100/api/admin/pc/2/lock \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -656,7 +672,7 @@ Returns system logs with optional filtering.
 
 **Example Request**
 ```bash
-curl "http://192.168.1.100:8000/api/admin/logs?level=ERROR&limit=50" \
+curl "http://192.168.1.100/api/admin/logs?level=ERROR&limit=50" \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -687,7 +703,7 @@ Deletes system logs older than N days.
 
 **Example Request**
 ```bash
-curl -X DELETE "http://192.168.1.100:8000/api/admin/logs?days=7" \
+curl -X DELETE "http://192.168.1.100/api/admin/logs?days=7" \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -732,9 +748,7 @@ Used by the monitor page (HTMX polling) to refresh PC live status.
     "name": "PC-01",
     "is_online": true,
     "is_locked": false,
-    "remaining_minutes": 28,
-    "remaining_seconds": 45,
-    "remaining_total_sec": 1725,
+    "remaining_seconds": 1725,
     "has_screenshot": true
   }
 ]
@@ -776,7 +790,7 @@ Rename a PC from the dashboard.
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100:8000/dashboard/api/pc/1/rename \
+curl -X POST http://192.168.1.100/dashboard/api/pc/1/rename \
   -H "Content-Type: application/json" \
   -d '{"name": "Gaming PC 1"}'
 ```
@@ -786,6 +800,32 @@ curl -X POST http://192.168.1.100:8000/dashboard/api/pc/1/rename \
 {
   "pc_number": 1,
   "name": "Gaming PC 1"
+}
+```
+
+---
+
+### POST `/dashboard/api/security/generate-key`
+
+Generate a new random client API key (48-char hex). Stored in DB and applied immediately (no restart needed). The key is returned once in the response for copying.
+
+**Response `200 OK`**
+```json
+{
+  "key": "a1b2c3d4e5f6..."
+}
+```
+
+---
+
+### POST `/dashboard/api/security/clear-key`
+
+Disable client API key authentication. Clears the key from DB and memory immediately.
+
+**Response `200 OK`**
+```json
+{
+  "status": "disabled"
 }
 ```
 
@@ -818,5 +858,5 @@ All error bodies follow this structure:
 
 FastAPI auto-generates interactive API docs. Open in browser while server is running:
 
-- **Swagger UI:** `http://<pi-ip>:8000/docs`
-- **ReDoc:** `http://<pi-ip>:8000/redoc`
+- **Swagger UI:** `http://<pi-ip>/docs`
+- **ReDoc:** `http://<pi-ip>/redoc`

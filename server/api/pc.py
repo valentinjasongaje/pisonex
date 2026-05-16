@@ -103,7 +103,7 @@ def heartbeat(
     wp_url, wp_hash = command_store.get_pc_wallpaper(pc_number)
     # Build absolute URL so client can download directly
     if wp_url:
-        host = request.headers.get("host", "localhost:8000")
+        host = request.headers.get("host", "localhost")
         scheme = request.url.scheme
         wp_url = f"{scheme}://{host}{wp_url}"
 
@@ -264,3 +264,22 @@ def lock_pc(pc_number: int, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(404, f"PC {pc_number} not found")
     return {"status": "locked", "pc_number": pc_number}
+
+
+@router.post("/{pc_number}/request-coins", dependencies=[_ClientAuth])
+def request_coins(pc_number: int):
+    """
+    Called by a PC client when the user presses 'Insert Coin'.
+    Signals the server's hardware controller to open the coin slot for this PC.
+    Returns 503 on Windows/no-hardware deployments where the controller is absent.
+    """
+    from main import hw_controller
+    if hw_controller is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No coin slot hardware on this server. Use the keypad unit instead.",
+        )
+    ok, message = hw_controller.request_coins_for_pc(pc_number)
+    if not ok:
+        raise HTTPException(status_code=409, detail=message)
+    return {"status": "ok"}

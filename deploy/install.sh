@@ -4,7 +4,7 @@
 
 set -e
 
-echo "=== PisoNet Installer ==="
+echo "=== Pisonex Installer ==="
 
 # ── Resolve project root automatically ───────────────────────────────────────
 # Works no matter where the project was placed (~/Documents/pisonex, /home/pi/pisonet, etc.)
@@ -26,23 +26,23 @@ fi
 
 # ── 1. System deps ────────────────────────────────────────────────────────────
 echo ""
-echo "[1/8] Installing system packages..."
-sudo apt update && sudo apt install -y python3-pip python3-venv i2c-tools git sqlite3
+echo "[1/10] Installing system packages..."
+sudo apt update && sudo apt install -y python3-pip python3-venv i2c-tools git sqlite3 avahi-daemon avahi-utils
 
 # ── 2. Enable I2C ────────────────────────────────────────────────────────────
 echo ""
-echo "[2/8] Enabling I2C..."
+echo "[2/10] Enabling I2C..."
 sudo raspi-config nonint do_i2c 0
 echo "I2C enabled"
 
 # ── 3. Detect LCD I2C address ─────────────────────────────────────────────────
 echo ""
-echo "[3/8] Scanning I2C bus (look for 0x27 or 0x3F)..."
+echo "[3/10] Scanning I2C bus (look for 0x27 or 0x3F)..."
 i2cdetect -y 1 || echo "No I2C devices found yet (hardware not connected — that's OK)"
 
 # ── 4. Python venv + deps ────────────────────────────────────────────────────
 echo ""
-echo "[4/8] Setting up Python virtual environment..."
+echo "[4/10] Setting up Python virtual environment..."
 cd "$SERVER_DIR"
 python3 -m venv venv
 source venv/bin/activate
@@ -52,7 +52,7 @@ echo "Python deps installed"
 
 # ── 5. Initialize database ───────────────────────────────────────────────────
 echo ""
-echo "[5/8] Initializing database..."
+echo "[5/10] Initializing database..."
 python3 -c "
 from database import engine, Base
 from models import *
@@ -62,7 +62,7 @@ print('Database initialized')
 
 # ── 6. Install systemd service ────────────────────────────────────────────────
 echo ""
-echo "[6/8] Installing systemd service..."
+echo "[6/10] Installing systemd service..."
 
 # Patch the service file with the actual project path AND actual username
 # (newer Raspberry Pi OS uses custom usernames, not always 'pi')
@@ -83,13 +83,28 @@ echo "Service installed and started"
 
 # ── 7. GPIO + I2C permissions ────────────────────────────────────────────────
 echo ""
-echo "[7/8] Setting GPIO/I2C permissions..."
+echo "[7/10] Setting GPIO/I2C permissions..."
 sudo adduser "$USER" gpio 2>/dev/null || true
 sudo adduser "$USER" i2c  2>/dev/null || true
 
-# ── 8. Daily backup cron ─────────────────────────────────────────────────────
+# ── 8. Set hostname to pisonex (enables pisonex.local on the LAN) ────────────
 echo ""
-echo "[8/8] Setting up daily backup..."
+echo "[8/10] Setting hostname to 'pisonex'..."
+sudo hostnamectl set-hostname pisonex
+# Update /etc/hosts so the Pi resolves its own name instantly
+sudo sed -i "s/127\.0\.1\.1.*/127.0.1.1\tpisonex/" /etc/hosts
+echo "Hostname set — this Pi will be reachable as pisonex.local"
+
+# ── 9. Enable mDNS via avahi ─────────────────────────────────────────────────
+echo ""
+echo "[9/10] Enabling avahi-daemon (mDNS for pisonex.local)..."
+sudo systemctl enable avahi-daemon
+sudo systemctl start avahi-daemon
+echo "avahi-daemon running — pisonex.local is now resolvable on the LAN"
+
+# ── 10. Daily backup cron ────────────────────────────────────────────────────
+echo ""
+echo "[10/10] Setting up daily backup..."
 BACKUP_SCRIPT="$PROJECT_ROOT/deploy/backup.sh"
 chmod +x "$BACKUP_SCRIPT"
 (crontab -l 2>/dev/null | grep -v "pisonet"; echo "0 3 * * * $BACKUP_SCRIPT") | crontab -
@@ -102,7 +117,8 @@ echo "  PisoNet installation complete!"
 echo "============================================"
 echo ""
 echo "  Admin dashboard:"
-echo "  http://$(hostname -I | awk '{print $1}'):8000/dashboard"
+echo "  http://pisonex.local/dashboard"
+echo "  http://$(hostname -I | awk '{print $1}')/dashboard"
 echo ""
 echo "  Login: admin / admin123"
 echo "  IMPORTANT: Change the password in $SERVER_DIR/.env"

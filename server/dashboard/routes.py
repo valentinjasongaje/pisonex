@@ -18,7 +18,7 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from config import settings
@@ -61,22 +61,23 @@ def _require_active_license():
 
 # ── Session cookie helpers ────────────────────────────────────────────────────
 
-def _validate_session(pisonet_session: str = Cookie(default=None)) -> Optional[str]:
-    """Returns the admin username from the session cookie, or None if invalid/absent."""
+def _validate_session(pisonet_session: str = Cookie(default=None)) -> Optional[dict]:
+    """Returns {"username": ..., "role": ...} from the session cookie, or None if invalid/absent."""
     if not pisonet_session:
         return None
     try:
         payload = jwt.decode(pisonet_session, settings.SECRET_KEY, algorithms=[_ALGORITHM])
         username: str = payload.get("sub")
-        return username if username else None
+        role: str = payload.get("role", "admin")  # default "admin" for legacy tokens
+        return {"username": username, "role": role} if username else None
     except JWTError:
         return None
 
 
-def _create_session_token(username: str) -> str:
+def _create_session_token(username: str, role: str = "admin") -> str:
     payload = {
         "sub": username,
-        "role": "admin",
+        "role": role,
         "exp": datetime.utcnow() + timedelta(hours=settings.TOKEN_EXPIRE_HOURS),
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=_ALGORITHM)
@@ -112,7 +113,7 @@ def login_submit(
             status_code=401,
         )
 
-    token = _create_session_token(admin.username)
+    token = _create_session_token(admin.username, admin.role)
     response = RedirectResponse("/dashboard", status_code=302)
     response.set_cookie(
         _COOKIE_NAME,
@@ -134,7 +135,7 @@ def account_page(
         return RedirectResponse("/dashboard/login", status_code=302)
     return templates.TemplateResponse("account.html", {
         "request": request,
-        "current_username": current_user,
+        "current_username": current_user["username"],
         "success": None,
         "error": None,
     })
@@ -153,12 +154,12 @@ def account_update(
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
 
-    admin = db.query(AdminUser).filter(AdminUser.username == current_user).first()
+    admin = db.query(AdminUser).filter(AdminUser.username == current_user["username"]).first()
 
     def _render(error=None, success=None):
         return templates.TemplateResponse("account.html", {
             "request": request,
-            "current_username": new_username.strip() or current_user,
+            "current_username": new_username.strip() or current_user["username"],
             "error": error,
             "success": success,
         })
@@ -171,7 +172,7 @@ def account_update(
     changed = False
 
     # Update username if changed
-    if new_username and new_username != current_user:
+    if new_username and new_username != current_user["username"]:
         exists = db.query(AdminUser).filter(
             AdminUser.username == new_username,
             AdminUser.id != admin.id,
@@ -196,7 +197,7 @@ def account_update(
     db.commit()
 
     # Re-issue session cookie with updated username
-    token = _create_session_token(admin.username)
+    token = _create_session_token(admin.username, admin.role)
     response = templates.TemplateResponse("account.html", {
         "request": request,
         "current_username": admin.username,
@@ -327,10 +328,12 @@ def pc_grid_partial(
 @router.get("/license", response_class=HTMLResponse)
 def license_page(
     request: Request,
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
     from main import license_service
     lic = license_service.get_status() if license_service else {}
     return templates.TemplateResponse("license.html", {
@@ -343,10 +346,12 @@ def license_page(
 def rates_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
     rates = (
         db.query(CoinRate)
         .filter(CoinRate.is_active == True)
@@ -365,10 +370,12 @@ def save_rate(
     pesos: int = Form(...),
     minutes: int = Form(...),
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
     existing = db.query(CoinRate).filter(
         CoinRate.pesos == pesos, CoinRate.is_active == True
     ).first()
@@ -401,10 +408,12 @@ def delete_rate(
     rate_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
     rate = db.query(CoinRate).filter(CoinRate.id == rate_id).first()
     if rate:
         rate.is_active = False
@@ -427,10 +436,12 @@ def transactions_page(
     days: int = 0,
     pc_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
 
     query = db.query(CoinTransaction).join(PC, CoinTransaction.pc_id == PC.id, isouter=True)
     if days and days > 0:
@@ -461,10 +472,12 @@ def transactions_page(
 def logs_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
     logs = (
         db.query(SystemLog)
         .order_by(desc(SystemLog.created_at))
@@ -559,11 +572,13 @@ def dashboard_rename_pc(
     pc_number: int,
     body: RenamePcBody,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     """Rename a PC — called from the PC Management page."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
 
     name = body.name.strip()
     if not name:
@@ -688,20 +703,24 @@ def serve_screenshot(
 @router.get("/docs/api", response_class=HTMLResponse)
 def docs_api_page(
     request: Request,
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
     return templates.TemplateResponse("docs_api.html", {"request": request})
 
 
 @router.get("/docs/wiring", response_class=HTMLResponse)
 def docs_wiring_page(
     request: Request,
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
     return templates.TemplateResponse("docs_wiring.html", {"request": request})
 
 
@@ -860,10 +879,12 @@ def reports_page(
     request: Request,
     days: int = 30,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
     ctx = _reports_data(days, db)
     return templates.TemplateResponse("reports.html", {
         "request": request,
@@ -876,10 +897,12 @@ def reports_page(
 def reports_export_csv(
     days: int = 0,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
 
     query = (
         db.query(CoinTransaction)
@@ -932,10 +955,12 @@ def send_pc_message(
 def send_pc_command(
     pc_number: int,
     body: SendCommandBody,
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
     allowed = {"shutdown", "restart", "lock", "open_url"}
     if body.type not in allowed:
         raise HTTPException(status_code=422, detail=f"Unknown command type: {body.type}")
@@ -1020,10 +1045,12 @@ _MAX_WALLPAPER_SIZE = 5 * 1024 * 1024  # 5 MB
 def wallpaper_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
 
     wallpapers = _list_wallpaper_files()
     wp_url, wp_hash = command_store.get_wallpaper()
@@ -1181,27 +1208,81 @@ from services.membership_service import MembershipService
 def settings_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
 
     msvc = MembershipService(db)
     cfg = msvc.get_config()
+    srv_cfg = db.query(ServerConfig).first()
+    api_key = srv_cfg.client_api_key if srv_cfg else ""
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "config": cfg,
+        "api_key_enabled": bool(api_key),
+        "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
     })
+
+
+@router.post("/api/security/generate-key")
+def generate_api_key(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Generate a new random client API key and store it in the database."""
+    import secrets
+    if not current_user:
+        raise HTTPException(status_code=401)
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    new_key = secrets.token_hex(24)  # 48-char hex key
+
+    srv_cfg = db.query(ServerConfig).first()
+    if srv_cfg:
+        srv_cfg.client_api_key = new_key
+    else:
+        db.add(ServerConfig(id=1, client_api_key=new_key))
+    db.commit()
+
+    # Apply immediately without restart
+    settings.CLIENT_API_KEY = new_key
+    return {"key": new_key}
+
+
+@router.post("/api/security/clear-key")
+def clear_api_key(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Disable client API key authentication."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    srv_cfg = db.query(ServerConfig).first()
+    if srv_cfg:
+        srv_cfg.client_api_key = ""
+        db.commit()
+
+    settings.CLIENT_API_KEY = ""
+    return {"status": "disabled"}
 
 
 @router.get("/membership", response_class=HTMLResponse)
 def membership_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[str] = Depends(_validate_session),
+    current_user: Optional[dict] = Depends(_validate_session),
 ):
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
 
     msvc = MembershipService(db)
     cfg = msvc.get_config()
@@ -1337,3 +1418,85 @@ def force_logout_member(
     if not ok:
         raise HTTPException(status_code=404, detail="Member not found or not logged in")
     return {"status": "logged_out", "member_id": member_id}
+
+
+# ── Staff management (admin only) ────────────────────────────────────────────
+
+class CreateStaffBody(BaseModel):
+    username: str
+    password: str
+    role: str  # "admin" | "cashier"
+
+
+@router.get("/staff", response_class=HTMLResponse)
+def staff_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
+
+    staff = db.query(AdminUser).order_by(AdminUser.created_at).all()
+    return templates.TemplateResponse("staff.html", {
+        "request": request,
+        "staff": staff,
+        "current_username": current_user["username"],
+        "success": request.query_params.get("success"),
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/api/staff/create")
+def create_staff_user(
+    body: CreateStaffBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if body.role not in ("admin", "cashier"):
+        raise HTTPException(status_code=422, detail="Role must be 'admin' or 'cashier'")
+
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username cannot be empty")
+    if len(body.password) < 6:
+        raise HTTPException(status_code=422, detail="Password must be at least 6 characters")
+
+    existing = db.query(AdminUser).filter(AdminUser.username == username).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+    hashed = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+    new_user = AdminUser(username=username, password=hashed, role=body.role)
+    db.add(new_user)
+    db.commit()
+    return {"status": "created", "username": username, "role": body.role}
+
+
+@router.post("/api/staff/{user_id}/delete")
+def delete_staff_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    target = db.query(AdminUser).filter(AdminUser.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.username == current_user["username"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    db.delete(target)
+    db.commit()
+    return {"status": "deleted", "user_id": user_id}

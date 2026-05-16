@@ -71,6 +71,33 @@ Namespace Services
         End Function
 
         ''' <summary>
+        ''' Asks the server to open the coin slot for this PC so the user can insert coins.
+        ''' Returns (True, "") on success, or (False, reason) if the request was rejected.
+        ''' reason is the server's detail string, e.g. "Coin slot is busy".
+        ''' </summary>
+        Public Async Function RequestCoinsAsync() As Task(Of (Ok As Boolean, Detail As String))
+            Try
+                Dim url = $"{_baseUrl}/api/pc/{_pcNumber}/request-coins"
+                Dim response = Await _client.PostAsync(url, Nothing)
+                If response.IsSuccessStatusCode Then
+                    Return (True, String.Empty)
+                End If
+                ' Read the server's error detail for a user-friendly message
+                Dim body = Await response.Content.ReadAsStringAsync()
+                Dim detail As String = "Unknown error"
+                Try
+                    Dim doc = Text.Json.JsonDocument.Parse(body)
+                    Dim d = doc.RootElement.GetProperty("detail").GetString()
+                    If Not String.IsNullOrEmpty(d) Then detail = d
+                Catch
+                End Try
+                Return (False, detail)
+            Catch
+                Return (False, "Server unreachable")
+            End Try
+        End Function
+
+        ''' <summary>
         ''' Sends a heartbeat to the server and gets back session state.
         ''' Returns Nothing if the server is unreachable.
         ''' </summary>

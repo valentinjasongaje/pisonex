@@ -2,14 +2,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Server
     DATABASE_URL: str = "sqlite:///./pisonet.db"
     SECRET_KEY: str = "change-this-to-a-random-256-bit-secret-key"
     TOKEN_EXPIRE_HOURS: int = 8
     SERVER_HOST: str = "0.0.0.0"
-    SERVER_PORT: int = 8000
+    SERVER_PORT: int = 80
 
     # Coin rates (seconds-based)
     DEFAULT_RATE_PESOS: int = 5
@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # Leave empty ("") to disable auth (default, backward-compatible).
     # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here
     CLIENT_API_KEY: str = ""
+
+    # HMAC secret for signing license API payloads sent to pisonex.com.
+    # Must match the value configured on the pisonex.com server.
+    # Auto-generated on first startup if left as the default.
+    LICENSE_HMAC_SECRET: str = "PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
 
     # Membership defaults (used to seed MembershipConfig on first run)
     MEMBERSHIP_ENABLED: bool = False

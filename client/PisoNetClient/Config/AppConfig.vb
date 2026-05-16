@@ -9,7 +9,7 @@ Namespace Config
         Public ReadOnly Property ServerUrl As String
             Get
                 Dim val = ReadReg("ServerUrl")
-                Return If(String.IsNullOrWhiteSpace(val), "http://192.168.1.21:8000", val)
+                Return If(String.IsNullOrWhiteSpace(val), "http://pisonex.local", val)
             End Get
         End Property
 
@@ -23,7 +23,7 @@ Namespace Config
                 ' Strip scheme
                 If url.StartsWith("http://") Then url = url.Substring(7)
                 If url.StartsWith("https://") Then url = url.Substring(8)
-                ' Strip port (e.g. ":8000") and any trailing path
+                ' Strip port (e.g. ":8080") and any trailing path
                 Dim colonIdx = url.IndexOf(":")
                 If colonIdx >= 0 Then url = url.Substring(0, colonIdx)
                 Dim slashIdx = url.IndexOf("/")
@@ -379,54 +379,7 @@ Namespace Config
             End Get
         End Property
 
-        ' ── License activation ─────────────────────────────────────────────
-        Public ReadOnly Property LicenseKey As String
-            Get
-                Return If(ReadReg("LicenseKey"), "")
-            End Get
-        End Property
-
-        Public ReadOnly Property LicenseDeviceId As String
-            Get
-                Return If(ReadReg("LicenseDeviceId"), "")
-            End Get
-        End Property
-
-        Public ReadOnly Property LicenseActivatedAt As String
-            Get
-                Return If(ReadReg("LicenseActivatedAt"), "")
-            End Get
-        End Property
-
-        Public ReadOnly Property LicenseExpiresAt As String
-            Get
-                Return If(ReadReg("LicenseExpiresAt"), "")
-            End Get
-        End Property
-
-        Public ReadOnly Property LicenseLastVerified As String
-            Get
-                Return If(ReadReg("LicenseLastVerified"), "")
-            End Get
-        End Property
-
-        Public ReadOnly Property LicenseFirstRunDate As String
-            Get
-                Return If(ReadReg("LicenseFirstRunDate"), "")
-            End Get
-        End Property
-
-        Public ReadOnly Property LicenseBetaMode As String
-            Get
-                Return If(ReadReg("LicenseBetaMode"), "")
-            End Get
-        End Property
-
-        Public ReadOnly Property LicenseBetaCheckedAt As String
-            Get
-                Return If(ReadReg("LicenseBetaCheckedAt"), "")
-            End Get
-        End Property
+        ' License data has been moved to LicenseStore (DPAPI-encrypted file).
 
         ' ── First-run flag ─────────────────────────────────────────────────
         Public ReadOnly Property IsConfigured As Boolean
@@ -442,9 +395,7 @@ Namespace Config
         Public Sub SavePCNumber(n As Integer)
             WriteReg("PCNumber", n.ToString())
         End Sub
-        Public Sub SaveAdminPin(pin As String)
-            WriteReg("AdminPin", pin)
-        End Sub
+        ' SaveAdminPin removed — PIN is now hashed and stored in LicenseStore (DPAPI).
         Public Sub SaveLockBgArgb(argb As Integer)
             WriteReg("LockBgArgb", argb.ToString())
         End Sub
@@ -561,30 +512,6 @@ Namespace Config
         End Sub
         Public Sub SaveApiKey(value As String)
             WriteReg("ApiKey", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseKey(value As String)
-            WriteReg("LicenseKey", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseDeviceId(value As String)
-            WriteReg("LicenseDeviceId", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseActivatedAt(value As String)
-            WriteReg("LicenseActivatedAt", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseExpiresAt(value As String)
-            WriteReg("LicenseExpiresAt", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseLastVerified(value As String)
-            WriteReg("LicenseLastVerified", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseFirstRunDate(value As String)
-            WriteReg("LicenseFirstRunDate", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseBetaMode(value As String)
-            WriteReg("LicenseBetaMode", If(value, ""))
-        End Sub
-        Public Sub SaveLicenseBetaCheckedAt(value As String)
-            WriteReg("LicenseBetaCheckedAt", If(value, ""))
         End Sub
         ''' <summary>Saves own exe path so the watchdog can find it after a restart.</summary>
         Public Sub SaveClientExePath(path As String)

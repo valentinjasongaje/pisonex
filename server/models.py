@@ -115,4 +115,19 @@ class AdminUser(Base):
     id         = Column(Integer, primary_key=True, index=True)
     username   = Column(String(50), unique=True, nullable=False)
     password   = Column(String(255), nullable=False)  # bcrypt hashed
+    role       = Column(String(20), nullable=False, default="admin")  # "admin" | "cashier"
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ServerConfig(Base):
+    """Singleton server configuration row (id always = 1).
+
+    Stores settings that the admin can change via the dashboard at runtime,
+    without requiring .env edits or a server restart.
+    """
+    __tablename__ = "server_config"
+
+    id             = Column(Integer, primary_key=True, default=1)
+    # Empty string = client auth disabled (default). Non-empty = all PC clients
+    # must send this value in the X-API-Key header.
+    client_api_key = Column(String(128), nullable=False, default="")

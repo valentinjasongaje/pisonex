@@ -43,32 +43,51 @@ Namespace Services
         Private _verifyTimer As System.Timers.Timer
         Private _betaTimer As System.Timers.Timer
 
-        ' ── Beta mode (fetched from pisonex.com) ────────────────────────
-
-        Public Sub LoadCachedBetaMode()
-            Dim cached = AppConfig.LicenseBetaMode
-            If Not String.IsNullOrEmpty(cached) Then
-                _betaMode = cached.Equals("1", StringComparison.OrdinalIgnoreCase) OrElse
-                            cached.Equals("true", StringComparison.OrdinalIgnoreCase)
-            End If
-        End Sub
+        ' ── Beta mode (fetched from pisonex.com — memory only, never cached) ──
 
         Public Async Function FetchBetaStatusAsync() As Task
             Try
-                Dim resp = Await _httpClient.GetAsync($"{PISONEX_API}/api/status")
+                ' POST instead of GET so we can include telemetry.
+                ' pisonex.com records this as a "ping" — captures trial installs
+                ' that have never activated, their version, and status.
+                Dim payload = New Dictionary(Of String, String) From {
+                    {"device_id", GetDeviceId()}
+                }
+                For Each kv In BuildTelemetry()
+                    payload(kv.Key) = kv.Value
+                Next
+
+                Dim json = JsonSerializer.Serialize(payload)
+                Dim content = New StringContent(json, Encoding.UTF8, "application/json")
+                Dim resp = Await _httpClient.PostAsync($"{PISONEX_API}/api/status", content)
                 If resp.IsSuccessStatusCode Then
                     Dim body = Await resp.Content.ReadAsStringAsync()
                     Dim doc = JsonDocument.Parse(body)
+
                     Dim betaProp As JsonElement
                     If doc.RootElement.TryGetProperty("beta", betaProp) Then
                         _betaMode = betaProp.GetBoolean()
                     End If
-                    AppConfig.SaveLicenseBetaMode(If(_betaMode, "1", "0"))
-                    AppConfig.SaveLicenseBetaCheckedAt(DateTime.UtcNow.ToString("o"))
+                    ' Beta status intentionally NOT saved — must come from server every time.
+
+                    ' Restore trial clock from server if license.dat was deleted or is fresh.
+                    ' first_seen_at is the date pisonex.com first recorded this device,
+                    ' so deleting license.dat cannot reset the trial as long as the device_id
+                    ' (CPU + disk fingerprint) stays the same.
+                    If String.IsNullOrEmpty(LicenseStore.LicenseFirstRunDate) Then
+                        Dim firstSeenProp As JsonElement
+                        If doc.RootElement.TryGetProperty("first_seen_at", firstSeenProp) AndAlso
+                           firstSeenProp.ValueKind = JsonValueKind.String Then
+                            Dim serverDate = firstSeenProp.GetString()
+                            If Not String.IsNullOrEmpty(serverDate) Then
+                                LicenseStore.LicenseFirstRunDate = serverDate
+                            End If
+                        End If
+                    End If
                 End If
             Catch
-                ' Offline — use cached value
-                LoadCachedBetaMode()
+                ' Cannot reach pisonex.com — fail closed (beta = false, date not restored)
+                _betaMode = False
             End Try
         End Function
 
@@ -82,17 +101,46 @@ Namespace Services
             _betaTimer.Start()
         End Sub
 
+        ' ── Telemetry helpers ────────────────────────────────────────────
+
+        ''' <summary>
+        ''' Returns a dictionary of telemetry fields that pisonex.com records on
+        ''' every license API call — version, status, trial days, PC info.
+        ''' These fields are ignored by older API versions so they are always safe to send.
+        ''' </summary>
+        Private Function BuildTelemetry() As Dictionary(Of String, String)
+            Return New Dictionary(Of String, String) From {
+                {"app_version", GetAppVersion()},
+                {"license_status", GetStatus().ToString().ToLower()},
+                {"trial_days_remaining", TrialDaysRemaining().ToString()},
+                {"pc_number", AppConfig.PCNumber.ToString()},
+                {"machine_name", Environment.MachineName}
+            }
+        End Function
+
+        Private Function GetAppVersion() As String
+            Try
+                Dim v = Reflection.Assembly.GetExecutingAssembly().GetName().Version
+                Return $"{v.Major}.{v.Minor}.{v.Build}"
+            Catch
+                Return "unknown"
+            End Try
+        End Function
+
         ' ── Device ID ────────────────────────────────────────────────────
 
         Public Function GetDeviceId() As String
-            Dim cached = AppConfig.LicenseDeviceId
+            Dim cached = LicenseStore.LicenseDeviceId
             If Not String.IsNullOrEmpty(cached) Then Return cached
 
-            Dim raw = GetCpuId() & "|" & GetDiskSerial() & "|" & GetMacAddress()
+            ' MAC address intentionally excluded — it's trivially changed in Windows
+            ' (Device Manager → adapter properties → Advanced → Network Address),
+            ' which would produce a new hash and bypass trial tracking after deleting license.dat.
+            Dim raw = GetCpuId() & "|" & GetDiskSerial()
             Dim bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw))
             Dim deviceId = BitConverter.ToString(bytes).Replace("-", "").ToLower()
 
-            AppConfig.SaveLicenseDeviceId(deviceId)
+            LicenseStore.LicenseDeviceId = deviceId
             Return deviceId
         End Function
 
@@ -121,18 +169,6 @@ Namespace Services
             Return ""
         End Function
 
-        Private Function GetMacAddress() As String
-            Try
-                Dim nic = Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces().
-                    Where(Function(n) n.OperationalStatus = Net.NetworkInformation.OperationalStatus.Up AndAlso
-                                      n.NetworkInterfaceType <> Net.NetworkInformation.NetworkInterfaceType.Loopback).
-                    OrderByDescending(Function(n) n.Speed).
-                    FirstOrDefault()
-                If nic IsNot Nothing Then Return nic.GetPhysicalAddress().ToString()
-            Catch
-            End Try
-            Return ""
-        End Function
 
         ' ── Activation ───────────────────────────────────────────────────
 
@@ -146,6 +182,9 @@ Namespace Services
                 {"device_label", deviceLabel},
                 {"device_type", "pc"}
             }
+            For Each kv In BuildTelemetry()
+                payload(kv.Key) = kv.Value
+            Next
 
             Try
                 Dim json = JsonSerializer.Serialize(payload)
@@ -156,9 +195,9 @@ Namespace Services
                 Debug.WriteLine($"[LICENSE] Activate response: HTTP {CInt(resp.StatusCode)} — {body}")
 
                 If resp.IsSuccessStatusCode Then
-                    AppConfig.SaveLicenseKey(licenseKey)
-                    AppConfig.SaveLicenseActivatedAt(DateTime.UtcNow.ToString("o"))
-                    AppConfig.SaveLicenseLastVerified(DateTime.UtcNow.ToString("o"))
+                    LicenseStore.LicenseKey = licenseKey
+                    LicenseStore.LicenseActivatedAt = DateTime.UtcNow.ToString("o")
+                    LicenseStore.LicenseLastVerified = DateTime.UtcNow.ToString("o")
 
                     Dim doc = JsonDocument.Parse(body)
                     Dim expiresAt = ""
@@ -166,7 +205,7 @@ Namespace Services
                     If doc.RootElement.TryGetProperty("expires_at", expProp) Then
                         If expProp.ValueKind <> JsonValueKind.Null Then
                             expiresAt = expProp.GetString()
-                            AppConfig.SaveLicenseExpiresAt(expiresAt)
+                            LicenseStore.LicenseExpiresAt = expiresAt
                         End If
                     End If
 
@@ -209,7 +248,7 @@ Namespace Services
         End Function
 
         Public Async Function DeactivateAsync() As Task(Of Boolean)
-            Dim key = AppConfig.LicenseKey
+            Dim key = LicenseStore.LicenseKey
             Dim deviceId = GetDeviceId()
 
             If Not String.IsNullOrEmpty(key) Then
@@ -225,18 +264,15 @@ Namespace Services
                 End Try
             End If
 
-            ' Clear local license data (keep FirstRunDate)
-            AppConfig.SaveLicenseKey("")
-            AppConfig.SaveLicenseActivatedAt("")
-            AppConfig.SaveLicenseExpiresAt("")
-            AppConfig.SaveLicenseLastVerified("")
+            ' Clear activation fields only — FirstRunDate stays so trial clock is not reset
+            LicenseStore.ClearActivation()
             Return True
         End Function
 
         ' ── Verification ─────────────────────────────────────────────────
 
         Public Async Function VerifyAsync() As Task(Of Boolean)
-            Dim key = AppConfig.LicenseKey
+            Dim key = LicenseStore.LicenseKey
             If String.IsNullOrEmpty(key) Then Return False
 
             Dim deviceId = GetDeviceId()
@@ -246,6 +282,9 @@ Namespace Services
                     {"license_key", key},
                     {"device_id", deviceId}
                 }
+                For Each kv In BuildTelemetry()
+                    payload(kv.Key) = kv.Value
+                Next
                 Dim json = JsonSerializer.Serialize(payload)
                 Dim content = New StringContent(json, Encoding.UTF8, "application/json")
                 Dim resp = Await _httpClient.PostAsync($"{PISONEX_API}/api/license/verify", content)
@@ -255,12 +294,12 @@ Namespace Services
                     Dim doc = JsonDocument.Parse(body)
                     Dim valid = doc.RootElement.GetProperty("valid").GetBoolean()
                     If valid Then
-                        AppConfig.SaveLicenseLastVerified(DateTime.UtcNow.ToString("o"))
+                        LicenseStore.LicenseLastVerified = DateTime.UtcNow.ToString("o")
 
                         Dim expProp As JsonElement
                         If doc.RootElement.TryGetProperty("expires_at", expProp) AndAlso
                            expProp.ValueKind <> JsonValueKind.Null Then
-                            AppConfig.SaveLicenseExpiresAt(expProp.GetString())
+                            LicenseStore.LicenseExpiresAt = expProp.GetString()
                         End If
                         Return True
                     End If
@@ -274,12 +313,12 @@ Namespace Services
         ' ── Status ───────────────────────────────────────────────────────
 
         Public Function IsActivated() As Boolean
-            Return Not String.IsNullOrEmpty(AppConfig.LicenseKey) AndAlso
-                   Not String.IsNullOrEmpty(AppConfig.LicenseActivatedAt)
+            Return Not String.IsNullOrEmpty(LicenseStore.LicenseKey) AndAlso
+                   Not String.IsNullOrEmpty(LicenseStore.LicenseActivatedAt)
         End Function
 
         Public Function TrialDaysRemaining() As Integer
-            Dim firstRun = AppConfig.LicenseFirstRunDate
+            Dim firstRun = LicenseStore.LicenseFirstRunDate
             If String.IsNullOrEmpty(firstRun) Then Return TRIAL_DAYS
 
             Dim firstDt As DateTime
@@ -295,7 +334,7 @@ Namespace Services
         End Function
 
         Public Function IsLicenseExpired() As Boolean
-            Dim expiresAt = AppConfig.LicenseExpiresAt
+            Dim expiresAt = LicenseStore.LicenseExpiresAt
             If String.IsNullOrEmpty(expiresAt) Then Return False  ' lifetime
 
             Dim expDt As DateTime
@@ -308,7 +347,7 @@ Namespace Services
         Public Function IsOfflineLocked() As Boolean
             If Not IsActivated() Then Return False
 
-            Dim lastVerified = AppConfig.LicenseLastVerified
+            Dim lastVerified = LicenseStore.LicenseLastVerified
             If String.IsNullOrEmpty(lastVerified) Then Return False
 
             Dim lastDt As DateTime
@@ -340,7 +379,7 @@ Namespace Services
         End Function
 
         Public Function GetMaskedKey() As String
-            Dim key = AppConfig.LicenseKey
+            Dim key = LicenseStore.LicenseKey
             If String.IsNullOrEmpty(key) Then Return ""
             Dim parts = key.Split("-"c)
             If parts.Length >= 5 Then
@@ -360,10 +399,7 @@ Namespace Services
                     If Not valid Then
                         ' Server rejected — device was revoked or license invalidated
                         Debug.WriteLine("[LICENSE] Verification failed — clearing local license")
-                        AppConfig.SaveLicenseKey("")
-                        AppConfig.SaveLicenseActivatedAt("")
-                        AppConfig.SaveLicenseExpiresAt("")
-                        AppConfig.SaveLicenseLastVerified("")
+                        LicenseStore.ClearActivation()
                     End If
                 End If
             End Sub
@@ -372,8 +408,8 @@ Namespace Services
         End Sub
 
         Public Sub EnsureFirstRunDate()
-            If String.IsNullOrEmpty(AppConfig.LicenseFirstRunDate) Then
-                AppConfig.SaveLicenseFirstRunDate(DateTime.UtcNow.ToString("o"))
+            If String.IsNullOrEmpty(LicenseStore.LicenseFirstRunDate) Then
+                LicenseStore.LicenseFirstRunDate = DateTime.UtcNow.ToString("o")
             End If
         End Sub
 

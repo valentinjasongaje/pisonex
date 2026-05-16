@@ -15,6 +15,7 @@ Namespace Services
         Public Event LockFormLoginRequested(username As String, password As String)
         Public Event LockFormRegisterRequested(username As String, password As String)
         Public Event LockFormLogoutRequested()
+        Public Event LockFormInsertCoinRequested()
 
         Public Sub New()
             _lockForm = New Forms.LockForm()
@@ -22,6 +23,7 @@ Namespace Services
             AddHandler _lockForm.MemberLoginRequested, Sub(u, p) RaiseEvent LockFormLoginRequested(u, p)
             AddHandler _lockForm.MemberRegisterRequested, Sub(u, p) RaiseEvent LockFormRegisterRequested(u, p)
             AddHandler _lockForm.MemberLogoutRequested, Sub() RaiseEvent LockFormLogoutRequested()
+            AddHandler _lockForm.InsertCoinRequested, Sub() RaiseEvent LockFormInsertCoinRequested()
         End Sub
 
         Public Sub LockPC()
@@ -82,6 +84,14 @@ Namespace Services
 
         Public Sub ShowReceivingCoins(isReceiving As Boolean)
             _lockForm.ShowReceivingCoins(isReceiving)
+        End Sub
+
+        Public Sub UpdateCoinSlot(enabled As Boolean)
+            _lockForm.UpdateCoinSlot(enabled)
+        End Sub
+
+        Public Sub SetInsertCoinResult(success As Boolean)
+            _lockForm.SetInsertCoinResult(success)
         End Sub
 
         Public Sub ShowMemberError(message As String)

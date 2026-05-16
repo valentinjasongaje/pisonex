@@ -414,7 +414,47 @@ class HardwareController:
             with self._lock:
                 self._show_idle()
 
-    # ── Public API (for testing/dev) ──────────────────────────────
+    # ── Public API ───────────────────────────────────────────────────
+
+    def request_coins_for_pc(self, pc_number: int) -> tuple[bool, str]:
+        """
+        Called via REST API when a PC client presses 'Insert Coin'.
+        Transitions the controller to AWAITING_COINS for the given PC
+        if currently IDLE.  Returns (success, message).
+        """
+        with self._lock:
+            # Idempotent: already waiting for this exact PC
+            if self._state == State.AWAITING_COINS and self._selected_pc == pc_number:
+                return True, "Already accepting coins"
+
+            # Only accept from IDLE — don't interrupt an in-progress keypad session
+            if self._state != State.IDLE:
+                return False, "Coin slot is busy"
+
+            if not self._is_license_active():
+                return False, "License expired"
+
+            if not command_store.is_coins_allowed(pc_number):
+                return False, "Coin slot disabled for this PC"
+
+            pc = self._service.get_pc(pc_number)
+            if not pc:
+                return False, f"PC {pc_number} not found"
+            if not pc.is_online:
+                return False, f"PC {pc_number} is offline"
+
+            self._selected_pc = pc_number
+            self._coins_inserted = False
+            self._total_pesos = 0
+            self._total_seconds = 0
+            self._transition(State.AWAITING_COINS)
+            command_store.set_receiving_coins(pc_number, True)
+            self._coin.enable()
+            self._lcd.show(Screen.pc_selected(pc_number, settings.PC_IDLE_TIMEOUT))
+            self._reset_idle_timer()
+            logger.info("PC %02d: coin slot opened via client Insert Coin request", pc_number)
+
+        return True, "Ready to accept coins"
 
     def simulate_key(self, key: str):
         """Inject a key press without physical hardware."""

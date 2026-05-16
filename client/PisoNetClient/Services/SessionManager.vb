@@ -31,6 +31,9 @@ Namespace Services
         ' Receiving-coins dedup — only fire event when state changes
         Private _lastReceivingCoins As Boolean = False
 
+        ' Coin-slot-enabled dedup — only fire event when state changes
+        Private _lastCoinSlotEnabled As Boolean = True
+
         ' Guards _remainingSeconds from concurrent access
         Private ReadOnly _stateLock As New Object()
 
@@ -54,6 +57,8 @@ Namespace Services
         Public Event WallpaperChanged(url As String, hash As String)
         ''' <summary>Fired when the server signals that the hardware controller is accepting coins for this PC.</summary>
         Public Event ReceivingCoinsChanged(isReceiving As Boolean)
+        ''' <summary>Fired when the server's coin_slot_enabled flag changes (global or per-PC).</summary>
+        Public Event CoinSlotChanged(enabled As Boolean)
         ''' <summary>Fired when membership state changes in heartbeat (enabled, username, balance, etc.).</summary>
         Public Event MembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                         balanceSeconds As Integer, canLogout As Boolean,
@@ -240,6 +245,12 @@ Namespace Services
             If response.receiving_coins <> _lastReceivingCoins Then
                 _lastReceivingCoins = response.receiving_coins
                 RaiseEvent ReceivingCoinsChanged(response.receiving_coins)
+            End If
+
+            ' Coin slot enabled — only fire event when state changes
+            If response.coin_slot_enabled <> _lastCoinSlotEnabled Then
+                _lastCoinSlotEnabled = response.coin_slot_enabled
+                RaiseEvent CoinSlotChanged(response.coin_slot_enabled)
             End If
 
             ' Membership state — always fire so the UI can update

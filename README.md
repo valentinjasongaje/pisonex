@@ -86,7 +86,7 @@ LCD_I2C_ADDRESS=0x27
 
 ## Admin Dashboard
 
-`http://<raspberry-pi-ip>:8000/dashboard`
+`http://<raspberry-pi-ip>/dashboard`
 
 Default credentials: `admin` / `admin123`
 **Change the password in `.env` before going live.**

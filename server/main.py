@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base, SessionLocal
-from models import AdminUser, CoinRate, MembershipConfig
+from models import AdminUser, CoinRate, MembershipConfig, ServerConfig
 from api import auth, pc, sessions, admin
 from api.license import router as license_router
 from api.member import router as member_router
@@ -52,8 +52,85 @@ license_service: LicenseService = None
 
 
 @asynccontextmanager
+def _ensure_firewall_rule():
+    """On Windows, add an inbound firewall rule for the server port (idempotent)."""
+    if sys.platform != "win32":
+        return
+    import subprocess
+    port = settings.SERVER_PORT
+    rule_name = f"Pisonex Server (TCP {port})"
+    try:
+        check = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", f"name={rule_name}"],
+            capture_output=True, text=True,
+        )
+        if check.returncode == 0:
+            return  # rule already exists
+        result = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "add", "rule",
+             f"name={rule_name}", "dir=in", "action=allow",
+             "protocol=TCP", f"localport={port}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            logger.info("Firewall rule added: %s", rule_name)
+        else:
+            logger.warning("Could not add firewall rule (not running as admin?): %s", result.stderr.strip())
+    except Exception as e:
+        logger.warning("Firewall rule check failed: %s", e)
+
+
+_DEFAULT_SECRET = "change-this-to-a-random-256-bit-secret-key"
+_DEFAULT_HMAC = "PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
+
+
+def _enforce_secure_defaults():
+    """Auto-generate SECRET_KEY and ADMIN_PASSWORD if they are still the
+    insecure defaults.  Writes the new values into .env so they persist
+    across restarts.  This runs once on first startup and is safe to
+    re-run (it only acts when the defaults are detected)."""
+    import secrets
+    env_path = Path(__file__).parent / ".env"
+
+    changed = False
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    def _replace_or_append(key: str, value: str):
+        nonlocal changed, lines
+        found = False
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            if stripped.startswith(f"{key}="):
+                lines[i] = f"{key}={value}\n"
+                found = True
+                break
+        if not found:
+            lines.append(f"{key}={value}\n")
+        changed = True
+
+    if settings.SECRET_KEY == _DEFAULT_SECRET:
+        new_key = secrets.token_hex(32)  # 256-bit random key
+        _replace_or_append("SECRET_KEY", new_key)
+        settings.SECRET_KEY = new_key
+        logger.warning("SECRET_KEY was the default — generated a secure random key and saved to .env")
+
+    if settings.LICENSE_HMAC_SECRET == _DEFAULT_HMAC:
+        new_hmac = secrets.token_hex(32)  # 256-bit random HMAC key
+        _replace_or_append("LICENSE_HMAC_SECRET", new_hmac)
+        settings.LICENSE_HMAC_SECRET = new_hmac
+        logger.warning("LICENSE_HMAC_SECRET was the default — generated a secure key and saved to .env")
+
+    if changed:
+        env_path.write_text("".join(lines), encoding="utf-8")
+
+
 async def lifespan(app: FastAPI):
     global hw_controller, license_service
+
+    # Ensure SECRET_KEY and ADMIN_PASSWORD are not the insecure defaults
+    _enforce_secure_defaults()
 
     # Initialize license service and fetch beta status from pisonex.com
     license_service = LicenseService()
@@ -63,12 +140,23 @@ async def lifespan(app: FastAPI):
     # Migrate existing DB columns (v2 → v3 seconds-based rename)
     _migrate_schema()
 
+    # Ensure Windows Firewall allows inbound connections on the server port
+    _ensure_firewall_rule()
+
     # Create all DB tables (creates new tables like membership_config)
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
     try:
         _seed_defaults(db)
+        # Load client API key from DB into settings so dependencies.py picks it up
+        srv_cfg = db.query(ServerConfig).first()
+        if srv_cfg and srv_cfg.client_api_key:
+            settings.CLIENT_API_KEY = srv_cfg.client_api_key
+            logger.info("Client API key loaded from database (auth enabled)")
+        else:
+            settings.CLIENT_API_KEY = ""
+            logger.info("Client API key not set — client auth disabled")
     finally:
         db.close()
 
@@ -162,6 +250,11 @@ def _migrate_schema():
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
             migrated.append(f"users.{col_name} (added)")
 
+    # Add role column to admin_users if missing
+    if not has_column("admin_users", "role"):
+        cursor.execute("ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'")
+        migrated.append("admin_users.role (added)")
+
     # Add new columns to membership_config if missing
     new_membership_columns = [
         ("preset_amounts_enabled", "INTEGER"),
@@ -200,7 +293,8 @@ def _migrate_schema():
 
 def _seed_defaults(db):
     """Insert default admin user, coin rate, and membership config on first run."""
-    if not db.query(AdminUser).first():
+    existing_admin = db.query(AdminUser).first()
+    if not existing_admin:
         admin_user = AdminUser(
             username=settings.ADMIN_USERNAME,
             password=hash_password(settings.ADMIN_PASSWORD),
@@ -235,6 +329,10 @@ def _seed_defaults(db):
         )
         db.add(cfg)
         logger.info("Created default membership config")
+
+    if not db.query(ServerConfig).first():
+        db.add(ServerConfig(id=1, client_api_key=""))
+        logger.info("Created default server config (client auth disabled)")
 
     db.commit()
 
@@ -328,12 +426,42 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: only allow the dashboard's own origin and localhost for dev.
+# PC clients don't use CORS (they're native apps, not browsers).
+# Browsers omit the port from Origin when using the default (80 for http, 443 for https).
+_port_suffix = f":{settings.SERVER_PORT}" if settings.SERVER_PORT not in (80, 443) else ""
+_cors_origins = [
+    "http://pisonex.local",
+    f"http://localhost{_port_suffix}",
+    f"http://127.0.0.1{_port_suffix}",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # Restrict to LAN subnet in production
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Session context middleware ────────────────────────────────────────────────
+# Parses the pisonet_session cookie and attaches user info to request.state so
+# Jinja2 templates can access it via request.state.user_role / .username without
+# requiring each route to pass it explicitly in the template context dict.
+
+@app.middleware("http")
+async def attach_session_to_request(request: Request, call_next):
+    cookie = request.cookies.get("pisonet_session")
+    request.state.username = None
+    request.state.user_role = None
+    if cookie:
+        try:
+            from jose import jwt as _jwt, JWTError
+            payload = _jwt.decode(cookie, settings.SECRET_KEY, algorithms=["HS256"])
+            request.state.username = payload.get("sub")
+            request.state.user_role = payload.get("role", "admin")
+        except Exception:
+            pass
+    return await call_next(request)
+
 
 # ── License enforcement middleware ─────────────────────────────────────────
 # Blocks API requests when license is expired or offline-locked.

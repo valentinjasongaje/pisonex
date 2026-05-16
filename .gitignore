@@ -11,6 +11,8 @@ venv/
 pisonet.log
 pisonet.log.*
 backups/
+dist/
+service_error.log
 
 # ── VB.NET / .NET (client) ───────────────────────────────────────
 bin/

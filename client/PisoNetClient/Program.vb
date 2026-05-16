@@ -68,9 +68,11 @@ Module Program
         _guardTimer.Start()
 
         ' ── License initialization ────────────────────────────────────────
-        LicenseService.EnsureFirstRunDate()
-        LicenseService.LoadCachedBetaMode()
+        ' FetchBetaStatusAsync runs first: it restores LicenseFirstRunDate from
+        ' pisonex.com (first_seen_at) if license.dat was deleted. EnsureFirstRunDate
+        ' then only writes a fresh date if the server had no record either.
         LicenseService.FetchBetaStatusAsync().GetAwaiter().GetResult()
+        LicenseService.EnsureFirstRunDate()
         LicenseService.StartVerificationTimer()
         LicenseService.StartBetaCheckTimer()
 
@@ -116,7 +118,11 @@ Module Program
         AddHandler _session.CommandReceived, AddressOf OnCommandReceived
         AddHandler _session.WallpaperChanged, AddressOf OnWallpaperChanged
         AddHandler _session.ReceivingCoinsChanged, AddressOf OnReceivingCoinsChanged
+        AddHandler _session.CoinSlotChanged, AddressOf OnCoinSlotChanged
         AddHandler _session.MembershipUpdated, AddressOf OnMembershipUpdated
+
+        ' Insert Coin event from lock form
+        AddHandler _lockMgr.LockFormInsertCoinRequested, AddressOf OnInsertCoinRequested
 
         ' Membership events from lock form and overlay
         AddHandler _lockMgr.LockFormLoginRequested, AddressOf OnMemberLogin
@@ -246,6 +252,37 @@ Module Program
 
     Private Sub OnReceivingCoinsChanged(isReceiving As Boolean)
         _lockMgr.ShowReceivingCoins(If(LicenseService.IsActive(), isReceiving, False))
+    End Sub
+
+    Private Sub OnCoinSlotChanged(enabled As Boolean)
+        _lockMgr.UpdateCoinSlot(enabled)
+    End Sub
+
+    Private Sub OnInsertCoinRequested()
+        Task.Run(Async Function()
+            Dim result = Await _api.RequestCoinsAsync()
+            If Not result.Ok Then
+                _lockMgr.SetInsertCoinResult(False)
+                Dim msg As String
+                Dim detail = result.Detail.ToLowerInvariant()
+                If detail.Contains("busy") Then
+                    msg = "The coin slot is currently in use by another PC. Please wait a moment and try again."
+                ElseIf detail.Contains("offline") Then
+                    msg = "This PC appears offline to the server. Please check your connection."
+                ElseIf detail.Contains("disabled") Then
+                    msg = "The coin slot has been disabled. Please contact the cashier."
+                ElseIf detail.Contains("license") Then
+                    msg = "The server license has expired. Please contact the administrator."
+                ElseIf detail.Contains("hardware") OrElse detail.Contains("not available") Then
+                    msg = "This server has no coin slot hardware. Please contact the cashier."
+                Else
+                    msg = "Could not open the coin slot. Please use the keypad unit or contact staff."
+                End If
+                _notifs.Show("Coin Slot Unavailable", msg, ToastType.Warning)
+            End If
+            ' On success the next heartbeat returns receiving_coins=True,
+            ' which triggers ShowReceivingCoins(True) and hides the button.
+        End Function)
     End Sub
 
     ' ── Remote control handlers ────────────────────────────────────────────
@@ -447,7 +484,7 @@ Module Program
 
         ' Ask for password
         Dim enteredPin = AskForPin()
-        If enteredPin Is Nothing OrElse enteredPin <> AppConfig.AdminPin Then
+        If enteredPin Is Nothing OrElse Not Config.LicenseStore.VerifyAdminPin(enteredPin) Then
             If enteredPin IsNot Nothing Then
                 MessageBox.Show("Incorrect password.", "Admin Access",
                                 MessageBoxButtons.OK, MessageBoxIcon.Warning)
@@ -475,6 +512,7 @@ Module Program
         _guardTimer?.Stop()
         _guardTimer?.Dispose()
         WindowsPolicy.RemoveAll()
+        _session?.Dispose()   ' stop heartbeat + countdown timers before closing lock form
         _capture?.Dispose()
         _metrics?.Dispose()
         _memberSvc?.Dispose()
