@@ -238,6 +238,12 @@ Namespace Services
                         End If
                     End If
 
+                    Dim tokenProp As JsonElement
+                    If doc.RootElement.TryGetProperty("token", tokenProp) AndAlso
+                       tokenProp.ValueKind = JsonValueKind.String Then
+                        LicenseStore.LicenseToken = tokenProp.GetString()
+                    End If
+
                     Return New ActivateResult With {
                         .Success = True,
                         .ExpiresAt = expiresAt
@@ -321,8 +327,16 @@ Namespace Services
                 If resp.IsSuccessStatusCode Then
                     Dim body = Await resp.Content.ReadAsStringAsync()
                     Dim doc = JsonDocument.Parse(body)
-                    Dim valid = doc.RootElement.GetProperty("valid").GetBoolean()
+                    Dim valid As Boolean = False
+                    Dim validProp As JsonElement
+                    If doc.RootElement.TryGetProperty("valid", validProp) Then
+                        valid = validProp.GetBoolean()
+                    End If
+
                     If valid Then
+                        ' Success — clear offline tracking, store fresh token
+                        LicenseStore.OfflineSince = ""
+                        LicenseStore.ServerRejected = False
                         LicenseStore.LicenseLastVerified = DateTime.UtcNow.ToString("o")
 
                         Dim expProp As JsonElement
@@ -330,13 +344,39 @@ Namespace Services
                            expProp.ValueKind <> JsonValueKind.Null Then
                             LicenseStore.LicenseExpiresAt = expProp.GetString()
                         End If
+
+                        Dim tokenProp As JsonElement
+                        If doc.RootElement.TryGetProperty("token", tokenProp) AndAlso
+                           tokenProp.ValueKind = JsonValueKind.String Then
+                            LicenseStore.LicenseToken = tokenProp.GetString()
+                        End If
+
                         Return True
                     End If
                 End If
-            Catch
-            End Try
 
-            Return False
+                ' Server responded but rejected the device (revoked/inactive/expired).
+                ' Clear token immediately — server decision overrides any grace period.
+                LicenseStore.LicenseToken = ""
+                LicenseStore.OfflineSince = ""
+                LicenseStore.ServerRejected = True
+                Return False
+
+            Catch ex As HttpRequestException
+                ' Network failure — start offline grace tracking
+                If String.IsNullOrEmpty(LicenseStore.OfflineSince) Then
+                    LicenseStore.OfflineSince = DateTime.UtcNow.ToString("o")
+                End If
+                Return False
+            Catch ex As TaskCanceledException
+                ' Timeout — treat as network failure
+                If String.IsNullOrEmpty(LicenseStore.OfflineSince) Then
+                    LicenseStore.OfflineSince = DateTime.UtcNow.ToString("o")
+                End If
+                Return False
+            Catch
+                Return False
+            End Try
         End Function
 
         ' ── Status ───────────────────────────────────────────────────────
@@ -363,22 +403,40 @@ Namespace Services
         End Function
 
         Public Function IsLicenseExpired() As Boolean
-            Dim expiresAt = LicenseStore.LicenseExpiresAt
-            If String.IsNullOrEmpty(expiresAt) Then Return False  ' lifetime
-
-            Dim expDt As DateTime
-            If DateTime.TryParse(expiresAt, expDt) Then
-                Return DateTime.UtcNow > expDt
+            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+            If claims IsNot Nothing Then
+                If Not claims.LicenseExpiresAt.HasValue Then Return False
+                Return DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.LicenseExpiresAt.Value
             End If
+            Dim expiresAt = LicenseStore.LicenseExpiresAt
+            If String.IsNullOrEmpty(expiresAt) Then Return False
+            Dim expDt As DateTime
+            If DateTime.TryParse(expiresAt, expDt) Then Return DateTime.UtcNow > expDt
             Return False
         End Function
 
         Public Function IsOfflineLocked() As Boolean
             If Not IsActivated() Then Return False
 
+            ' Server explicitly rejected — no grace period
+            If LicenseStore.ServerRejected Then Return True
+
+            ' Valid token = verified within 8h — not offline locked
+            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+            If claims IsNot Nothing Then Return False
+
+            ' Token expired — check how long we've been offline
+            Dim offlineSince = LicenseStore.OfflineSince
+            If Not String.IsNullOrEmpty(offlineSince) Then
+                Dim offlineDt As DateTime
+                If DateTime.TryParse(offlineSince, offlineDt) Then
+                    Return (DateTime.UtcNow - offlineDt).TotalHours > OFFLINE_GRACE_HOURS
+                End If
+            End If
+
+            ' Fallback for installs without offline_since tracking yet
             Dim lastVerified = LicenseStore.LicenseLastVerified
             If String.IsNullOrEmpty(lastVerified) Then Return False
-
             Dim lastDt As DateTime
             If DateTime.TryParse(lastVerified, lastDt) Then
                 Return (DateTime.UtcNow - lastDt).TotalHours > OFFLINE_GRACE_HOURS
@@ -389,6 +447,18 @@ Namespace Services
         Public Function IsActive() As Boolean
             If _betaMode Then Return True
             If IsActivated() Then
+                ' Server explicitly rejected — no grace period
+                If LicenseStore.ServerRejected Then Return False
+
+                Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+                If claims IsNot Nothing Then
+                    If DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.ExpiresAt Then
+                        Return Not IsOfflineLocked()
+                    End If
+                    If claims.LicenseExpiresAt.HasValue AndAlso
+                       DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.LicenseExpiresAt.Value Then Return False
+                    Return True
+                End If
                 If IsLicenseExpired() Then Return False
                 If IsOfflineLocked() Then Return False
                 Return True

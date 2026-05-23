@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+from jose import jwt, exceptions as jose_exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,6 @@ PISONEX_API = "https://www.pisonex.com"
 
 # Resolve the data directory relative to the executable when frozen by PyInstaller,
 # or relative to this source file when running normally.
-# Do NOT use __file__ alone — it's unreliable inside a frozen PyInstaller bundle.
 if getattr(sys, "frozen", False):
     _APP_DIR = Path(sys.executable).parent
 else:
@@ -28,28 +28,79 @@ else:
 
 from config import settings as _settings
 
+# ── ES256 public key (matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com) ────
+# Generated 2026-05-23. Replace both keys together if rotating.
+_LICENSE_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEMPqOTqe2MzuA4WZDi5LkXR8eDsDZ
+LzZRzgFpKVqJaolIe9zRoFAZTEbuB0solxxBxQe0BZOGB35P377p6o6ppw==
+-----END PUBLIC KEY-----"""
+
+
+def _verify_license_token(token: str) -> Optional[dict]:
+    """Verify an ES256-signed token from pisonex.com. Returns claims or None."""
+    try:
+        claims = jwt.decode(
+            token,
+            _LICENSE_PUBLIC_KEY,
+            algorithms=["ES256"],
+            options={"verify_aud": False},
+        )
+        return claims
+    except Exception:
+        return None
+
 
 def _get_hmac_secret() -> bytes:
-    """Return the HMAC secret as bytes, read from Settings (.env)."""
     return _settings.LICENSE_HMAC_SECRET.encode()
 
 
 def _signed_payload(body: dict) -> dict:
-    """Add a timestamp + HMAC-SHA256 signature to an outgoing API payload.
-
-    The pisonex.com API should reject any request whose signature does not
-    match or whose timestamp is more than 5 minutes old, preventing replay
-    attacks from anyone who extracts the license key from license.json.
+    """Add timestamp + HMAC-SHA256 signature to an outgoing payload.
+    The pisonex.com server validates _ts (5-minute window) to block replays.
     """
     ts = str(int(time.time()))
     canonical = json.dumps(body, separators=(",", ":"), sort_keys=True) + ts
     sig = hmac.new(_get_hmac_secret(), canonical.encode(), hashlib.sha256).hexdigest()
     return {**body, "_ts": ts, "_sig": sig}
+
+
 LICENSE_FILE = _APP_DIR / "data" / "license.json"
 TRIAL_DAYS = 14
-OFFLINE_GRACE_HOURS = 72  # 3 days
+OFFLINE_GRACE_HOURS = 72
 VERIFY_INTERVAL_HOURS = 6
-BETA_CHECK_INTERVAL_HOURS = 1  # how often to re-fetch beta flag
+BETA_CHECK_INTERVAL_HOURS = 1
+
+
+def _get_machine_id() -> str:
+    """Return a stable hardware-bound identifier for this machine.
+
+    Linux/Pi: /etc/machine-id  (systemd UUID, unique per device, never changes)
+    Windows:  HKLM MachineGuid (set at Windows installation time)
+    Fallback: hostname + architecture (no MAC — easily spoofed)
+    """
+    # Linux / Raspberry Pi / Orange Pi
+    mid_path = Path("/etc/machine-id")
+    if mid_path.exists():
+        val = mid_path.read_text().strip()
+        if val:
+            return val
+
+    # Windows
+    try:
+        import winreg  # type: ignore
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Cryptography",
+        )
+        val, _ = winreg.QueryValueEx(key, "MachineGuid")
+        winreg.CloseKey(key)
+        if val:
+            return str(val)
+    except Exception:
+        pass
+
+    # Fallback — no MAC address (trivially changed in software)
+    return f"{platform.node()}|{platform.machine()}|{platform.processor()}"
 
 
 class LicenseStatus(str, Enum):
@@ -62,7 +113,7 @@ class LicenseStatus(str, Enum):
 class LicenseService:
     def __init__(self):
         self._data: dict = {}
-        self._beta_mode: bool = False  # default: licensing enforced until first successful fetch
+        self._beta_mode: bool = False
         self._beta_last_checked: Optional[datetime] = None
         self._load()
 
@@ -77,50 +128,53 @@ class LicenseService:
         if "first_run" not in self._data:
             self._data["first_run"] = datetime.utcnow().isoformat()
             self._save()
-        self._load_cached_beta()
+        # beta_mode is intentionally NOT loaded from disk — must come from server
 
     def _save(self):
         LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
         LICENSE_FILE.write_text(json.dumps(self._data, indent=2))
 
-    # ── Beta mode (fetched from pisonex.com) ─────────────────────────
+    # ── Beta mode (memory-only, never persisted) ─────────────────────
 
     @property
     def beta_mode(self) -> bool:
         return self._beta_mode
 
     async def fetch_beta_status(self) -> bool:
-        """Fetch beta flag from pisonex.com and cache locally."""
+        """POST to /api/status with device_id for telemetry and beta flag.
+        Also restores first_seen_at from the server if local first_run is missing.
+        Beta flag is kept in memory only — cannot be injected via file editing.
+        """
         try:
+            device_id = self.get_device_id()
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(f"{PISONEX_API}/api/status")
+                resp = await client.post(
+                    f"{PISONEX_API}/api/status",
+                    json={"device_id": device_id},
+                )
             if resp.status_code == 200:
                 data = resp.json()
                 self._beta_mode = bool(data.get("beta", False))
                 self._beta_last_checked = datetime.utcnow()
-                self._data["beta_mode"] = self._beta_mode
-                self._data["beta_last_checked"] = self._beta_last_checked.isoformat()
-                self._save()
                 logger.info("Beta status fetched: %s", self._beta_mode)
+
+                # Restore trial clock from server if local date is missing.
+                # The server records first_seen_at on the very first ping,
+                # so deleting license.json cannot reset the trial as long as
+                # the device_id (machine-id / MachineGuid) stays the same.
+                if not self._data.get("first_run"):
+                    server_date = data.get("first_seen_at")
+                    if server_date:
+                        self._data["first_run"] = server_date
+                        self._save()
+                        logger.info("Trial start date restored from server: %s", server_date)
         except Exception as e:
-            logger.warning("Failed to fetch beta status: %s", e)
-            # Fall back to cached value
-            if "beta_mode" in self._data:
-                self._beta_mode = self._data["beta_mode"]
+            logger.warning("Failed to fetch beta/status from pisonex.com: %s", e)
+            # Beta defaults to False on failure — fail closed (licensing enforced)
+            self._beta_mode = False
         return self._beta_mode
 
-    def _load_cached_beta(self):
-        """Load beta flag from cached data on startup."""
-        if "beta_mode" in self._data:
-            self._beta_mode = self._data["beta_mode"]
-        if "beta_last_checked" in self._data:
-            try:
-                self._beta_last_checked = datetime.fromisoformat(self._data["beta_last_checked"])
-            except (ValueError, TypeError):
-                pass
-
     def should_refresh_beta(self) -> bool:
-        """True if enough time has passed to re-fetch beta status."""
         if self._beta_last_checked is None:
             return True
         return (datetime.utcnow() - self._beta_last_checked) > timedelta(hours=BETA_CHECK_INTERVAL_HOURS)
@@ -132,11 +186,30 @@ class LicenseService:
         if cached:
             return cached
 
-        raw = f"{platform.node()}|{uuid.getnode()}|{platform.machine()}|{platform.processor()}"
+        raw = _get_machine_id()
         device_id = hashlib.sha256(raw.encode()).hexdigest()
         self._data["device_id"] = device_id
         self._save()
         return device_id
+
+    # ── Token verification ───────────────────────────────────────────
+
+    def _get_valid_token_claims(self) -> Optional[dict]:
+        """Return verified token claims if a valid, unexpired token is stored.
+        Returns None if no token, signature is bad, or token is expired.
+        """
+        token = self._data.get("license_token")
+        if not token:
+            return None
+        claims = _verify_license_token(token)
+        if claims is None:
+            logger.warning("license_token signature invalid — ignoring stored token")
+            return None
+        # Verify device binding: token must have been issued for this device
+        if claims.get("did") != self.get_device_id():
+            logger.warning("license_token device_id mismatch — ignoring stored token")
+            return None
+        return claims
 
     # ── Activation ───────────────────────────────────────────────────
 
@@ -163,6 +236,8 @@ class LicenseService:
         self._data["activated_at"] = datetime.utcnow().isoformat()
         self._data["expires_at"] = body.get("expires_at")
         self._data["last_verified"] = datetime.utcnow().isoformat()
+        if body.get("token"):
+            self._data["license_token"] = body["token"]
         self._save()
 
         return {"success": True, "expires_at": body.get("expires_at")}
@@ -181,14 +256,11 @@ class LicenseService:
             except Exception as e:
                 logger.warning("Remote deactivation failed: %s", e)
 
-        # Clear local data but keep first_run
         first_run = self._data.get("first_run")
         device = self._data.get("device_id")
         self._data = {"first_run": first_run, "device_id": device}
         self._save()
         return {"success": True}
-
-    # ── Verification ─────────────────────────────────────────────────
 
     async def verify(self) -> dict:
         key = self._data.get("license_key")
@@ -204,20 +276,46 @@ class LicenseService:
                     json=_signed_payload({"license_key": key, "device_id": device_id}),
                 )
 
-            body = resp.json()
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+
             if resp.status_code == 200 and body.get("valid"):
+                # Successful verify — clear offline tracking, store new token
+                self._data.pop("offline_since", None)
+                self._data.pop("server_rejected", None)
                 self._data["last_verified"] = datetime.utcnow().isoformat()
                 self._data["expires_at"] = body.get("expires_at", self._data.get("expires_at"))
+                if body.get("token"):
+                    self._data["license_token"] = body["token"]
                 self._save()
                 return {"valid": True, "expires_at": body.get("expires_at")}
             else:
-                return {"valid": False, "error": body.get("error", "Verification failed")}
+                # Server explicitly rejected (revoked, inactive, expired).
+                # Clear token immediately — no offline grace for a server decision.
+                self._data.pop("license_token", None)
+                self._data.pop("offline_since", None)
+                self._data["server_rejected"] = True
+                self._save()
+                logger.warning("License rejected by pisonex.com: %s", body.get("error"))
+                return {"valid": False, "revoked": True, "error": body.get("error", "License rejected")}
+
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+            # Genuine network failure — start offline grace tracking
+            if "offline_since" not in self._data:
+                self._data["offline_since"] = datetime.utcnow().isoformat()
+                self._save()
+            logger.warning("Cannot reach pisonex.com (offline?): %s", e)
+            return {"valid": False, "error": "offline"}
         except Exception as e:
-            logger.warning("License verification failed (offline?): %s", e)
+            # Unexpected error — treat as offline, don't punish for server-side bugs
+            logger.warning("License verification error: %s", e)
             return {"valid": False, "error": str(e)}
 
+    # ── Verification ─────────────────────────────────────────────────
+
     def should_verify(self) -> bool:
-        """True if enough time has passed since last verification."""
         last = self._data.get("last_verified")
         if not last:
             return True
@@ -246,9 +344,17 @@ class LicenseService:
         return self.trial_days_remaining() <= 0
 
     def is_license_expired(self) -> bool:
+        claims = self._get_valid_token_claims()
+        if claims is not None:
+            exp_lic = claims.get("exp_lic")
+            if exp_lic is None:
+                return False  # lifetime license
+            return time.time() > exp_lic
+
+        # Fallback for installs that haven't received a token yet
         expires_at = self._data.get("expires_at")
         if not expires_at:
-            return False  # lifetime license
+            return False
         try:
             exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
             return datetime.utcnow() > exp.replace(tzinfo=None)
@@ -258,6 +364,26 @@ class LicenseService:
     def is_offline_locked(self) -> bool:
         if not self.is_activated():
             return False
+
+        # Server explicitly rejected (revoked/inactive) — no grace period
+        if self._data.get("server_rejected"):
+            return True
+
+        claims = self._get_valid_token_claims()
+        if claims is not None:
+            # Valid token = verified within 8h — not offline locked
+            return False
+
+        # Token missing or expired — measure how long we've been offline
+        offline_since = self._data.get("offline_since")
+        if offline_since:
+            try:
+                offline_dt = datetime.fromisoformat(offline_since)
+                return (datetime.utcnow() - offline_dt) > timedelta(hours=OFFLINE_GRACE_HOURS)
+            except (ValueError, AttributeError):
+                pass
+
+        # Fallback for installs without offline_since tracking yet
         last = self._data.get("last_verified")
         if not last:
             return False
@@ -270,12 +396,29 @@ class LicenseService:
     def is_active(self) -> bool:
         if self._beta_mode:
             return True
+
         if self.is_activated():
+            # Server explicitly rejected — no grace period
+            if self._data.get("server_rejected"):
+                return False
+
+            claims = self._get_valid_token_claims()
+            if claims is not None:
+                if time.time() > claims["exp"]:
+                    # Token expired — defer to offline grace logic
+                    return not self.is_offline_locked()
+                exp_lic = claims.get("exp_lic")
+                if exp_lic and time.time() > exp_lic:
+                    return False
+                return True
+
+            # No valid token — fall back to timestamp checks
             if self.is_license_expired():
                 return False
             if self.is_offline_locked():
                 return False
             return True
+
         return not self.is_trial_expired()
 
     def get_status(self) -> dict:
