@@ -154,6 +154,19 @@ Namespace Config
             End Set
         End Property
 
+        ''' <summary>
+        ''' ES256-signed JWT from pisonex.com. Stored alongside license data.
+        ''' Verified on every load — file tampering breaks the signature.
+        ''' </summary>
+        Public Property LicenseToken As String
+            Get
+                Return GetValue("LicenseToken")
+            End Get
+            Set(v As String)
+                SetValue("LicenseToken", v)
+            End Set
+        End Property
+
         ' ── Admin PIN (hashed) ────────────────────────────────────────────
 
         Private Const DEFAULT_PIN As String = "1234"

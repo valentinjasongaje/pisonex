@@ -238,6 +238,12 @@ Namespace Services
                         End If
                     End If
 
+                    Dim tokenProp As JsonElement
+                    If doc.RootElement.TryGetProperty("token", tokenProp) AndAlso
+                       tokenProp.ValueKind = JsonValueKind.String Then
+                        LicenseStore.LicenseToken = tokenProp.GetString()
+                    End If
+
                     Return New ActivateResult With {
                         .Success = True,
                         .ExpiresAt = expiresAt
@@ -330,6 +336,13 @@ Namespace Services
                            expProp.ValueKind <> JsonValueKind.Null Then
                             LicenseStore.LicenseExpiresAt = expProp.GetString()
                         End If
+
+                        Dim tokenProp As JsonElement
+                        If doc.RootElement.TryGetProperty("token", tokenProp) AndAlso
+                           tokenProp.ValueKind = JsonValueKind.String Then
+                            LicenseStore.LicenseToken = tokenProp.GetString()
+                        End If
+
                         Return True
                     End If
                 End If
@@ -363,9 +376,16 @@ Namespace Services
         End Function
 
         Public Function IsLicenseExpired() As Boolean
-            Dim expiresAt = LicenseStore.LicenseExpiresAt
-            If String.IsNullOrEmpty(expiresAt) Then Return False  ' lifetime
+            ' Prefer token-based check (tamper-proof)
+            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+            If claims IsNot Nothing Then
+                If Not claims.LicenseExpiresAt.HasValue Then Return False  ' lifetime
+                Return DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.LicenseExpiresAt.Value
+            End If
 
+            ' Fallback for installs without a token yet
+            Dim expiresAt = LicenseStore.LicenseExpiresAt
+            If String.IsNullOrEmpty(expiresAt) Then Return False
             Dim expDt As DateTime
             If DateTime.TryParse(expiresAt, expDt) Then
                 Return DateTime.UtcNow > expDt
@@ -376,9 +396,15 @@ Namespace Services
         Public Function IsOfflineLocked() As Boolean
             If Not IsActivated() Then Return False
 
+            ' Token exp = issued_at + 72h. If token is expired the offline grace has passed.
+            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+            If claims IsNot Nothing Then
+                Return DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.ExpiresAt
+            End If
+
+            ' Fallback for installs without a token yet
             Dim lastVerified = LicenseStore.LicenseLastVerified
             If String.IsNullOrEmpty(lastVerified) Then Return False
-
             Dim lastDt As DateTime
             If DateTime.TryParse(lastVerified, lastDt) Then
                 Return (DateTime.UtcNow - lastDt).TotalHours > OFFLINE_GRACE_HOURS
@@ -389,6 +415,15 @@ Namespace Services
         Public Function IsActive() As Boolean
             If _betaMode Then Return True
             If IsActivated() Then
+                ' If a valid token exists, use it as the authoritative source.
+                ' Invalid/missing token falls back to timestamp-based checks.
+                Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+                If claims IsNot Nothing Then
+                    If DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.ExpiresAt Then Return False
+                    If claims.LicenseExpiresAt.HasValue AndAlso
+                       DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.LicenseExpiresAt.Value Then Return False
+                    Return True
+                End If
                 If IsLicenseExpired() Then Return False
                 If IsOfflineLocked() Then Return False
                 Return True

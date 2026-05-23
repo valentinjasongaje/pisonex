@@ -82,6 +82,7 @@ def _ensure_firewall_rule():
 
 _DEFAULT_SECRET = "change-this-to-a-random-256-bit-secret-key"
 _DEFAULT_HMAC = "PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
+_DEFAULT_ADMIN_PASSWORD = "admin123"
 
 
 def _enforce_secure_defaults():
@@ -121,6 +122,16 @@ def _enforce_secure_defaults():
         _replace_or_append("LICENSE_HMAC_SECRET", new_hmac)
         settings.LICENSE_HMAC_SECRET = new_hmac
         logger.warning("LICENSE_HMAC_SECRET was the default — generated a secure key and saved to .env")
+
+    if settings.ADMIN_PASSWORD == _DEFAULT_ADMIN_PASSWORD:
+        new_password = secrets.token_urlsafe(16)
+        _replace_or_append("ADMIN_PASSWORD", new_password)
+        settings.ADMIN_PASSWORD = new_password
+        logger.warning(
+            "ADMIN_PASSWORD was 'admin123' — generated a secure password: %s  "
+            "(saved to .env — log in with this password and change it in the dashboard)",
+            new_password,
+        )
 
     if changed:
         env_path.write_text("".join(lines), encoding="utf-8")
@@ -467,7 +478,8 @@ async def _nightly_earnings_sync_loop():
 
                         yesterday = (_dt.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-                        payload = {
+                        from services.license_service import _signed_payload
+                        raw_payload = {
                             "license_key": license_key,
                             "branch_name": branch_name,
                             "date": yesterday,
@@ -485,7 +497,7 @@ async def _nightly_earnings_sync_loop():
                         async with httpx.AsyncClient(timeout=30.0) as client:
                             resp = await client.post(
                                 "https://www.pisonex.com/api/sync/earnings",
-                                json=payload,
+                                json=_signed_payload(raw_payload),
                             )
                             if resp.status_code in (200, 201):
                                 logger.info(
