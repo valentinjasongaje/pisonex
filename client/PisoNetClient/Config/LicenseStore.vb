@@ -167,6 +167,30 @@ Namespace Config
             End Set
         End Property
 
+        ''' <summary>ISO timestamp of first consecutive network failure. Cleared on success.</summary>
+        Public Property OfflineSince As String
+            Get
+                Return GetValue("OfflineSince")
+            End Get
+            Set(v As String)
+                SetValue("OfflineSince", v)
+            End Set
+        End Property
+
+        ''' <summary>
+        ''' Set to "true" when pisonex.com explicitly rejects the device (revoked/inactive).
+        ''' No offline grace applies — is_active returns False immediately.
+        ''' Cleared on next successful verification.
+        ''' </summary>
+        Public Property ServerRejected As Boolean
+            Get
+                Return GetValue("ServerRejected") = "true"
+            End Get
+            Set(v As Boolean)
+                SetValue("ServerRejected", If(v, "true", ""))
+            End Set
+        End Property
+
         ' ── Admin PIN (hashed) ────────────────────────────────────────────
 
         Private Const DEFAULT_PIN As String = "1234"
@@ -228,6 +252,9 @@ Namespace Config
                 _cache.Remove("LicenseActivatedAt")
                 _cache.Remove("LicenseExpiresAt")
                 _cache.Remove("LicenseLastVerified")
+                _cache.Remove("LicenseToken")
+                _cache.Remove("OfflineSince")
+                _cache.Remove("ServerRejected")
                 WriteToDisk(_cache)
             End SyncLock
         End Sub

@@ -262,8 +262,6 @@ class LicenseService:
         self._save()
         return {"success": True}
 
-    # ── Verification ─────────────────────────────────────────────────
-
     async def verify(self) -> dict:
         key = self._data.get("license_key")
         if not key:
@@ -278,8 +276,15 @@ class LicenseService:
                     json=_signed_payload({"license_key": key, "device_id": device_id}),
                 )
 
-            body = resp.json()
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+
             if resp.status_code == 200 and body.get("valid"):
+                # Successful verify — clear offline tracking, store new token
+                self._data.pop("offline_since", None)
+                self._data.pop("server_rejected", None)
                 self._data["last_verified"] = datetime.utcnow().isoformat()
                 self._data["expires_at"] = body.get("expires_at", self._data.get("expires_at"))
                 if body.get("token"):
@@ -287,10 +292,28 @@ class LicenseService:
                 self._save()
                 return {"valid": True, "expires_at": body.get("expires_at")}
             else:
-                return {"valid": False, "error": body.get("error", "Verification failed")}
+                # Server explicitly rejected (revoked, inactive, expired).
+                # Clear token immediately — no offline grace for a server decision.
+                self._data.pop("license_token", None)
+                self._data.pop("offline_since", None)
+                self._data["server_rejected"] = True
+                self._save()
+                logger.warning("License rejected by pisonex.com: %s", body.get("error"))
+                return {"valid": False, "revoked": True, "error": body.get("error", "License rejected")}
+
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+            # Genuine network failure — start offline grace tracking
+            if "offline_since" not in self._data:
+                self._data["offline_since"] = datetime.utcnow().isoformat()
+                self._save()
+            logger.warning("Cannot reach pisonex.com (offline?): %s", e)
+            return {"valid": False, "error": "offline"}
         except Exception as e:
-            logger.warning("License verification failed (offline?): %s", e)
+            # Unexpected error — treat as offline, don't punish for server-side bugs
+            logger.warning("License verification error: %s", e)
             return {"valid": False, "error": str(e)}
+
+    # ── Verification ─────────────────────────────────────────────────
 
     def should_verify(self) -> bool:
         last = self._data.get("last_verified")
@@ -342,12 +365,25 @@ class LicenseService:
         if not self.is_activated():
             return False
 
+        # Server explicitly rejected (revoked/inactive) — no grace period
+        if self._data.get("server_rejected"):
+            return True
+
         claims = self._get_valid_token_claims()
         if claims is not None:
-            # Token exp = issued_at + 72h. Expired token = offline grace exceeded.
-            return time.time() > claims["exp"]
+            # Valid token = verified within 8h — not offline locked
+            return False
 
-        # Fallback for installs without a token yet
+        # Token missing or expired — measure how long we've been offline
+        offline_since = self._data.get("offline_since")
+        if offline_since:
+            try:
+                offline_dt = datetime.fromisoformat(offline_since)
+                return (datetime.utcnow() - offline_dt) > timedelta(hours=OFFLINE_GRACE_HOURS)
+            except (ValueError, AttributeError):
+                pass
+
+        # Fallback for installs without offline_since tracking yet
         last = self._data.get("last_verified")
         if not last:
             return False
@@ -362,16 +398,20 @@ class LicenseService:
             return True
 
         if self.is_activated():
+            # Server explicitly rejected — no grace period
+            if self._data.get("server_rejected"):
+                return False
+
             claims = self._get_valid_token_claims()
             if claims is not None:
-                # Token expired = offline lock
                 if time.time() > claims["exp"]:
-                    return False
-                # License subscription expired
+                    # Token expired — defer to offline grace logic
+                    return not self.is_offline_locked()
                 exp_lic = claims.get("exp_lic")
                 if exp_lic and time.time() > exp_lic:
                     return False
                 return True
+
             # No valid token — fall back to timestamp checks
             if self.is_license_expired():
                 return False
