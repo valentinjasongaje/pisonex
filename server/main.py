@@ -82,11 +82,8 @@ def _ensure_firewall_rule():
 
 _DEFAULT_SECRET = "change-this-to-a-random-256-bit-secret-key"
 _DEFAULT_HMAC = "PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
-_DEFAULT_ADMIN_PASSWORD = "admin123"
-
-
 def _enforce_secure_defaults():
-    """Auto-generate SECRET_KEY and ADMIN_PASSWORD if they are still the
+    """Auto-generate SECRET_KEY and LICENSE_HMAC_SECRET if they are still the
     insecure defaults.  Writes the new values into .env so they persist
     across restarts.  This runs once on first startup and is safe to
     re-run (it only acts when the defaults are detected)."""
@@ -123,16 +120,6 @@ def _enforce_secure_defaults():
         settings.LICENSE_HMAC_SECRET = new_hmac
         logger.warning("LICENSE_HMAC_SECRET was the default — generated a secure key and saved to .env")
 
-    if settings.ADMIN_PASSWORD == _DEFAULT_ADMIN_PASSWORD:
-        new_password = secrets.token_urlsafe(16)
-        _replace_or_append("ADMIN_PASSWORD", new_password)
-        settings.ADMIN_PASSWORD = new_password
-        logger.warning(
-            "ADMIN_PASSWORD was 'admin123' — generated a secure password: %s  "
-            "(saved to .env — log in with this password and change it in the dashboard)",
-            new_password,
-        )
-
     if changed:
         env_path.write_text("".join(lines), encoding="utf-8")
 
@@ -140,7 +127,7 @@ def _enforce_secure_defaults():
 async def lifespan(app: FastAPI):
     global hw_controller, license_service
 
-    # Ensure SECRET_KEY and ADMIN_PASSWORD are not the insecure defaults
+    # Auto-generate SECRET_KEY and LICENSE_HMAC_SECRET if still at insecure defaults
     _enforce_secure_defaults()
 
     # Initialize license service and fetch beta status from pisonex.com

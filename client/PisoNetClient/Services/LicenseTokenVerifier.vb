@@ -1,4 +1,4 @@
-Imports System.Security.Cryptography
+﻿Imports System.Security.Cryptography
 Imports System.Text
 Imports System.Text.Json
 
@@ -11,7 +11,7 @@ Namespace Services
     ''' </summary>
     Public Module LicenseTokenVerifier
 
-        ' ES256 public key — matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com.
+        ' ES256 public key â€” matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com.
         ' Generated 2026-05-23. Replace both keys together if rotating.
         Private Const PUBLIC_KEY_PEM As String =
             "-----BEGIN PUBLIC KEY-----" & vbLf &
@@ -39,13 +39,13 @@ Namespace Services
                 Dim parts = token.Split("."c)
                 If parts.Length <> 3 Then Return Nothing
 
-                ' Verify ES256 signature (IEEE P1363 format = 64 bytes: r‖s)
+                ' Verify ES256 signature (IEEE P1363 format = 64 bytes: râ€–s)
                 Dim dataToVerify = Encoding.ASCII.GetBytes($"{parts(0)}.{parts(1)}")
                 Dim sigBytes = Base64UrlDecode(parts(2))
 
-                Using ecdsa = ECDsa.Create()
-                    ecdsa.ImportFromPem(PUBLIC_KEY_PEM)
-                    If Not ecdsa.VerifyData(
+                Using ecKey As ECDsa = ECDsa.Create()
+                    ecKey.ImportFromPem(PUBLIC_KEY_PEM)
+                    If Not ecKey.VerifyData(
                             dataToVerify,
                             sigBytes,
                             HashAlgorithmName.SHA256,
@@ -105,3 +105,4 @@ Namespace Services
     End Module
 
 End Namespace
+
