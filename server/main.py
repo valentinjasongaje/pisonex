@@ -370,12 +370,25 @@ def _init_wallpapers():
         logger.info("Restored wallpaper: %s", filename)
 
 
+_SYNC_STATUS_INTERVAL_HOURS = 24  # re-anchor trial clock once a day
+
+
 async def _license_verify_loop():
-    """Periodically verify the license with pisonex.com."""
+    """Periodically verify the license and re-anchor the trial clock."""
+    last_sync = 0.0  # epoch seconds of last successful sync_startup_status call
     while True:
-        await asyncio.sleep(60 * 60)  # check every hour
+        await asyncio.sleep(60 * 60)  # wake up every hour
         try:
             if license_service:
+                # Re-anchor trial clock every 24 hours.
+                # Catches the case where the server started offline and
+                # sync_startup_status() failed at boot — once connectivity
+                # returns the tampered first_run gets corrected.
+                now = asyncio.get_event_loop().time()
+                if now - last_sync >= _SYNC_STATUS_INTERVAL_HOURS * 3600:
+                    await license_service.sync_startup_status()
+                    last_sync = now
+
                 # Verify license every 6 hours
                 if license_service.is_activated() and license_service.should_verify():
                     result = await license_service.verify()
