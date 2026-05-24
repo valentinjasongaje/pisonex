@@ -3,6 +3,7 @@ Imports System.Net.Http
 Imports System.Security.Cryptography
 Imports System.Text
 Imports System.Text.Json
+Imports Microsoft.Win32
 Imports PisoNetClient.Config
 
 Namespace Services
@@ -73,13 +74,25 @@ Namespace Services
                     Dim body = Await resp.Content.ReadAsStringAsync()
                     Dim doc = JsonDocument.Parse(body)
 
-                    ' Restore trial clock from server if license.dat was deleted or is fresh.
-                    If String.IsNullOrEmpty(LicenseStore.LicenseFirstRunDate) Then
-                        Dim firstSeenProp As JsonElement
-                        If doc.RootElement.TryGetProperty("first_seen_at", firstSeenProp) AndAlso
-                           firstSeenProp.ValueKind = JsonValueKind.String Then
-                            Dim serverDate = firstSeenProp.GetString()
-                            If Not String.IsNullOrEmpty(serverDate) Then
+                    ' Always apply the earlier of local vs server first-run date.
+                    ' This prevents trial-clock reset via license.dat deletion.
+                    Dim firstSeenProp As JsonElement
+                    If doc.RootElement.TryGetProperty("first_seen_at", firstSeenProp) AndAlso
+                       firstSeenProp.ValueKind = JsonValueKind.String Then
+                        Dim serverDate = firstSeenProp.GetString()
+                        If Not String.IsNullOrEmpty(serverDate) Then
+                            Dim localDate = LicenseStore.LicenseFirstRunDate
+                            Dim shouldUpdate = String.IsNullOrEmpty(localDate)
+                            If Not shouldUpdate Then
+                                Try
+                                    Dim localDt = DateTime.Parse(localDate, Nothing, Globalization.DateTimeStyles.RoundtripKind)
+                                    Dim serverDt = DateTime.Parse(serverDate, Nothing, Globalization.DateTimeStyles.RoundtripKind)
+                                    If serverDt < localDt Then shouldUpdate = True
+                                Catch
+                                    shouldUpdate = True
+                                End Try
+                            End If
+                            If shouldUpdate Then
                                 LicenseStore.LicenseFirstRunDate = serverDate
                             End If
                         End If
@@ -128,18 +141,33 @@ Namespace Services
         ' ── Device ID ────────────────────────────────────────────────────
 
         Public Function GetDeviceId() As String
-            Dim cached = LicenseStore.LicenseDeviceId
-            If Not String.IsNullOrEmpty(cached) Then Return cached
-
-            ' MAC address intentionally excluded — it's trivially changed in Windows
-            ' (Device Manager → adapter properties → Advanced → Network Address),
-            ' which would produce a new hash and bypass trial tracking after deleting license.dat.
-            Dim raw = GetCpuId() & "|" & GetDiskSerial()
+            ' Always derive from hardware — never trust the cached value.
+            ' If the cached value differs (e.g. file tampered or hardware changed),
+            ' self-correct so the stored ID stays consistent.
+            Dim raw = GetHardwareId()
             Dim bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw))
             Dim deviceId = BitConverter.ToString(bytes).Replace("-", "").ToLower()
 
-            LicenseStore.LicenseDeviceId = deviceId
+            If LicenseStore.LicenseDeviceId <> deviceId Then
+                LicenseStore.LicenseDeviceId = deviceId
+            End If
             Return deviceId
+        End Function
+
+        ''' <summary>
+        ''' Returns the most stable hardware identifier available.
+        ''' MachineGuid is set at Windows install and works on diskless (PXE) machines.
+        ''' CPU+Disk is a fallback only — disk serial is empty on diskless PCs.
+        ''' </summary>
+        Private Function GetHardwareId() As String
+            Try
+                Using rk = Registry.LocalMachine.OpenSubKey("SOFTWARE\Microsoft\Cryptography")
+                    Dim guid = rk?.GetValue("MachineGuid")?.ToString()
+                    If Not String.IsNullOrEmpty(guid) Then Return guid
+                End Using
+            Catch
+            End Try
+            Return GetCpuId() & "|" & GetDiskSerial()
         End Function
 
         Private Function GetCpuId() As String
@@ -372,7 +400,7 @@ Namespace Services
         End Function
 
         Public Function IsLicenseExpired() As Boolean
-            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken, GetDeviceId())
             If claims IsNot Nothing Then
                 If Not claims.LicenseExpiresAt.HasValue Then Return False
                 Return DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.LicenseExpiresAt.Value
@@ -391,7 +419,7 @@ Namespace Services
             If LicenseStore.ServerRejected Then Return True
 
             ' Valid token = verified within 8h — not offline locked
-            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+            Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken, GetDeviceId())
             If claims IsNot Nothing Then Return False
 
             ' Token expired — check how long we've been offline
@@ -418,7 +446,7 @@ Namespace Services
                 ' Server explicitly rejected — no grace period
                 If LicenseStore.ServerRejected Then Return False
 
-                Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken)
+                Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken, GetDeviceId())
                 If claims IsNot Nothing Then
                     If DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.ExpiresAt Then
                         Return Not IsOfflineLocked()
@@ -460,10 +488,12 @@ Namespace Services
             If _verifyTimer IsNot Nothing Then Return
             _verifyTimer = New System.Timers.Timer(6 * 60 * 60 * 1000)  ' 6 hours
             AddHandler _verifyTimer.Elapsed, Async Sub(s, e)
+                ' Re-anchor the trial clock every 6h so an attacker can't reset it
+                ' by deleting license.dat and staying offline until the next reboot.
+                Await SyncStartupStatusAsync()
                 If IsActivated() Then
                     Dim valid = Await VerifyAsync()
                     If Not valid Then
-                        ' Server rejected — device was revoked or license invalidated
                         Debug.WriteLine("[LICENSE] Verification failed — clearing local license")
                         LicenseStore.ClearActivation()
                     End If

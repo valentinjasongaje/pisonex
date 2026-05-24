@@ -30,9 +30,10 @@ Namespace Services
 
         ''' <summary>
         ''' Verifies signature, checks expiry, and returns claims.
-        ''' Returns Nothing if the token is missing, tampered, or expired.
+        ''' Pass expectedDeviceId to also enforce device binding (did claim must match).
+        ''' Returns Nothing if the token is missing, tampered, expired, or bound to a different device.
         ''' </summary>
-        Public Function Verify(token As String) As TokenClaims
+        Public Function Verify(token As String, Optional expectedDeviceId As String = Nothing) As TokenClaims
             If String.IsNullOrWhiteSpace(token) Then Return Nothing
 
             Try
@@ -84,6 +85,14 @@ Namespace Services
                 If root.TryGetProperty("exp_lic", expLicElem) AndAlso
                    expLicElem.ValueKind = JsonValueKind.Number Then
                     claims.LicenseExpiresAt = expLicElem.GetInt64()
+                End If
+
+                ' Enforce device binding when the caller supplies the expected device ID.
+                ' A token issued for a different device is rejected even if the signature is valid.
+                If Not String.IsNullOrEmpty(expectedDeviceId) AndAlso
+                   Not String.IsNullOrEmpty(claims.DeviceId) AndAlso
+                   Not String.Equals(claims.DeviceId, expectedDeviceId, StringComparison.OrdinalIgnoreCase) Then
+                    Return Nothing
                 End If
 
                 Return claims
