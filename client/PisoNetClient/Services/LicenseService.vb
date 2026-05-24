@@ -25,16 +25,6 @@ Namespace Services
         Private Const PISONEX_API As String = "https://www.pisonex.com"
         Private Const TRIAL_DAYS As Integer = 14
         Private Const OFFLINE_GRACE_HOURS As Integer = 72  ' 3 days
-        Private Const BETA_CHECK_INTERVAL_HOURS As Integer = 1
-
-        ''' <summary>Beta mode flag fetched from pisonex.com. Defaults to False (licensing enforced) until first successful fetch.</summary>
-        Private _betaMode As Boolean = False
-
-        Public ReadOnly Property BetaMode As Boolean
-            Get
-                Return _betaMode
-            End Get
-        End Property
 
         ' ── Branch / earnings cache (updated by SessionManager on every heartbeat) ──
         ' These are forwarded to pisonex.com on the hourly /api/status ping so the
@@ -61,15 +51,14 @@ Namespace Services
         }
 
         Private _verifyTimer As System.Timers.Timer
-        Private _betaTimer As System.Timers.Timer
 
-        ' ── Beta mode (fetched from pisonex.com — memory only, never cached) ──
+        ' ── Startup sync (telemetry + trial-clock restore) ───────────────
 
-        Public Async Function FetchBetaStatusAsync() As Task
+        Public Async Function SyncStartupStatusAsync() As Task
             Try
-                ' POST instead of GET so we can include telemetry.
-                ' pisonex.com records this as a "ping" — captures trial installs
-                ' that have never activated, their version, and status.
+                ' POST telemetry to pisonex.com on startup.
+                ' The server records first_seen_at on the first ping so deleting
+                ' license.dat cannot reset the trial as long as the device_id stays the same.
                 Dim payload = New Dictionary(Of String, String) From {
                     {"device_id", GetDeviceId()}
                 }
@@ -84,16 +73,7 @@ Namespace Services
                     Dim body = Await resp.Content.ReadAsStringAsync()
                     Dim doc = JsonDocument.Parse(body)
 
-                    Dim betaProp As JsonElement
-                    If doc.RootElement.TryGetProperty("beta", betaProp) Then
-                        _betaMode = betaProp.GetBoolean()
-                    End If
-                    ' Beta status intentionally NOT saved — must come from server every time.
-
                     ' Restore trial clock from server if license.dat was deleted or is fresh.
-                    ' first_seen_at is the date pisonex.com first recorded this device,
-                    ' so deleting license.dat cannot reset the trial as long as the device_id
-                    ' (CPU + disk fingerprint) stays the same.
                     If String.IsNullOrEmpty(LicenseStore.LicenseFirstRunDate) Then
                         Dim firstSeenProp As JsonElement
                         If doc.RootElement.TryGetProperty("first_seen_at", firstSeenProp) AndAlso
@@ -106,20 +86,9 @@ Namespace Services
                     End If
                 End If
             Catch
-                ' Cannot reach pisonex.com — fail closed (beta = false, date not restored)
-                _betaMode = False
+                ' Cannot reach pisonex.com — trial date not restored this time
             End Try
         End Function
-
-        Public Sub StartBetaCheckTimer()
-            If _betaTimer IsNot Nothing Then Return
-            _betaTimer = New System.Timers.Timer(BETA_CHECK_INTERVAL_HOURS * 60 * 60 * 1000)
-            AddHandler _betaTimer.Elapsed, Async Sub(s, e)
-                Await FetchBetaStatusAsync()
-            End Sub
-            _betaTimer.AutoReset = True
-            _betaTimer.Start()
-        End Sub
 
         ' ── Telemetry helpers ────────────────────────────────────────────
 
@@ -445,7 +414,6 @@ Namespace Services
         End Function
 
         Public Function IsActive() As Boolean
-            If _betaMode Then Return True
             If IsActivated() Then
                 ' Server explicitly rejected — no grace period
                 If LicenseStore.ServerRejected Then Return False
@@ -467,7 +435,6 @@ Namespace Services
         End Function
 
         Public Function GetStatus() As LicenseStatus
-            If _betaMode Then Return LicenseStatus.Activated
             If IsActivated() Then
                 If IsLicenseExpired() Then Return LicenseStatus.Expired
                 If IsOfflineLocked() Then Return LicenseStatus.OfflineLocked

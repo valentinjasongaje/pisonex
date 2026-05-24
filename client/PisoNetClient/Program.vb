@@ -68,13 +68,12 @@ Module Program
         _guardTimer.Start()
 
         ' ── License initialization ────────────────────────────────────────
-        ' FetchBetaStatusAsync runs first: it restores LicenseFirstRunDate from
+        ' SyncStartupStatusAsync runs first: it restores LicenseFirstRunDate from
         ' pisonex.com (first_seen_at) if license.dat was deleted. EnsureFirstRunDate
         ' then only writes a fresh date if the server had no record either.
-        LicenseService.FetchBetaStatusAsync().GetAwaiter().GetResult()
+        LicenseService.SyncStartupStatusAsync().GetAwaiter().GetResult()
         LicenseService.EnsureFirstRunDate()
         LicenseService.StartVerificationTimer()
-        LicenseService.StartBetaCheckTimer()
 
         ' Periodic license enforcement — catches expiry during active sessions
         Dim licenseEnforcementTimer = New System.Timers.Timer(10 * 60 * 1000) ' every 10 min
