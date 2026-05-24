@@ -68,7 +68,6 @@ LICENSE_FILE = _APP_DIR / "data" / "license.json"
 TRIAL_DAYS = 14
 OFFLINE_GRACE_HOURS = 72
 VERIFY_INTERVAL_HOURS = 6
-BETA_CHECK_INTERVAL_HOURS = 1
 
 
 def _get_machine_id() -> str:
@@ -113,8 +112,6 @@ class LicenseStatus(str, Enum):
 class LicenseService:
     def __init__(self):
         self._data: dict = {}
-        self._beta_mode: bool = False
-        self._beta_last_checked: Optional[datetime] = None
         self._load()
 
     # ── Persistence ──────────────────────────────────────────────────
@@ -128,22 +125,17 @@ class LicenseService:
         if "first_run" not in self._data:
             self._data["first_run"] = datetime.utcnow().isoformat()
             self._save()
-        # beta_mode is intentionally NOT loaded from disk — must come from server
 
     def _save(self):
         LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
         LICENSE_FILE.write_text(json.dumps(self._data, indent=2))
 
-    # ── Beta mode (memory-only, never persisted) ─────────────────────
+    # ── Startup sync (telemetry + trial-clock restore) ───────────────
 
-    @property
-    def beta_mode(self) -> bool:
-        return self._beta_mode
-
-    async def fetch_beta_status(self) -> bool:
-        """POST to /api/status with device_id for telemetry and beta flag.
-        Also restores first_seen_at from the server if local first_run is missing.
-        Beta flag is kept in memory only — cannot be injected via file editing.
+    async def sync_startup_status(self) -> None:
+        """POST to /api/status for telemetry and to restore first_seen_at.
+        The server records first_seen_at on the first ping, so deleting
+        license.json cannot reset the trial as long as the device_id stays the same.
         """
         try:
             device_id = self.get_device_id()
@@ -154,14 +146,6 @@ class LicenseService:
                 )
             if resp.status_code == 200:
                 data = resp.json()
-                self._beta_mode = bool(data.get("beta", False))
-                self._beta_last_checked = datetime.utcnow()
-                logger.info("Beta status fetched: %s", self._beta_mode)
-
-                # Restore trial clock from server if local date is missing.
-                # The server records first_seen_at on the very first ping,
-                # so deleting license.json cannot reset the trial as long as
-                # the device_id (machine-id / MachineGuid) stays the same.
                 if not self._data.get("first_run"):
                     server_date = data.get("first_seen_at")
                     if server_date:
@@ -169,15 +153,7 @@ class LicenseService:
                         self._save()
                         logger.info("Trial start date restored from server: %s", server_date)
         except Exception as e:
-            logger.warning("Failed to fetch beta/status from pisonex.com: %s", e)
-            # Beta defaults to False on failure — fail closed (licensing enforced)
-            self._beta_mode = False
-        return self._beta_mode
-
-    def should_refresh_beta(self) -> bool:
-        if self._beta_last_checked is None:
-            return True
-        return (datetime.utcnow() - self._beta_last_checked) > timedelta(hours=BETA_CHECK_INTERVAL_HOURS)
+            logger.warning("Failed to sync status with pisonex.com: %s", e)
 
     # ── Device ID ────────────────────────────────────────────────────
 
@@ -394,9 +370,6 @@ class LicenseService:
             return False
 
     def is_active(self) -> bool:
-        if self._beta_mode:
-            return True
-
         if self.is_activated():
             # Server explicitly rejected — no grace period
             if self._data.get("server_rejected"):
@@ -422,20 +395,6 @@ class LicenseService:
         return not self.is_trial_expired()
 
     def get_status(self) -> dict:
-        if self._beta_mode:
-            return {
-                "status": "beta",
-                "is_active": True,
-                "license_key": "",
-                "device_id": self.get_device_id(),
-                "activated_at": None,
-                "expires_at": None,
-                "last_verified": None,
-                "trial_days_remaining": self.trial_days_remaining(),
-                "first_run": self._data.get("first_run"),
-                "beta_mode": True,
-            }
-
         if self.is_activated():
             if self.is_license_expired():
                 status = LicenseStatus.EXPIRED

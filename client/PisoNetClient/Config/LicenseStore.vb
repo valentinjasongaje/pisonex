@@ -9,7 +9,6 @@ Namespace Config
     ''' Persists license data as a DPAPI-encrypted binary file in %ProgramData%\PisoNet\.
     ''' The file is encrypted to the local machine key — unreadable and unmodifiable
     ''' by users, and non-portable (decryption fails on any other machine).
-    ''' BetaMode is intentionally NOT persisted here; it lives in memory only.
     ''' </summary>
     Public Module LicenseStore
 

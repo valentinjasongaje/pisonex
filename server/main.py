@@ -130,10 +130,10 @@ async def lifespan(app: FastAPI):
     # Auto-generate SECRET_KEY and LICENSE_HMAC_SECRET if still at insecure defaults
     _enforce_secure_defaults()
 
-    # Initialize license service and fetch beta status from pisonex.com
+    # Initialize license service and sync startup status (telemetry + trial-clock restore)
     license_service = LicenseService()
-    await license_service.fetch_beta_status()
-    logger.info("License status: %s (beta=%s)", license_service.get_status()["status"], license_service.beta_mode)
+    await license_service.sync_startup_status()
+    logger.info("License status: %s", license_service.get_status()["status"])
 
     # Migrate existing DB columns (v2 → v3 seconds-based rename)
     _migrate_schema()
@@ -371,15 +371,11 @@ def _init_wallpapers():
 
 
 async def _license_verify_loop():
-    """Periodically verify the license and refresh beta status."""
+    """Periodically verify the license with pisonex.com."""
     while True:
         await asyncio.sleep(60 * 60)  # check every hour
         try:
             if license_service:
-                # Refresh beta flag from pisonex.com
-                if license_service.should_refresh_beta():
-                    await license_service.fetch_beta_status()
-
                 # Verify license every 6 hours
                 if license_service.is_activated() and license_service.should_verify():
                     result = await license_service.verify()
