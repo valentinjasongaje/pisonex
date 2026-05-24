@@ -1329,12 +1329,6 @@ Namespace Forms
         Private Sub UpdateLicenseStatusDisplay()
             If _lblLicStatus Is Nothing Then Return
 
-            If LicenseService.BetaMode Then
-                _lblLicStatus.Text = "Beta — All features unlocked"
-                _lblLicStatus.ForeColor = Color.FromArgb(34, 197, 94)
-                Return
-            End If
-
             Dim status = LicenseService.GetStatus()
             Select Case status
                 Case LicenseStatus.Activated

@@ -9,9 +9,7 @@
 <div class="card" id="license-status">
   <h2>Activation Status</h2>
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-    {% if lic.status == "beta" %}
-      <span class="badge badge-success">Beta — All features unlocked</span>
-    {% elif lic.status == "activated" %}
+    {% if lic.status == "activated" %}
       <span class="badge badge-success">Activated</span>
     {% elif lic.status == "trial" %}
       <span class="badge badge-warning">Trial — {{ lic.trial_days_remaining }} day{{ "s" if lic.trial_days_remaining != 1 }} remaining</span>
