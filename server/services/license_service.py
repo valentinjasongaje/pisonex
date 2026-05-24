@@ -133,9 +133,13 @@ class LicenseService:
     # ── Startup sync (telemetry + trial-clock restore) ───────────────
 
     async def sync_startup_status(self) -> None:
-        """POST to /api/status for telemetry and to restore first_seen_at.
-        The server records first_seen_at on the first ping, so deleting
-        license.json cannot reset the trial as long as the device_id stays the same.
+        """POST to /api/status for telemetry and to anchor the trial clock.
+
+        The server records first_seen_at on the first ping for this device_id.
+        We always use the EARLIER of local vs server dates, so:
+          - Deleting license.json → local first_run resets to now, but server
+            returns the original date and we correct it immediately.
+          - Editing first_run to a future date → server date is earlier, we fix it.
         """
         try:
             device_id = self.get_device_id()
@@ -146,26 +150,39 @@ class LicenseService:
                 )
             if resp.status_code == 200:
                 data = resp.json()
-                if not self._data.get("first_run"):
-                    server_date = data.get("first_seen_at")
-                    if server_date:
+                server_date = data.get("first_seen_at")
+                if server_date:
+                    local_first_run = self._data.get("first_run")
+                    should_update = False
+                    if not local_first_run:
+                        should_update = True
+                    else:
+                        try:
+                            local_dt = datetime.fromisoformat(local_first_run)
+                            server_dt = datetime.fromisoformat(server_date)
+                            # Use the earlier date — prevents forward-dating the trial
+                            if server_dt < local_dt:
+                                should_update = True
+                        except (ValueError, TypeError):
+                            should_update = True
+                    if should_update:
                         self._data["first_run"] = server_date
                         self._save()
-                        logger.info("Trial start date restored from server: %s", server_date)
+                        logger.info("Trial start date anchored to server: %s", server_date)
         except Exception as e:
             logger.warning("Failed to sync status with pisonex.com: %s", e)
 
     # ── Device ID ────────────────────────────────────────────────────
 
     def get_device_id(self) -> str:
-        cached = self._data.get("device_id")
-        if cached:
-            return cached
-
+        # Always derive from hardware — never trust the cached value.
+        # This prevents an attacker from editing device_id in license.json
+        # to impersonate a different device or reset the server-side trial clock.
         raw = _get_machine_id()
         device_id = hashlib.sha256(raw.encode()).hexdigest()
-        self._data["device_id"] = device_id
-        self._save()
+        if self._data.get("device_id") != device_id:
+            self._data["device_id"] = device_id
+            self._save()
         return device_id
 
     # ── Token verification ───────────────────────────────────────────
