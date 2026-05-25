@@ -42,7 +42,7 @@ class CoinSlotBody(BaseModel):
     enabled: bool
 
 router = APIRouter(prefix="/dashboard")
-_BUNDLE_DIR = Path(os.environ.get('PISONEX_BUNDLE_DIR', Path(__file__).parent.parent))
+_BUNDLE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(_BUNDLE_DIR / "dashboard" / "templates"))
 
 _ALGORITHM = "HS256"

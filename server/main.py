@@ -38,10 +38,7 @@ logging.basicConfig(
         ),
     ],
 )
-# Resolve the directory that contains bundled assets (templates, static files).
-# When frozen by PyInstaller onedir, assets are in sys._MEIPASS (_internal/),
-# not next to the exe. PISONEX_BUNDLE_DIR is set by windows_service.py before import.
-_BUNDLE_DIR = Path(os.environ.get('PISONEX_BUNDLE_DIR', Path(__file__).parent))
+_BUNDLE_DIR = Path(__file__).parent
 
 logger = logging.getLogger(__name__)
 
@@ -50,34 +47,6 @@ logger = logging.getLogger(__name__)
 hw_controller = None
 license_service: LicenseService = None
 
-
-@asynccontextmanager
-def _ensure_firewall_rule():
-    """On Windows, add an inbound firewall rule for the server port (idempotent)."""
-    if sys.platform != "win32":
-        return
-    import subprocess
-    port = settings.SERVER_PORT
-    rule_name = f"Pisonex Server (TCP {port})"
-    try:
-        check = subprocess.run(
-            ["netsh", "advfirewall", "firewall", "show", "rule", f"name={rule_name}"],
-            capture_output=True, text=True,
-        )
-        if check.returncode == 0:
-            return  # rule already exists
-        result = subprocess.run(
-            ["netsh", "advfirewall", "firewall", "add", "rule",
-             f"name={rule_name}", "dir=in", "action=allow",
-             "protocol=TCP", f"localport={port}"],
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            logger.info("Firewall rule added: %s", rule_name)
-        else:
-            logger.warning("Could not add firewall rule (not running as admin?): %s", result.stderr.strip())
-    except Exception as e:
-        logger.warning("Firewall rule check failed: %s", e)
 
 
 _DEFAULT_SECRET = "change-this-to-a-random-256-bit-secret-key"
@@ -124,6 +93,7 @@ def _enforce_secure_defaults():
         env_path.write_text("".join(lines), encoding="utf-8")
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     global hw_controller, license_service
 
@@ -137,9 +107,6 @@ async def lifespan(app: FastAPI):
 
     # Migrate existing DB columns (v2 → v3 seconds-based rename)
     _migrate_schema()
-
-    # Ensure Windows Firewall allows inbound connections on the server port
-    _ensure_firewall_rule()
 
     # Create all DB tables (creates new tables like membership_config)
     Base.metadata.create_all(bind=engine)
