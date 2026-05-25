@@ -1,0 +1,372 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>PC Monitor</h1>
+  <div class="header-stats">
+    <span class="stat-pill" id="refresh-indicator">● Live</span>
+    <span class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">Updates every 3s</span>
+  </div>
+</div>
+
+{% if not pcs %}
+<div class="card" style="text-align:center;padding:48px;color:var(--text-dim)">
+  No PCs registered yet.
+</div>
+{% else %}
+<div class="monitor-grid">
+  {% for pc in pcs %}
+  <div class="monitor-card {% if not pc.is_online %}monitor-offline{% elif not pc.is_locked %}monitor-active{% endif %}"
+       id="card-{{ pc.pc_number }}">
+
+    {# ── Header ── #}
+    <div class="monitor-card-header">
+      <span class="monitor-pc-label">PC {{ "%02d"|format(pc.pc_number) }}</span>
+      <span class="monitor-pc-name" id="name-{{ pc.pc_number }}">{{ pc.name }}</span>
+      <span class="monitor-status-dot
+        {% if not pc.is_online %}dot-offline
+        {% elif not pc.is_locked %}dot-active
+        {% else %}dot-locked{% endif %}"
+        id="dot-{{ pc.pc_number }}">
+      </span>
+    </div>
+
+    {# ── Body: screenshot left, metrics right (desktop) / stacked (mobile) ── #}
+    <div class="monitor-card-body">
+
+      <div class="monitor-screen" onclick="openFullscreen({{ pc.pc_number }})" title="Tap to enlarge">
+        <img id="shot-{{ pc.pc_number }}"
+             src="/dashboard/api/pc/{{ pc.pc_number }}/screenshot"
+             alt="PC {{ pc.pc_number }} screen"
+             style="{% if not pc.has_screenshot %}display:none{% endif %}"
+             onerror="handleImgError(this)" />
+        <div class="monitor-no-shot" id="noshot-{{ pc.pc_number }}"
+             style="{% if pc.has_screenshot %}display:none{% endif %}">
+          <span>No screenshot yet</span>
+        </div>
+      </div>
+
+      {# Metrics: always visible on desktop, toggle on mobile #}
+      <div class="metrics-panel" id="metrics-{{ pc.pc_number }}"
+           hx-get="/dashboard/monitor/metrics/{{ pc.pc_number }}"
+           hx-trigger="load delay:{{ loop.index0 }}s, every 8s"
+           hx-target="this"
+           hx-swap="innerHTML">
+        <div class="metrics-empty"><span>Loading…</span></div>
+      </div>
+
+    </div>{# end monitor-card-body #}
+
+    {# ── Footer: time, actions, mobile stats toggle ── #}
+    <div class="monitor-card-footer" id="footer-{{ pc.pc_number }}">
+      <span class="monitor-footer-time" id="footer-time-{{ pc.pc_number }}">
+        {% if not pc.is_online %}
+          <span style="color:var(--gray)">Offline</span>
+        {% elif pc.is_locked %}
+          <span style="color:var(--gray)">Locked</span>
+        {% else %}
+          {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
+          {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
+          <span class="monitor-time" data-remaining-sec="{{ _tsec }}">
+            {{ _h }}h {{ _m }}m {{ "%02d"|format(_s) }}s
+          </span>
+          <span style="color:var(--text-dim);font-size:11px">remaining</span>
+        {% endif %}
+      </span>
+      {% if membership_enabled and pc.member_username %}
+      <span class="monitor-member-badge" id="member-{{ pc.pc_number }}"
+            style="font-size:12px;color:var(--green,#22c55e);padding:0 6px">
+        👤 {{ pc.member_username }}
+      </span>
+      {% else %}
+      <span class="monitor-member-badge" id="member-{{ pc.pc_number }}" style="display:none"></span>
+      {% endif %}
+      <div class="monitor-footer-actions">
+        <button
+          class="btn btn-sm btn-default"
+          onclick="openMessageModal({{ pc.pc_number }})"
+          title="Send message to this PC"
+        >✉</button>
+        <div class="cmd-dropdown">
+          <button
+            class="btn btn-sm btn-default"
+            onclick="toggleCmdDropdown({{ pc.pc_number }})"
+            title="Remote commands"
+          >⚡ ▾</button>
+          <div class="cmd-menu hidden" id="cmd-menu-{{ pc.pc_number }}">
+            <button onclick="sendCommand({{ pc.pc_number }}, 'lock')">🔒 Lock</button>
+            <button onclick="openUrlModal({{ pc.pc_number }})">🌐 Open URL</button>
+            <div class="cmd-menu-divider"></div>
+            <button class="cmd-danger" onclick="sendCommand({{ pc.pc_number }}, 'restart')">🔄 Restart</button>
+            <button class="cmd-danger" onclick="sendCommand({{ pc.pc_number }}, 'shutdown')">🔴 Shutdown</button>
+          </div>
+        </div>
+        {# Stats toggle — mobile only (hidden on desktop via CSS) #}
+        <button
+          class="btn btn-sm btn-default metrics-toggle-btn"
+          id="metrics-btn-{{ pc.pc_number }}"
+          onclick="toggleMetrics({{ pc.pc_number }})"
+          title="Toggle performance stats"
+        >📊 Stats</button>
+      </div>
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Send message modal ── #}
+<div id="message-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>✉ Message to <span id="message-pc-label"></span></h2>
+    <form id="message-form">
+      <div class="form-group">
+        <label>Message</label>
+        <textarea id="message-text" name="text" rows="3" maxlength="300"
+          placeholder="Type your message…"
+          style="width:100%;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:14px"
+          required></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeMessageModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Send</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Open URL modal ── #}
+<div id="url-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>🌐 Open URL on <span id="url-pc-label"></span></h2>
+    <form id="url-form">
+      <div class="form-group">
+        <label>URL</label>
+        <input id="url-input" type="url" name="url" maxlength="512"
+          placeholder="https://…" required
+          style="width:100%" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeUrlModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Open</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Fullscreen modal ── #}
+<div id="fullscreen-modal" class="modal hidden">
+  <div class="fullscreen-box" onclick="event.stopPropagation()">
+    <div class="fullscreen-header">
+      <span id="fullscreen-label"></span>
+      <div class="fullscreen-actions">
+        <button id="fs-stats-btn" class="fullscreen-stats-btn" onclick="toggleFullscreenStats()" title="Toggle stats">📊 Stats</button>
+        <button class="fullscreen-close" onclick="closeFullscreen()">✕</button>
+      </div>
+    </div>
+    <div class="fullscreen-content">
+      <img id="fullscreen-img" src="" alt="Full screen view" />
+      <div id="fullscreen-stats-panel" class="fullscreen-stats-panel hidden"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PC_NUMBERS = [{% for pc in pcs %}{{ pc.pc_number }}{% if not loop.last %},{% endif %}{% endfor %}];
+let _fullscreenPc = null;
+let _fullscreenStatsOpen = false;
+let _fullscreenStatsTimer = null;
+let _fullscreenImgTimer = null;
+
+function fmtHMS(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${h}h ${m}m ${String(s).padStart(2,'0')}s`;
+}
+
+// ── Screenshot refresh ──────────────────────────────────────────────────────
+
+function refreshScreenshots() {
+  const t = Date.now();
+  PC_NUMBERS.forEach(n => {
+    const img = document.getElementById('shot-' + n);
+    if (img && img.style.display !== 'none') {
+      img.src = `/dashboard/api/pc/${n}/screenshot?t=${t}`;
+    }
+  });
+  if (_fullscreenPc !== null) {
+    document.getElementById('fullscreen-img').src =
+      `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${t}`;
+  }
+}
+
+// ── Status refresh ──────────────────────────────────────────────────────────
+
+function refreshStatus() {
+  fetch('/dashboard/monitor/status')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data) return;
+      const t = Date.now();
+      data.forEach(pc => updateCard(pc, t));
+      const dot = document.getElementById('refresh-indicator');
+      dot.style.opacity = '0.4';
+      setTimeout(() => { dot.style.opacity = '1'; }, 300);
+    })
+    .catch(() => {});
+}
+
+function updateCard(pc, t) {
+  const card    = document.getElementById('card-'        + pc.pc_number);
+  const dot     = document.getElementById('dot-'         + pc.pc_number);
+  const timeEl  = document.getElementById('footer-time-' + pc.pc_number);
+  const img     = document.getElementById('shot-'        + pc.pc_number);
+  const noshot  = document.getElementById('noshot-'      + pc.pc_number);
+  if (!card) return;
+
+  // Card class
+  card.className = 'monitor-card' +
+    (!pc.is_online ? ' monitor-offline' : !pc.is_locked ? ' monitor-active' : '');
+
+  // Status dot
+  dot.className = 'monitor-status-dot ' +
+    (!pc.is_online ? 'dot-offline' : !pc.is_locked ? 'dot-active' : 'dot-locked');
+
+  // Update ONLY the time span — Stats button is a sibling, untouched
+  if (timeEl) {
+    if (!pc.is_online) {
+      timeEl.innerHTML = '<span style="color:var(--gray)">Offline</span>';
+    } else if (pc.is_locked) {
+      timeEl.innerHTML = '<span style="color:var(--gray)">Locked</span>';
+    } else {
+      const totalSec = pc.remaining_total_sec;
+      timeEl.innerHTML =
+        `<span class="monitor-time" data-remaining-sec="${totalSec}">${fmtHMS(totalSec)}</span>` +
+        `<span style="color:var(--text-dim);font-size:11px">remaining</span>`;
+    }
+  }
+
+  // Screenshot visibility
+  if (pc.has_screenshot) {
+    if (noshot) noshot.style.display = 'none';
+    if (img) {
+      img.style.display = '';
+      img.src = `/dashboard/api/pc/${pc.pc_number}/screenshot?t=${t}`;
+    }
+  } else {
+    if (img) img.style.display = 'none';
+    if (noshot) noshot.style.display = '';
+  }
+
+  // Member username
+  const memberEl = document.getElementById('member-' + pc.pc_number);
+  if (memberEl) {
+    if (pc.membership_enabled && pc.member_username) {
+      memberEl.textContent = '👤 ' + pc.member_username;
+      memberEl.style.display = '';
+    } else {
+      memberEl.textContent = '';
+      memberEl.style.display = 'none';
+    }
+  }
+}
+
+function handleImgError(img) {
+  img.style.display = 'none';
+  const noshot = document.getElementById('noshot-' + img.id.replace('shot-', ''));
+  if (noshot) noshot.style.display = '';
+}
+
+// ── Mobile metrics panel toggle ──────────────────────────────────────────────
+
+function toggleMetrics(pcNumber) {
+  const panel = document.getElementById('metrics-' + pcNumber);
+  const btn   = document.getElementById('metrics-btn-' + pcNumber);
+  if (!panel) return;
+  const isOpen = panel.classList.contains('metrics-open');
+  panel.classList.toggle('metrics-open', !isOpen);
+  if (btn) btn.textContent = isOpen ? '📊 Stats' : '📊 Hide';
+}
+
+// ── Fullscreen modal ─────────────────────────────────────────────────────────
+
+function openFullscreen(pcNumber) {
+  _fullscreenPc = pcNumber;
+  const modal = document.getElementById('fullscreen-modal');
+  const img   = document.getElementById('fullscreen-img');
+  document.getElementById('fullscreen-label').textContent =
+    `PC ${String(pcNumber).padStart(2, '0')}`;
+  img.src = `/dashboard/api/pc/${pcNumber}/screenshot?t=${Date.now()}`;
+  modal.classList.remove('hidden');
+
+  // Reset stats panel
+  _fullscreenStatsOpen = false;
+  document.getElementById('fs-stats-btn').textContent = '📊 Stats';
+  const statsPanel = document.getElementById('fullscreen-stats-panel');
+  statsPanel.classList.add('hidden');
+  statsPanel.innerHTML = '';
+  clearInterval(_fullscreenStatsTimer);
+
+  // Lock to landscape on mobile
+  if (window.matchMedia('(max-width: 768px)').matches && screen.orientation?.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+
+  // Refresh fullscreen screenshot every 1 second for near-live view
+  if (_fullscreenImgTimer) clearInterval(_fullscreenImgTimer);
+  _fullscreenImgTimer = setInterval(() => {
+    if (_fullscreenPc !== null) {
+      document.getElementById('fullscreen-img').src =
+        `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${Date.now()}`;
+    }
+  }, 1000);
+}
+
+function closeFullscreen() {
+  document.getElementById('fullscreen-modal').classList.add('hidden');
+  document.getElementById('fullscreen-img').src = '';
+  clearInterval(_fullscreenImgTimer);
+  _fullscreenImgTimer = null;
+  _fullscreenPc = null;
+  _fullscreenStatsOpen = false;
+  clearInterval(_fullscreenStatsTimer);
+  document.getElementById('fullscreen-stats-panel').classList.add('hidden');
+
+  // Unlock orientation
+  if (screen.orientation?.unlock) {
+    try { screen.orientation.unlock(); } catch(e) {}
+  }
+}
+
+async function toggleFullscreenStats() {
+  const panel = document.getElementById('fullscreen-stats-panel');
+  const btn   = document.getElementById('fs-stats-btn');
+  _fullscreenStatsOpen = !_fullscreenStatsOpen;
+  panel.classList.toggle('hidden', !_fullscreenStatsOpen);
+  btn.textContent = _fullscreenStatsOpen ? '📊 Hide' : '📊 Stats';
+
+  if (_fullscreenStatsOpen && _fullscreenPc) {
+    const loadStats = () => {
+      htmx.ajax('GET', `/dashboard/monitor/metrics/${_fullscreenPc}`,
+        { target: '#fullscreen-stats-panel', swap: 'innerHTML' });
+    };
+    loadStats();
+    _fullscreenStatsTimer = setInterval(loadStats, 8000);
+  } else {
+    clearInterval(_fullscreenStatsTimer);
+  }
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFullscreen(); });
+
+// Close fullscreen by clicking outside the box
+document.getElementById('fullscreen-modal').addEventListener('click', closeFullscreen);
+
+// ── Intervals ────────────────────────────────────────────────────────────────
+setInterval(refreshStatus, 3000);
+setTimeout(() => setInterval(refreshScreenshots, 3000), 2500);
+</script>
+
+{% endblock %}

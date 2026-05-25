@@ -1,0 +1,126 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>License</h1>
+</div>
+
+<!-- Status card -->
+<div class="card" id="license-status">
+  <h2>Activation Status</h2>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+    {% if lic.status == "activated" %}
+      <span class="badge badge-success">Activated</span>
+    {% elif lic.status == "trial" %}
+      <span class="badge badge-warning">Trial — {{ lic.trial_days_remaining }} day{{ "s" if lic.trial_days_remaining != 1 }} remaining</span>
+    {% elif lic.status == "offline_locked" %}
+      <span class="badge badge-danger">Offline Locked — Cannot verify activation</span>
+    {% else %}
+      <span class="badge badge-danger">Expired</span>
+    {% endif %}
+  </div>
+
+  <table class="detail-table" style="width:100%;max-width:520px">
+    <tr>
+      <td style="color:var(--gray);padding:6px 12px 6px 0">License Key</td>
+      <td style="padding:6px 0;font-family:monospace">{{ lic.license_key or "—" }}</td>
+    </tr>
+    <tr>
+      <td style="color:var(--gray);padding:6px 12px 6px 0">Device ID</td>
+      <td style="padding:6px 0;font-family:monospace;font-size:.82em;word-break:break-all">{{ lic.device_id }}</td>
+    </tr>
+    <tr>
+      <td style="color:var(--gray);padding:6px 12px 6px 0">Activated At</td>
+      <td style="padding:6px 0">{{ lic.activated_at or "—" }}</td>
+    </tr>
+    <tr>
+      <td style="color:var(--gray);padding:6px 12px 6px 0">Expires At</td>
+      <td style="padding:6px 0">{{ lic.expires_at or "Lifetime" }}</td>
+    </tr>
+    <tr>
+      <td style="color:var(--gray);padding:6px 12px 6px 0">Last Verified</td>
+      <td style="padding:6px 0">{{ lic.last_verified or "—" }}</td>
+    </tr>
+  </table>
+</div>
+
+<!-- Activate card -->
+<div class="card">
+  <h2>{% if lic.status == "activated" %}Change{% else %}Enter{% endif %} License Key</h2>
+  <form id="activate-form" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+    <div class="form-group" style="flex:1;min-width:280px">
+      <label>License Key</label>
+      <input type="text" id="license-key-input" name="license_key"
+             placeholder="PSNX-XXXX-XXXX-XXXX-XXXX"
+             maxlength="24" required
+             style="font-family:monospace;letter-spacing:1px;text-transform:uppercase" />
+    </div>
+    <button type="submit" class="btn btn-primary" id="activate-btn">Activate</button>
+    {% if lic.status == "activated" %}
+      <button type="button" class="btn btn-danger" id="deactivate-btn">Deactivate</button>
+    {% endif %}
+  </form>
+  <div id="activate-result" style="margin-top:12px"></div>
+</div>
+
+<style>
+.badge{display:inline-block;padding:4px 14px;border-radius:12px;font-size:.85em;font-weight:600}
+.badge-success{background:rgba(34,197,94,.15);color:#22c55e}
+.badge-warning{background:rgba(245,158,11,.15);color:#f59e0b}
+.badge-danger{background:rgba(239,68,68,.15);color:#ef4444}
+</style>
+
+<script>
+document.getElementById('activate-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('activate-btn');
+  const result = document.getElementById('activate-result');
+  const key = document.getElementById('license-key-input').value.trim().toUpperCase();
+  if (!key) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Activating...';
+  result.innerHTML = '';
+
+  try {
+    const resp = await fetch('/api/license/activate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({license_key: key})
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      result.innerHTML = '<span style="color:#22c55e">License activated successfully!</span>';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      result.innerHTML = '<span style="color:#ef4444">' + (data.detail || data.error || 'Activation failed') + '</span>';
+    }
+  } catch(err) {
+    result.innerHTML = '<span style="color:#ef4444">Network error: ' + err.message + '</span>';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Activate';
+});
+
+const deactBtn = document.getElementById('deactivate-btn');
+if (deactBtn) {
+  deactBtn.addEventListener('click', async function() {
+    if (!confirm('Deactivate this license? The software will revert to trial mode.')) return;
+    const result = document.getElementById('activate-result');
+    try {
+      const resp = await fetch('/api/license/deactivate', {method: 'POST'});
+      if (resp.ok) {
+        result.innerHTML = '<span style="color:#f59e0b">License deactivated.</span>';
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        const data = await resp.json();
+        result.innerHTML = '<span style="color:#ef4444">' + (data.detail || 'Deactivation failed') + '</span>';
+      }
+    } catch(err) {
+      result.innerHTML = '<span style="color:#ef4444">Network error: ' + err.message + '</span>';
+    }
+  });
+}
+</script>
+
+{% endblock %}

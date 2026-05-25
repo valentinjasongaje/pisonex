@@ -1,0 +1,153 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Staff</h1>
+  <button class="btn btn-primary" onclick="openCreateModal()">+ Add Staff</button>
+</div>
+
+{% if success %}
+<div class="alert alert-success" style="margin-bottom:16px">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-danger" style="margin-bottom:16px">{{ error }}</div>
+{% endif %}
+
+<!-- Staff table -->
+<div class="table-card">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Role</th>
+        <th>Created</th>
+        <th style="width:80px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in staff %}
+      <tr>
+        <td>
+          <strong>{{ user.username }}</strong>
+          {% if user.username == current_username %}
+          <span class="badge badge-info" style="font-size:10px;margin-left:6px">You</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if user.role == "admin" %}
+          <span class="badge badge-warning">Admin</span>
+          {% else %}
+          <span class="badge badge-secondary">Cashier</span>
+          {% endif %}
+        </td>
+        <td style="color:var(--text-dim);font-size:13px">
+          {{ user.created_at.strftime("%b %d, %Y") if user.created_at else "—" }}
+        </td>
+        <td>
+          {% if user.username != current_username %}
+          <button
+            class="btn btn-sm btn-danger"
+            onclick="deleteStaff({{ user.id }}, '{{ user.username }}')"
+          >Delete</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--text-dim);padding:24px">No staff accounts yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p style="margin-top:12px;font-size:13px;color:var(--text-dim)">
+  <strong>Admin</strong> — full dashboard access.
+  <strong>Cashier</strong> — can add time, lock/unlock PCs, and view the PC grid and monitor. Cannot access Settings, Reports, Rates, Membership, or Logs.
+</p>
+
+<!-- Create staff modal -->
+<div id="create-modal" class="modal hidden">
+  <div class="modal-box" style="max-width:420px">
+    <h2>Add Staff Account</h2>
+    <div id="create-error" class="alert alert-danger" style="display:none;margin-bottom:12px"></div>
+    <div class="form-group">
+      <label>Username</label>
+      <input id="new-username" type="text" class="form-control" placeholder="e.g. cashier1" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input id="new-password" type="password" class="form-control" placeholder="Min. 6 characters" />
+    </div>
+    <div class="form-group">
+      <label>Role</label>
+      <select id="new-role" class="form-control">
+        <option value="cashier">Cashier — limited access</option>
+        <option value="admin">Admin — full access</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-default" onclick="closeCreateModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCreate()">Create Account</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openCreateModal() {
+  document.getElementById('create-modal').classList.remove('hidden');
+  document.getElementById('new-username').focus();
+}
+function closeCreateModal() {
+  document.getElementById('create-modal').classList.add('hidden');
+  document.getElementById('new-username').value = '';
+  document.getElementById('new-password').value = '';
+  document.getElementById('new-role').value = 'cashier';
+  document.getElementById('create-error').style.display = 'none';
+}
+
+async function submitCreate() {
+  const username = document.getElementById('new-username').value.trim();
+  const password = document.getElementById('new-password').value;
+  const role     = document.getElementById('new-role').value;
+  const errEl    = document.getElementById('create-error');
+
+  errEl.style.display = 'none';
+
+  if (!username) { errEl.textContent = 'Username is required.'; errEl.style.display = 'block'; return; }
+  if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
+
+  try {
+    const res = await fetch('/dashboard/api/staff/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.detail || 'Failed to create account.';
+      errEl.style.display = 'block';
+      return;
+    }
+    window.location.reload();
+  } catch {
+    errEl.textContent = 'Unexpected error. Please try again.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function deleteStaff(userId, username) {
+  if (!confirm(`Delete staff account "${username}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/dashboard/api/staff/${userId}/delete`, { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.detail || 'Failed to delete account.');
+      return;
+    }
+    window.location.reload();
+  } catch {
+    alert('Unexpected error.');
+  }
+}
+</script>
+
+{% endblock %}

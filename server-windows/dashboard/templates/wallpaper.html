@@ -1,0 +1,166 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Wallpaper Management</h1>
+  <p class="page-subtitle">Upload and push wallpapers to client lock screens</p>
+</div>
+
+<!-- Active Wallpaper Status -->
+<div class="card" style="margin-bottom:1.5rem">
+  <h2>Active Wallpaper</h2>
+  <div id="active-status" style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
+    {% if active_url %}
+      <img src="{{ active_url }}" alt="Active wallpaper" style="width:240px;height:135px;object-fit:cover;border-radius:8px;border:2px solid var(--accent)" />
+      <div>
+        <p style="margin:0;color:var(--text)">Currently pushing to <strong>all PCs</strong></p>
+        <p style="margin:.25rem 0 0;font-size:.8rem;color:var(--gray)">Hash: {{ active_hash[:12] }}...</p>
+        <button class="btn btn-danger" style="margin-top:.75rem" onclick="clearWallpaper()">Clear Wallpaper</button>
+      </div>
+    {% else %}
+      <div style="width:240px;height:135px;border-radius:8px;border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--gray)">
+        No wallpaper set
+      </div>
+      <p style="margin:0;color:var(--gray)">Clients will use their local wallpaper settings</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Upload -->
+<div class="card" style="margin-bottom:1.5rem">
+  <h2>Upload New Wallpaper</h2>
+  <div id="upload-area" style="border:2px dashed var(--border);border-radius:12px;padding:2rem;text-align:center;cursor:pointer;transition:border-color .2s,background .2s"
+       ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(59,130,246,.06)'"
+       ondragleave="this.style.borderColor='var(--border)';this.style.background=''"
+       ondrop="handleDrop(event)"
+       onclick="document.getElementById('wp-file').click()">
+    <p style="margin:0 0 .5rem;font-size:1.1rem;color:var(--text)">Drag & drop an image here</p>
+    <p style="margin:0;font-size:.8rem;color:var(--gray)">or click to browse (JPEG, PNG, BMP, WebP &mdash; max 5 MB)</p>
+    <input type="file" id="wp-file" accept=".jpg,.jpeg,.png,.bmp,.webp" style="display:none" onchange="uploadFile(this.files[0])" />
+  </div>
+  <div id="upload-progress" style="display:none;margin-top:.75rem">
+    <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+      <div id="upload-bar" style="height:100%;width:0%;background:var(--accent);transition:width .3s"></div>
+    </div>
+    <p id="upload-status" style="margin:.5rem 0 0;font-size:.8rem;color:var(--gray)">Uploading...</p>
+  </div>
+
+  <!-- Per-PC targeting -->
+  <div style="margin-top:1rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+    <label style="font-size:.85rem;color:var(--text)">Target:</label>
+    <select id="wp-target" style="padding:.35rem .5rem;border-radius:6px;border:1px solid var(--border);background:var(--card-bg);color:var(--text)">
+      <option value="">All PCs (Global)</option>
+      {% for pc in pcs %}
+        <option value="{{ pc.pc_number }}">PC {{ "%02d"|format(pc.pc_number) }}{% if pc.name %} — {{ pc.name }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+
+<!-- Gallery -->
+<div class="card">
+  <h2>Uploaded Wallpapers</h2>
+  <div id="gallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-top:.75rem">
+    {% for wp in wallpapers %}
+      <div class="wp-thumb" style="position:relative;border-radius:8px;overflow:hidden;border:2px solid {% if active_url == wp.url %}var(--accent){% else %}var(--border){% endif %};cursor:pointer;transition:border-color .2s"
+           onclick="setWallpaper('{{ wp.filename }}')"
+           onmouseenter="this.querySelector('.wp-actions').style.opacity='1'"
+           onmouseleave="this.querySelector('.wp-actions').style.opacity='0'">
+        <img src="{{ wp.url }}" alt="{{ wp.filename }}" style="width:100%;height:120px;object-fit:cover;display:block" loading="lazy" />
+        <div style="padding:.4rem .6rem;font-size:.72rem;color:var(--gray);background:var(--card-bg)">
+          {{ wp.filename }}<br/>{{ wp.size_kb }} KB
+        </div>
+        <div class="wp-actions" style="position:absolute;top:4px;right:4px;opacity:0;transition:opacity .2s">
+          <button class="btn btn-danger" style="padding:.2rem .5rem;font-size:.7rem;min-width:auto"
+                  onclick="event.stopPropagation();deleteWallpaper('{{ wp.filename }}')">Delete</button>
+        </div>
+        {% if active_url == wp.url %}
+          <div style="position:absolute;top:4px;left:4px;background:var(--accent);color:#fff;font-size:.65rem;padding:.15rem .4rem;border-radius:4px">Active</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% if not wallpapers %}
+      <p style="color:var(--gray);grid-column:1/-1">No wallpapers uploaded yet. Upload one above to get started.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.style.borderColor = 'var(--border)';
+  e.currentTarget.style.background = '';
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+}
+
+async function uploadFile(file) {
+  if (!file) return;
+  const allowed = ['.jpg','.jpeg','.png','.bmp','.webp'];
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  if (!allowed.includes(ext)) {
+    alert('Invalid file type. Use JPEG, PNG, BMP, or WebP.');
+    return;
+  }
+  if (file.size > 5*1024*1024) {
+    alert('File too large (max 5 MB).');
+    return;
+  }
+
+  const progress = document.getElementById('upload-progress');
+  const bar = document.getElementById('upload-bar');
+  const status = document.getElementById('upload-status');
+  progress.style.display = 'block';
+  bar.style.width = '30%';
+  status.textContent = 'Uploading...';
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    bar.style.width = '60%';
+    const resp = await fetch('/dashboard/api/wallpaper/upload', {method:'POST', body:form});
+    bar.style.width = '90%';
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Upload failed');
+    }
+    bar.style.width = '100%';
+    status.textContent = 'Upload complete! Refreshing...';
+    setTimeout(() => location.reload(), 500);
+  } catch(e) {
+    bar.style.width = '100%';
+    bar.style.background = 'var(--danger)';
+    status.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function setWallpaper(filename) {
+  const target = document.getElementById('wp-target').value;
+  const body = {filename};
+  if (target) body.pc_number = parseInt(target);
+
+  const resp = await fetch('/dashboard/api/wallpaper/set', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  if (resp.ok) location.reload();
+  else alert('Failed to set wallpaper');
+}
+
+async function clearWallpaper() {
+  const resp = await fetch('/dashboard/api/wallpaper', {method:'DELETE'});
+  if (resp.ok) location.reload();
+  else alert('Failed to clear wallpaper');
+}
+
+async function deleteWallpaper(filename) {
+  if (!confirm('Delete this wallpaper file?')) return;
+  const resp = await fetch('/dashboard/api/wallpaper/file/' + encodeURIComponent(filename), {method:'DELETE'});
+  if (resp.ok) location.reload();
+  else alert('Failed to delete wallpaper');
+}
+</script>
+
+{% endblock %}
