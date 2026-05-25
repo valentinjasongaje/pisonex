@@ -1,0 +1,248 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Settings</h1>
+</div>
+
+<!-- Branch Name -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Branch</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Identifies this café installation in the pisonex.com customer portal.
+    PCs with the same branch name are grouped together.
+    Leave blank to appear under "Unassigned".
+  </p>
+
+  <div class="form-group">
+    <label for="cfg-branch-name" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Branch Name</label>
+    <input type="text" id="cfg-branch-name" maxlength="120"
+      placeholder="e.g. Tomas Morato Branch"
+      value="{{ branch_name }}"
+      style="margin-top:.4rem;width:100%;" />
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="saveBranchName()">Save</button>
+    <span id="branch-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
+<!-- General -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>General</h2>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-idle-shutdown" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Idle Auto-Shutdown</label>
+    <p style="font-size:.8rem;color:var(--gray);margin:.25rem 0 .5rem;">
+      Automatically shut down a PC that has been locked and idle for this many minutes (0 = disabled).
+    </p>
+    <div class="input-suffix" style="max-width:180px;">
+      <input type="number" id="cfg-idle-shutdown" min="0" max="60"
+        value="{{ config.idle_auto_shutdown_minutes }}" />
+      <span class="suffix">min</span>
+    </div>
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="saveIdleShutdown()">Save</button>
+    <span id="idle-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
+<!-- PC Management Presets -->
+<div class="card" style="max-width:480px;">
+  <h2>PC Management Presets</h2>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label class="toggle-label">
+      <input type="checkbox" id="cfg-preset-amounts"
+        {% if config.preset_amounts_enabled %}checked{% endif %} />
+      <span>Use PHP amount presets</span>
+    </label>
+    <p style="font-size:.8rem;color:var(--gray);margin:.5rem 0 0 24px;">
+      When enabled, the Add Time buttons show fixed PHP amounts instead of fixed minutes.
+      Transactions are recorded with the peso amount paid.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin:.6rem 0 0 24px;">
+      {% for amt in [1, 5, 10, 15, 20, 25] %}
+      <span style="font-size:.75rem;padding:.25rem .6rem;background:var(--surface-2,rgba(255,255,255,0.05));border:1px solid var(--border);border-radius:6px;color:var(--text);">₱{{ amt }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="savePresetAmounts()">Save</button>
+    <span id="preset-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
+<!-- Security -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Security</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Client API Key restricts which devices can talk to this server.
+    When enabled, every PC client must be configured with the same key.
+    Leave disabled if your network is already isolated.
+  </p>
+
+  <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;">
+    <span style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Status:</span>
+    {% if api_key_enabled %}
+    <span id="key-status-badge" style="font-size:.75rem;padding:.2rem .6rem;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:99px;font-weight:600;">Enabled</span>
+    {% else %}
+    <span id="key-status-badge" style="font-size:.75rem;padding:.2rem .6rem;background:rgba(148,163,184,.1);color:var(--text-dim);border:1px solid var(--border);border-radius:99px;font-weight:600;">Disabled</span>
+    {% endif %}
+  </div>
+
+  {% if api_key_enabled %}
+  <div style="margin-bottom:1rem;">
+    <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);display:block;margin-bottom:.35rem;">Current Key</label>
+    <div style="display:flex;align-items:center;gap:.5rem;">
+      <input id="key-display" type="text" value="{{ api_key_masked }}" readonly
+        style="flex:1;font-family:monospace;font-size:.85rem;background:var(--surface-2,rgba(255,255,255,0.04));border:1px solid var(--border);border-radius:6px;padding:.4rem .65rem;color:var(--text);" />
+    </div>
+    <p style="font-size:.75rem;color:var(--gray);margin:.35rem 0 0;">Key is partially hidden. Generate a new one to see the full value.</p>
+  </div>
+  {% endif %}
+
+  <div id="new-key-box" style="display:none;margin-bottom:1rem;">
+    <label style="font-size:.8rem;font-weight:600;color:#22c55e;display:block;margin-bottom:.35rem;">New Key — copy this now, it won't be shown again</label>
+    <div style="display:flex;align-items:center;gap:.5rem;">
+      <input id="new-key-value" type="text" readonly
+        style="flex:1;font-family:monospace;font-size:.85rem;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.3);border-radius:6px;padding:.4rem .65rem;color:#22c55e;" />
+      <button class="btn btn-secondary" style="white-space:nowrap;font-size:.8rem;" onclick="copyKey()">Copy</button>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;">
+    <button class="btn btn-primary" onclick="generateKey()">Generate New Key</button>
+    {% if api_key_enabled %}
+    <button class="btn btn-danger" onclick="clearKey()">Disable</button>
+    {% endif %}
+    <span id="key-action-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
+<style>
+  .input-suffix {
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+  .input-suffix input {
+    width: 100%;
+    padding-right: 40px;
+  }
+  .input-suffix .suffix {
+    position: absolute;
+    right: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim, #94a3b8);
+    pointer-events: none;
+    opacity: 0.7;
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text, #e2e8f0);
+    cursor: pointer;
+  }
+  .toggle-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--blue, #3b82f6);
+  }
+</style>
+
+<script>
+async function saveBranchName() {
+  const val = document.getElementById('cfg-branch-name').value.trim();
+  const el = document.getElementById('branch-status');
+  const res = await fetch('/dashboard/api/settings/branch-name', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branch_name: val }),
+  });
+  if (res.ok) {
+    el.textContent = 'Saved.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 3000);
+}
+
+async function _saveConfig(body, statusId) {
+  const el = document.getElementById(statusId);
+  const res = await fetch('/dashboard/api/membership/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) {
+    el.textContent = 'Saved.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 3000);
+}
+
+function saveIdleShutdown() {
+  const val = parseInt(document.getElementById('cfg-idle-shutdown').value);
+  if (isNaN(val) || val < 0) return;
+  _saveConfig({ idle_auto_shutdown_minutes: val }, 'idle-status');
+}
+
+function savePresetAmounts() {
+  const val = document.getElementById('cfg-preset-amounts').checked;
+  _saveConfig({ preset_amounts_enabled: val }, 'preset-status');
+}
+
+async function generateKey() {
+  const el = document.getElementById('key-action-status');
+  const res = await fetch('/dashboard/api/security/generate-key', { method: 'POST' });
+  if (!res.ok) { el.textContent = 'Failed.'; el.style.color = 'var(--red)'; return; }
+  const data = await res.json();
+  // Show new key
+  const box = document.getElementById('new-key-box');
+  document.getElementById('new-key-value').value = data.key;
+  box.style.display = 'block';
+  // Update status badge
+  document.getElementById('key-status-badge').textContent = 'Enabled';
+  document.getElementById('key-status-badge').style.cssText = 'font-size:.75rem;padding:.2rem .6rem;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:99px;font-weight:600;';
+  el.textContent = 'Key generated — copy it now!';
+  el.style.color = '#22c55e';
+}
+
+async function clearKey() {
+  if (!confirm('Disable client authentication? All PCs will be able to connect without a key.')) return;
+  const el = document.getElementById('key-action-status');
+  const res = await fetch('/dashboard/api/security/clear-key', { method: 'POST' });
+  if (!res.ok) { el.textContent = 'Failed.'; el.style.color = 'var(--red)'; return; }
+  document.getElementById('key-status-badge').textContent = 'Disabled';
+  document.getElementById('key-status-badge').style.cssText = 'font-size:.75rem;padding:.2rem .6rem;background:rgba(148,163,184,.1);color:var(--text-dim);border:1px solid var(--border);border-radius:99px;font-weight:600;';
+  document.getElementById('new-key-box').style.display = 'none';
+  el.textContent = 'Client auth disabled.';
+  el.style.color = 'var(--text-dim)';
+}
+
+function copyKey() {
+  const val = document.getElementById('new-key-value').value;
+  navigator.clipboard.writeText(val).then(() => {
+    const el = document.getElementById('key-action-status');
+    el.textContent = 'Copied to clipboard!';
+    el.style.color = '#22c55e';
+    setTimeout(() => el.textContent = '', 2500);
+  });
+}
+</script>
+
+{% endblock %}

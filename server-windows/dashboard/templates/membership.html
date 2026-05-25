@@ -1,0 +1,395 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Membership</h1>
+</div>
+
+<!-- Configuration -->
+<div class="card">
+  <h2>Settings</h2>
+  <form id="membership-config-form" onsubmit="saveMembershipConfig(event)">
+
+    <!-- Toggle switches row -->
+    <div class="membership-toggles">
+      <label class="toggle-label">
+        <input type="checkbox" id="cfg-membership-enabled"
+          {% if config.membership_enabled %}checked{% endif %} />
+        <span>Enable Membership Mode</span>
+      </label>
+      <label class="toggle-label">
+        <input type="checkbox" id="cfg-absorption-enabled"
+          {% if config.absorption_enabled %}checked{% endif %} />
+        <span>Allow Session Absorption</span>
+      </label>
+    </div>
+
+    <!-- Number inputs grid -->
+    <div class="membership-grid">
+      <div class="form-group">
+        <label for="cfg-logout-deduction">Logout Deduction</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-logout-deduction" min="0" max="60"
+            value="{{ config.logout_deduction_minutes }}" />
+          <span class="suffix">min</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="cfg-min-logout">Minimum Logout Time</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-min-logout" min="0" max="120"
+            value="{{ config.minimum_logout_minutes }}" />
+          <span class="suffix">min</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="cfg-zero-time">Zero-Time Auto-Logout</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-zero-time" min="10" max="600"
+            value="{{ config.zero_time_auto_logout_seconds }}" />
+          <span class="suffix">sec</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="cfg-heartbeat-timeout">Heartbeat Timeout</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-heartbeat-timeout" min="5" max="1440"
+            value="{{ config.member_heartbeat_timeout_minutes }}" />
+          <span class="suffix">min</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="membership-actions">
+      <button type="submit" class="btn btn-primary">Save Settings</button>
+      <span id="config-status"></span>
+    </div>
+  </form>
+</div>
+
+<!-- Members List -->
+<div class="card">
+  <h2>Members ({{ members | length }})</h2>
+
+  {% if members %}
+
+  <!-- ── Desktop table (hidden on mobile) ──────────────────── -->
+  <div class="members-desktop-view">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Balance</th>
+          <th>Status</th>
+          <th>Logged In</th>
+          <th>Remaining</th>
+          <th>Last Login</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in members %}
+        <tr id="member-row-{{ m.id }}">
+          <td>{{ m.username }}</td>
+          <td>{{ m.balance_seconds // 60 }}m {{ m.balance_seconds % 60 }}s</td>
+          <td>
+            {% if m.is_active %}
+              <span class="badge badge-success">Active</span>
+            {% else %}
+              <span class="badge badge-danger">Inactive</span>
+            {% endif %}
+          </td>
+          <td>{% if m.logged_in_pc %}PC {{ "%02d" | format(m.logged_in_pc) }}{% else %}&mdash;{% endif %}</td>
+          <td>{% if m.remaining_seconds > 0 %}{{ m.remaining_seconds // 60 }}m {{ m.remaining_seconds % 60 }}s{% else %}&mdash;{% endif %}</td>
+          <td>{% if m.last_login_at %}{{ m.last_login_at.strftime('%m/%d %H:%M') }}{% else %}&mdash;{% endif %}</td>
+          <td>
+            {% if m.is_active %}
+              <button class="btn btn-sm btn-warning" onclick="deactivateMember({{ m.id }})">Deactivate</button>
+            {% else %}
+              <button class="btn btn-sm btn-success" onclick="activateMember({{ m.id }})">Activate</button>
+            {% endif %}
+            {% if m.logged_in_pc %}
+              <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
+            {% endif %}
+            <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Mobile tile list (hidden on desktop) ───────────────── -->
+  <div class="members-mobile-view">
+    {% for m in members %}
+    <div class="member-tile" id="member-tile-{{ m.id }}">
+
+      <div class="member-tile-header">
+        <div>
+          <div class="member-tile-username">{{ m.username }}</div>
+          {% if m.logged_in_pc %}
+          <div class="member-tile-pc">📍 PC {{ "%02d" | format(m.logged_in_pc) }}</div>
+          {% endif %}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          {% if m.is_active %}
+            <span class="badge badge-success">Active</span>
+          {% else %}
+            <span class="badge badge-danger">Inactive</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="member-tile-body">
+        <div class="member-tile-row">
+          <span class="member-tile-label">Balance</span>
+          <span>{{ m.balance_seconds // 60 }}m {{ m.balance_seconds % 60 }}s</span>
+        </div>
+        <div class="member-tile-row">
+          <span class="member-tile-label">Remaining</span>
+          <span>{% if m.remaining_seconds > 0 %}{{ m.remaining_seconds // 60 }}m {{ m.remaining_seconds % 60 }}s{% else %}—{% endif %}</span>
+        </div>
+        <div class="member-tile-row">
+          <span class="member-tile-label">Last Login</span>
+          <span style="color:var(--text-dim);font-size:12px">{% if m.last_login_at %}{{ m.last_login_at.strftime('%m/%d %H:%M') }}{% else %}—{% endif %}</span>
+        </div>
+      </div>
+
+      <div class="member-tile-actions">
+        {% if m.is_active %}
+          <button class="btn btn-sm btn-warning" onclick="deactivateMember({{ m.id }})">Deactivate</button>
+        {% else %}
+          <button class="btn btn-sm btn-success" onclick="activateMember({{ m.id }})">Activate</button>
+        {% endif %}
+        {% if m.logged_in_pc %}
+          <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
+        {% endif %}
+        <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <p style="color:var(--gray)">No registered members yet.</p>
+  {% endif %}
+</div>
+
+<style>
+  /* ── Config form ─────────────────────────────────────────── */
+  .membership-toggles {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    background: var(--surface-2, rgba(255,255,255,0.03));
+    border-radius: 8px;
+    border: 1px solid var(--border, rgba(255,255,255,0.06));
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: var(--text, #e2e8f0) !important;
+    cursor: pointer;
+  }
+  .toggle-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--blue, #3b82f6);
+  }
+
+  .membership-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .membership-grid .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .membership-grid label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim, #94a3b8);
+  }
+
+  .input-suffix {
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+  .input-suffix input {
+    width: 100%;
+    padding-right: 40px;
+  }
+  .input-suffix .suffix {
+    position: absolute;
+    right: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim, #94a3b8);
+    pointer-events: none;
+    opacity: 0.7;
+  }
+
+  .membership-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .membership-actions #config-status {
+    font-size: 0.85rem;
+  }
+
+  /* ── Members list responsive layout ─────────────────────── */
+  .members-mobile-view { display: none; }
+
+  @media (max-width: 768px) {
+    .members-desktop-view { display: none; }
+    .members-mobile-view {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 4px;
+    }
+
+    .member-tile {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .member-tile-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+    }
+    .member-tile-username {
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+    }
+    .member-tile-pc {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .member-tile-body {
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .member-tile-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      min-height: 20px;
+    }
+    .member-tile-label {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .member-tile-actions {
+      padding: 10px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .member-tile-actions .btn {
+      flex: 1;
+      min-width: 100px;
+      text-align: center;
+    }
+
+    /* Config form tweaks on mobile */
+    .membership-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    .membership-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .membership-actions .btn {
+      width: 100%;
+      text-align: center;
+    }
+  }
+</style>
+
+<script>
+async function saveMembershipConfig(e) {
+  e.preventDefault();
+  const body = {
+    membership_enabled: document.getElementById('cfg-membership-enabled').checked,
+    absorption_enabled: document.getElementById('cfg-absorption-enabled').checked,
+    logout_deduction_minutes: parseInt(document.getElementById('cfg-logout-deduction').value),
+    minimum_logout_minutes: parseInt(document.getElementById('cfg-min-logout').value),
+    zero_time_auto_logout_seconds: parseInt(document.getElementById('cfg-zero-time').value),
+    member_heartbeat_timeout_minutes: parseInt(document.getElementById('cfg-heartbeat-timeout').value),
+  };
+  const res = await fetch('/dashboard/api/membership/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  });
+  const el = document.getElementById('config-status');
+  if (res.ok) {
+    el.textContent = 'Settings saved.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save settings.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 3000);
+}
+
+async function deactivateMember(id) {
+  if (!confirm('Deactivate this member?')) return;
+  await fetch(`/dashboard/api/membership/members/${id}/deactivate`, {method: 'POST'});
+  location.reload();
+}
+
+async function activateMember(id) {
+  await fetch(`/dashboard/api/membership/members/${id}/activate`, {method: 'POST'});
+  location.reload();
+}
+
+async function forceLogout(id) {
+  if (!confirm('Force logout this member? Their remaining time will be saved.')) return;
+  await fetch(`/dashboard/api/membership/members/${id}/force-logout`, {method: 'POST'});
+  location.reload();
+}
+
+function adjustBalance(id, username) {
+  const input = prompt(`Adjust balance for ${username}.\nEnter seconds to add (negative to subtract):`);
+  if (input === null) return;
+  const seconds = parseInt(input);
+  if (isNaN(seconds)) { alert('Invalid number'); return; }
+  fetch(`/dashboard/api/membership/members/${id}/adjust-balance`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({seconds})
+  }).then(() => location.reload());
+}
+</script>
+
+{% endblock %}

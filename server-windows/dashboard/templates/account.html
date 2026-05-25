@@ -1,0 +1,80 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Account Settings</h1>
+</div>
+
+{% if success %}
+<div class="alert alert-success" style="margin-bottom:1rem;">
+  ✓ {{ success }}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-danger" style="margin-bottom:1rem;">
+  ✗ {{ error }}
+</div>
+{% endif %}
+
+<div class="card" style="max-width:480px;">
+  <h2>Change Admin Credentials</h2>
+  <p style="color:var(--gray);font-size:.875rem;margin-bottom:1.25rem;">
+    Update your username, password, or both. Current password is always required.
+  </p>
+
+  <form method="post" action="/dashboard/account">
+    <div class="form-group">
+      <label>Current Password <span style="color:var(--danger)">*</span></label>
+      <input
+        type="password"
+        name="current_password"
+        required
+        autocomplete="current-password"
+        placeholder="Enter your current password"
+      />
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:1.25rem 0;" />
+
+    <div class="form-group">
+      <label>New Username</label>
+      <input
+        type="text"
+        name="new_username"
+        value="{{ current_username }}"
+        minlength="3"
+        maxlength="32"
+        autocomplete="username"
+        placeholder="Leave unchanged to keep current"
+      />
+    </div>
+
+    <div class="form-group">
+      <label>New Password</label>
+      <input
+        type="password"
+        name="new_password"
+        minlength="6"
+        autocomplete="new-password"
+        placeholder="Leave blank to keep current"
+      />
+    </div>
+
+    <div class="form-group">
+      <label>Confirm New Password</label>
+      <input
+        type="password"
+        name="confirm_password"
+        autocomplete="new-password"
+        placeholder="Repeat new password"
+      />
+    </div>
+
+    <div style="margin-top:1.5rem;">
+      <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

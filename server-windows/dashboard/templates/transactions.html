@@ -1,0 +1,83 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Transactions</h1>
+  <div class="header-stats">
+    <div class="stat-pill earnings">₱ {{ total_pesos }} total</div>
+    <div class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">{{ transactions|length }} record{{ 's' if transactions|length != 1 else '' }}</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <form id="tx-filter-form" method="get" action="/dashboard/transactions" class="filter-bar" style="align-items:flex-end;gap:12px">
+    <div class="form-group">
+      <label>Period</label>
+      <select name="days" onchange="submitTxFilter()">
+        <option value="0"  {% if days == 0  %}selected{% endif %}>All Time</option>
+        <option value="1"  {% if days == 1  %}selected{% endif %}>Today</option>
+        <option value="7"  {% if days == 7  %}selected{% endif %}>Last 7 days</option>
+        <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+        <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>PC</label>
+      <select name="pc_id" onchange="submitTxFilter()">
+        <option value="">All PCs</option>
+        {% for pc in pcs %}
+        <option value="{{ pc.pc_number }}" {% if pc_id == pc.pc_number %}selected{% endif %}>
+          PC {{ "%02d" | format(pc.pc_number) }}{% if pc.name and pc.name != "PC " ~ "%02d" | format(pc.pc_number) %} — {{ pc.name }}{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if days or pc_id %}
+    <a href="/dashboard/transactions" class="btn btn-default btn-sm" style="align-self:flex-end">Clear</a>
+    {% endif %}
+  </form>
+  <script>
+  function submitTxFilter() {
+    const form = document.getElementById('tx-filter-form');
+    const url = new URL(form.action);
+    new FormData(form).forEach((val, key) => {
+      if (val !== '') url.searchParams.set(key, val);
+    });
+    window.location.href = url.toString();
+  }
+  </script>
+</div>
+
+<div class="card">
+  {% if transactions %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>PC</th>
+        <th>Amount</th>
+        <th>Time Added</th>
+        <th>Date / Time</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tx in transactions %}
+      <tr>
+        <td style="color:var(--gray)">{{ tx.id }}</td>
+        <td>{% if tx.pc %}PC {{ "%02d" | format(tx.pc.pc_number) }}{% else %}&mdash;{% endif %}</td>
+        <td class="money">₱{{ tx.amount_php }}</td>
+        <td>
+          {% set _h = tx.seconds_added // 3600 %}{% set _m = (tx.seconds_added % 3600) // 60 %}{% set _s = tx.seconds_added % 60 %}
+          {% if _h > 0 %}{{ _h }}h {{ _m }}m{% elif _m > 0 %}{{ _m }}m {{ _s }}s{% else %}{{ _s }}s{% endif %}
+        </td>
+        <td style="color:var(--text-dim)">{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="text-align:center;padding:32px;color:var(--text-dim)">No transactions found for the selected filters.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
