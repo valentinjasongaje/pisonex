@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>System Logs</h1>
+  <div class="filter-bar">
+    <select onchange="filterLogs(this.value)">
+      <option value="">All Levels</option>
+      <option value="INFO">INFO</option>
+      <option value="WARNING">WARNING</option>
+      <option value="ERROR">ERROR</option>
+    </select>
+  </div>
+</div>
+
+<div class="card log-container">
+  {% for log in logs %}
+  <div class="log-entry log-{{ log.level | lower }}">
+    <span class="log-time">{{ log.created_at.strftime('%H:%M:%S') }}</span>
+    <span class="log-level">{{ log.level }}</span>
+    <span class="log-source">[{{ log.source }}]</span>
+    <span class="log-msg">{{ log.message }}</span>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+function filterLogs(level) {
+  const entries = document.querySelectorAll('.log-entry');
+  entries.forEach(e => {
+    e.style.display = (!level || e.classList.contains('log-' + level.toLowerCase())) ? '' : 'none';
+  });
+}
+</script>
+
+{% endblock %}

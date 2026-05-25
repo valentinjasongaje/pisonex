@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pisonex Admin</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="stylesheet" href="/static/css/admin.css" />
+</head>
+<body>
+
+<button class="hamburger" id="hamburger-btn" aria-label="Toggle menu">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <img src="/static/img/logo.png" alt="Pisonex" class="sidebar-logo-img" />
+    <span class="title-text">PISONEX</span>
+  </div>
+  <ul class="sidebar-nav">
+    <li><a href="/dashboard"         class="nav-link" data-page="overview">Overview</a></li>
+    <li><a href="/dashboard/pcs"     class="nav-link" data-page="pcs">PC Management</a></li>
+    <li><a href="/dashboard/monitor" class="nav-link" data-page="monitor">Monitor</a></li>
+    {% if request.state.user_role == "admin" %}
+    <li><a href="/dashboard/transactions" class="nav-link" data-page="transactions">Transactions</a></li>
+    <li><a href="/dashboard/reports"      class="nav-link" data-page="reports">Reports</a></li>
+    <li><a href="/dashboard/rates"        class="nav-link" data-page="rates">Coin Rates</a></li>
+    <li><a href="/dashboard/settings"     class="nav-link" data-page="settings">Settings</a></li>
+    <li><a href="/dashboard/wallpaper"    class="nav-link" data-page="wallpaper">Wallpaper</a></li>
+    <li><a href="/dashboard/membership"   class="nav-link" data-page="membership">Membership</a></li>
+    <li><a href="/dashboard/logs"         class="nav-link" data-page="logs">System Logs</a></li>
+    <li><a href="/dashboard/license"      class="nav-link" data-page="license">License</a></li>
+    <li><a href="/dashboard/staff"        class="nav-link" data-page="staff">Staff</a></li>
+    {% endif %}
+    <li><a href="/dashboard/account"  class="nav-link" data-page="account">Account</a></li>
+  </ul>
+  <div class="sidebar-footer">
+    <a href="/dashboard/logout" class="logout-link">⏏ Logout</a>
+    <div class="sidebar-footer-row">
+      <span class="version">v1.0.0</span>
+      <button class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle light/dark mode">☀</button>
+    </div>
+  </div>
+</nav>
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="/static/js/admin.js"></script>
+<script>
+(function initTheme() {
+  const saved = localStorage.getItem('pisonet-theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = saved || (prefersDark ? 'dark' : 'light');
+  if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+
+  const btn = document.getElementById('theme-toggle-btn');
+  function applyTheme(t) {
+    if (t === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      if (btn) btn.textContent = '🌙';
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      if (btn) btn.textContent = '☀';
+    }
+    localStorage.setItem('pisonet-theme', t);
+  }
+  applyTheme(theme);
+  if (btn) btn.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    applyTheme(current === 'light' ? 'dark' : 'light');
+  });
+})();
+</script>
+</body>
+</html>

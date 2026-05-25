@@ -1,0 +1,339 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>PC Management</h1>
+  <div class="header-stats">
+    <div class="stat-pill online">{{ total }} PC{{ 's' if total != 1 else '' }} registered</div>
+  </div>
+</div>
+
+{% if not pcs %}
+<div class="card">
+  <p style="color: var(--text-dim); text-align: center; padding: 24px 0;">
+    No PCs registered yet. PCs appear here once the client app connects.
+  </p>
+</div>
+{% else %}
+
+<!-- ── Desktop table (hidden on mobile) ─────────────────────────── -->
+<div class="card pcs-desktop-view">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>PC</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th class="col-hide-sm">IP Address</th>
+        <th class="col-hide-sm">MAC Address</th>
+        <th>Remaining</th>
+        {% if membership_enabled %}<th class="col-hide-sm">Member</th>{% endif %}
+        <th class="col-hide-sm">Last Seen</th>
+        <th>Coins</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pc in pcs %}
+      {% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
+      <tr id="pc-row-{{ pc.pc_number }}">
+        <td><strong>PC {{ "%02d" | format(pc.pc_number) }}</strong></td>
+        <td>
+          <span id="pc-name-{{ pc.pc_number }}">{{ pc.name }}</span>
+        </td>
+        <td>
+          <span class="pc-badge badge-{{ state }}">
+            {% if not pc.is_online %}OFFLINE
+            {% elif not pc.is_locked %}ACTIVE
+            {% else %}LOCKED{% endif %}
+          </span>
+        </td>
+        <td class="col-hide-sm" style="color: var(--text-dim);">{{ pc.ip_address }}</td>
+        <td class="col-hide-sm" style="color: var(--text-dim); font-size: 12px;">{{ pc.mac_address or "—" }}</td>
+        <td>
+          {% if not pc.is_locked and (pc.remaining_minutes > 0 or pc.remaining_seconds > 0) %}
+          {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
+          {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
+          <span class="money" data-remaining-sec="{{ _tsec }}">{{ _h }}h {{ _m }}m {{ "%02d" | format(_s) }}s</span>
+          {% else %}
+          <span style="color: var(--gray);">—</span>
+          {% endif %}
+        </td>
+        {% if membership_enabled %}
+        <td class="col-hide-sm">
+          {% if pc.member_username %}
+          <span style="color: var(--green, #22c55e); font-size: 13px;">👤 {{ pc.member_username }}</span>
+          {% else %}
+          <span style="color: var(--text-dim);">—</span>
+          {% endif %}
+        </td>
+        {% endif %}
+        <td class="col-hide-sm" style="color: var(--text-dim); font-size: 12px;">
+          {{ pc.last_seen.strftime('%b %d %H:%M') if pc.last_seen else "Never" }}
+        </td>
+        <td>
+          <button
+            id="pc-coin-btn-{{ pc.pc_number }}"
+            data-coin-pc="{{ pc.pc_number }}"
+            class="btn btn-sm coin-toggle-btn coin-enabled"
+            onclick="togglePcCoinSlot({{ pc.pc_number }})"
+            title="Toggle coin slot for this PC"
+          >ON</button>
+        </td>
+        <td>
+          <div class="pc-actions">
+            <button
+              class="btn btn-sm btn-primary"
+              onclick="openAddTime({{ pc.pc_number }})"
+              title="Add time"
+            >+ Time</button>
+            <button
+              class="btn btn-sm btn-default"
+              onclick="openRename({{ pc.pc_number }}, '{{ pc.name | replace("'", "\\'") }}')"
+              title="Rename"
+            >Rename</button>
+            {% if not pc.is_locked %}
+            <button
+              class="btn btn-sm btn-danger"
+              onclick="lockPc({{ pc.pc_number }})"
+              title="End session and lock"
+            >Lock</button>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Mobile tile grid (hidden on desktop) ──────────────────────── -->
+<div class="pcs-mobile-view">
+  {% for pc in pcs %}
+  {% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
+  <div class="pc-mgmt-tile">
+
+    <div class="pc-mgmt-tile-header">
+      <div>
+        <div class="pc-mgmt-tile-number">PC {{ "%02d" | format(pc.pc_number) }}</div>
+        <div class="pc-mgmt-tile-name">{{ pc.name }}</div>
+      </div>
+      <span class="pc-badge badge-{{ state }}">
+        {% if not pc.is_online %}OFFLINE
+        {% elif not pc.is_locked %}ACTIVE
+        {% else %}LOCKED{% endif %}
+      </span>
+    </div>
+
+    <div class="pc-mgmt-tile-body">
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">Remaining</span>
+        {% if not pc.is_locked and (pc.remaining_minutes > 0 or pc.remaining_seconds > 0) %}
+        {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
+        {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
+        <span class="money" data-remaining-sec="{{ _tsec }}">{{ _h }}h {{ _m }}m {{ "%02d" | format(_s) }}s</span>
+        {% else %}
+        <span style="color:var(--gray)">—</span>
+        {% endif %}
+      </div>
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">IP Address</span>
+        <span style="color:var(--text-dim);font-size:13px">{{ pc.ip_address or "—" }}</span>
+      </div>
+      {% if membership_enabled %}
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">Member</span>
+        {% if pc.member_username %}
+        <span style="color:var(--green,#22c55e);font-size:13px">👤 {{ pc.member_username }}</span>
+        {% else %}
+        <span style="color:var(--text-dim)">—</span>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">Last Seen</span>
+        <span style="color:var(--text-dim);font-size:12px">{{ pc.last_seen.strftime('%b %d %H:%M') if pc.last_seen else "Never" }}</span>
+      </div>
+    </div>
+
+    <div class="pc-mgmt-tile-actions">
+      <button
+        data-coin-pc="{{ pc.pc_number }}"
+        class="btn btn-sm coin-toggle-btn coin-enabled"
+        onclick="togglePcCoinSlot({{ pc.pc_number }})"
+      >ON</button>
+      <button class="btn btn-sm btn-primary" onclick="openAddTime({{ pc.pc_number }})">+ Time</button>
+      <button class="btn btn-sm btn-default" onclick="openRename({{ pc.pc_number }}, '{{ pc.name | replace("'", "\\'") }}')">Rename</button>
+      {% if not pc.is_locked %}
+      <button class="btn btn-sm btn-danger" onclick="lockPc({{ pc.pc_number }})">Lock</button>
+      {% endif %}
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+
+{% endif %}
+
+<!-- Add Time Modal (shared with overview) -->
+<div id="add-time-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>Add Time to <span id="modal-pc-label"></span></h2>
+    <form id="add-time-form">
+      <input type="hidden" id="modal-pc-number" name="pc_number" />
+      <label>Quick presets</label>
+      {% if preset_amounts_enabled %}
+      <div class="preset-grid">
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 1, 'pesos')">
+          <span class="preset-min">₱1</span><span class="preset-label">peso</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 5, 'pesos')">
+          <span class="preset-min">₱5</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 10, 'pesos')">
+          <span class="preset-min">₱10</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 15, 'pesos')">
+          <span class="preset-min">₱15</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 20, 'pesos')">
+          <span class="preset-min">₱20</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 25, 'pesos')">
+          <span class="preset-min">₱25</span><span class="preset-label">pesos</span>
+        </button>
+      </div>
+      <input type="hidden" id="preset-mode" value="pesos" />
+      <div class="time-divider">or enter custom pesos</div>
+      <input type="number" id="add-time-input" name="amount" min="1" max="9999" placeholder="Pesos (₱)" required />
+      {% else %}
+      <div class="preset-grid">
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 30, 'minutes')">
+          <span class="preset-min">30</span><span class="preset-label">minutes</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 60, 'minutes')">
+          <span class="preset-min">1h</span><span class="preset-label">60 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 120, 'minutes')">
+          <span class="preset-min">2h</span><span class="preset-label">120 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 180, 'minutes')">
+          <span class="preset-min">3h</span><span class="preset-label">180 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 300, 'minutes')">
+          <span class="preset-min">5h</span><span class="preset-label">300 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 480, 'minutes')">
+          <span class="preset-min">8h</span><span class="preset-label">480 min</span>
+        </button>
+      </div>
+      <input type="hidden" id="preset-mode" value="minutes" />
+      <div class="time-divider">or enter custom</div>
+      <input type="number" id="add-time-input" name="amount" min="1" max="999" placeholder="Minutes" required />
+      {% endif %}
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Time</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Rename Modal -->
+<div id="rename-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>Rename <span id="rename-pc-label"></span></h2>
+    <form id="rename-form">
+      <input type="hidden" id="rename-pc-number" name="pc_number" />
+      <div class="form-group">
+        <label>New name</label>
+        <input
+          type="text"
+          id="rename-input"
+          name="name"
+          maxlength="40"
+          placeholder="e.g. PC 01"
+          required
+        />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeRenameModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+/* ── PC Management responsive layout ─────────────────────── */
+.pcs-mobile-view { display: none; }
+
+@media (max-width: 768px) {
+  .pcs-desktop-view { display: none; }
+  .pcs-mobile-view {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pc-mgmt-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .pc-mgmt-tile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+  }
+  .pc-mgmt-tile-number {
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--text);
+  }
+  .pc-mgmt-tile-name {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-top: 2px;
+  }
+
+  .pc-mgmt-tile-body {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .pc-mgmt-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 20px;
+  }
+  .pc-mgmt-label {
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .pc-mgmt-tile-actions {
+    padding: 10px 14px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .pc-mgmt-tile-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+</style>
+
+{% endblock %}
