@@ -1,0 +1,76 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # Server
+    DATABASE_URL: str = "sqlite:///./pisonet.db"
+    SECRET_KEY: str = "change-this-to-a-random-256-bit-secret-key"
+    TOKEN_EXPIRE_HOURS: int = 8
+    SERVER_HOST: str = "0.0.0.0"
+    SERVER_PORT: int = 80
+
+    # Coin rates (seconds-based)
+    DEFAULT_RATE_PESOS: int = 5
+    DEFAULT_RATE_SECONDS: int = 1800  # 30 minutes
+
+    # PC monitoring
+    PC_HEARTBEAT_TIMEOUT: int = 30  # seconds before PC is marked offline
+
+    # Admin credentials (used to seed admin on first run)
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "admin123"
+
+    # Branch name for this installation — shown in pisonex.com customer portal.
+    # Set this so the portal can group PCs by branch (e.g. "Tomas Morato Branch").
+    # Leave empty to show PCs under "Unassigned" in the portal.
+    BRANCH_NAME: str = ""
+
+    # PC client API key — shared secret sent in X-API-Key header by all clients.
+    # Leave empty ("") to disable auth (default, backward-compatible).
+    # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here
+    CLIENT_API_KEY: str = ""
+
+    # HMAC secret for signing license API payloads sent to pisonex.com.
+    # Must match the value configured on the pisonex.com server.
+    # Auto-generated on first startup if left as the default.
+    LICENSE_HMAC_SECRET: str = "PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
+
+    # Membership defaults (used to seed MembershipConfig on first run)
+    MEMBERSHIP_ENABLED: bool = False
+    ABSORPTION_ENABLED: bool = False
+    LOGOUT_DEDUCTION_MINUTES: int = 5
+    MINIMUM_LOGOUT_MINUTES: int = 10
+    ZERO_TIME_AUTO_LOGOUT_SECONDS: int = 30
+    IDLE_AUTO_SHUTDOWN_MINUTES: int = 5
+    MEMBER_HEARTBEAT_TIMEOUT_MINUTES: int = 60
+
+    # GPIO pins — Orange Pi SoC numbering via OPi.GPIO BCM mode.
+    # Allwinner SoC ports: PA0=0, PA1=1 ... PB0=32, PC0=64, PC1=65 etc.
+    # These defaults are placeholders — set the correct values in .env to match
+    # your actual wiring. Run 'gpio readall' on the board to list available pins.
+    COIN_PIN: int = 4
+    RELAY_PIN: int = 6
+    KEYPAD_ROWS: list[int] = [17, 27, 22, 5]   # R1, R2, R3, R4
+    KEYPAD_COLS: list[int] = [9, 11, 10]        # C1, C2, C3
+    LCD_I2C_ADDRESS: int = 0x27
+    LCD_I2C_PORT: int = 1
+
+    # Coin signal edge polarity — depends on whether the custom board inverts the signal.
+    #   "RISING"  — direct connection or buffer (signal goes HIGH on coin pulse)
+    #   "FALLING" — custom board with optocoupler (signal goes LOW on coin pulse)
+    # Run server/test_coin_signal.py to detect which one your board uses.
+    COIN_EDGE: str = "FALLING"
+
+    # Timing — tuned for UCB Mini v4 coin acceptor
+    # UCB Mini v4 pulse gap is ~50-80 ms; 30 ms debounce catches bounce without
+    # swallowing legitimate pulses on ₱5 / ₱10 multi-pulse coins.
+    COIN_DEBOUNCE_MS: int = 30
+    COIN_PULSE_TIMEOUT: float = 3.0   # seconds of silence before finalizing — allows inserting multiple coins
+    KEYPAD_SCAN_INTERVAL: float = 0.05
+    PC_IDLE_TIMEOUT: int = 30       # seconds before returning to idle screen
+    DISPLAY_CONFIRM_DELAY: int = 3  # seconds to show confirmation message
+
+
+settings = Settings()

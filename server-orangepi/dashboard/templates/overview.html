@@ -1,0 +1,119 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Overview</h1>
+  <div class="header-stats">
+    <div class="stat-pill online">🟢 <span id="online-count">{{ online_count }}</span> Online</div>
+    <div class="stat-pill active">⚡ <span id="active-count">{{ active_count }}</span> Active</div>
+    <div class="stat-pill earnings">₱ <span id="today-earnings">{{ today_pesos }}</span> Today</div>
+    <button class="btn btn-sm btn-default" onclick="openAnnouncementModal()">📢 Announce</button>
+    <button id="global-coin-btn" class="btn btn-sm coin-toggle-btn coin-enabled" onclick="toggleGlobalCoinSlot()">🪙 Coins: ON</button>
+  </div>
+</div>
+
+<!-- Active announcement banner (hidden until JS populates it) -->
+<div id="announcement-banner" class="announcement-banner" style="display:none">
+  <span></span>
+  <button class="btn btn-sm btn-danger" onclick="clearAnnouncement()" style="flex-shrink:0">✕ Clear</button>
+</div>
+
+<!-- PC Grid — auto-refreshes every 10s via HTMX -->
+<div
+  id="pc-grid"
+  class="pc-grid"
+  hx-get="/dashboard/partials/pc-grid"
+  hx-trigger="every 10s"
+  hx-swap="outerHTML"
+>
+  {% for pc in pcs %}
+  {% include "partials/pc_card.html" %}
+  {% endfor %}
+</div>
+
+<!-- Announcement Modal -->
+<div id="announcement-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>📢 Shop Announcement</h2>
+    <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">Broadcasts to all connected PCs. Stays visible until cleared.</p>
+    <form id="announcement-form">
+      <div class="form-group">
+        <label>Message</label>
+        <textarea id="announcement-text" name="text" rows="3" maxlength="300"
+          placeholder="e.g. Shop closing in 30 minutes…"
+          style="width:100%;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:14px"
+          required></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeAnnouncementModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Send to All PCs</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add Time Modal -->
+<div id="add-time-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>Add Time to <span id="modal-pc-label"></span></h2>
+    <form id="add-time-form">
+      <input type="hidden" id="modal-pc-number" name="pc_number" />
+      <label>Quick presets</label>
+      {% if preset_amounts_enabled %}
+      <div class="preset-grid">
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 1, 'pesos')">
+          <span class="preset-min">₱1</span><span class="preset-label">peso</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 5, 'pesos')">
+          <span class="preset-min">₱5</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 10, 'pesos')">
+          <span class="preset-min">₱10</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 15, 'pesos')">
+          <span class="preset-min">₱15</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 20, 'pesos')">
+          <span class="preset-min">₱20</span><span class="preset-label">pesos</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 25, 'pesos')">
+          <span class="preset-min">₱25</span><span class="preset-label">pesos</span>
+        </button>
+      </div>
+      <input type="hidden" id="preset-mode" value="pesos" />
+      <div class="time-divider">or enter custom pesos</div>
+      <input type="number" id="add-time-input" name="amount" min="1" max="9999" placeholder="Pesos (₱)" required />
+      {% else %}
+      <div class="preset-grid">
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 30, 'minutes')">
+          <span class="preset-min">30</span><span class="preset-label">minutes</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 60, 'minutes')">
+          <span class="preset-min">1h</span><span class="preset-label">60 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 120, 'minutes')">
+          <span class="preset-min">2h</span><span class="preset-label">120 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 180, 'minutes')">
+          <span class="preset-min">3h</span><span class="preset-label">180 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 300, 'minutes')">
+          <span class="preset-min">5h</span><span class="preset-label">300 min</span>
+        </button>
+        <button type="button" class="preset-btn" onclick="selectPreset(this, 480, 'minutes')">
+          <span class="preset-min">8h</span><span class="preset-label">480 min</span>
+        </button>
+      </div>
+      <input type="hidden" id="preset-mode" value="minutes" />
+      <div class="time-divider">or enter custom</div>
+      <input type="number" id="add-time-input" name="amount" min="1" max="999" placeholder="Minutes" required />
+      {% endif %}
+      <div class="modal-actions">
+        <button type="button" class="btn btn-default" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Time</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

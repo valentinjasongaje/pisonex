@@ -1,0 +1,42 @@
+{% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
+<div class="pc-card pc-{{ state }}">
+  <div class="pc-header">
+    <span class="pc-number">PC {{ "%02d" | format(pc.pc_number) }}</span>
+    <span class="pc-badge badge-{{ state }}">
+      {% if not pc.is_online %}OFFLINE
+      {% elif not pc.is_locked %}ACTIVE
+      {% else %}LOCKED{% endif %}
+    </span>
+  </div>
+
+  <div class="pc-body">
+    {% if not pc.is_locked and (pc.remaining_minutes > 0 or pc.remaining_seconds > 0) %}
+    {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
+    {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
+    <div class="pc-timer" data-remaining-sec="{{ _tsec }}">{{ _h }}h {{ _m }}m {{ "%02d" | format(_s) }}s</div>
+    {% elif pc.is_online %}
+    <div class="pc-idle">Idle</div>
+    {% else %}
+    <div class="pc-offline-msg">{{ pc.last_seen.strftime('%H:%M') if pc.last_seen else "Never" }}</div>
+    {% endif %}
+    <div class="pc-ip">{{ pc.ip_address or "—" }}</div>
+    {% if pc.membership_enabled and pc.member_username %}
+    <div class="pc-member-badge">👤 {{ pc.member_username }}</div>
+    {% endif %}
+  </div>
+
+  {% if pc.is_online %}
+  <div class="pc-actions">
+    <button
+      class="btn btn-sm btn-primary"
+      onclick="openAddTime({{ pc.pc_number }})"
+    >+ Time</button>
+    {% if not pc.is_locked %}
+    <button
+      class="btn btn-sm btn-danger"
+      onclick="lockPc({{ pc.pc_number }})"
+    >Lock</button>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
