@@ -308,13 +308,8 @@ class HardwareController:
         dev environments without a ping command don't block coin acceptance.
         """
         import subprocess
-        import platform
         try:
-            os_name = platform.system().lower()
-            if os_name == "windows":
-                cmd = ["ping", "-n", "1", "-w", "1000", ip_address]
-            else:
-                cmd = ["ping", "-c", "1", "-W", "1", ip_address]
+            cmd = ["ping", "-c", "1", "-W", "1", ip_address]
             result = subprocess.run(cmd, capture_output=True, timeout=4)
             return result.returncode == 0
         except FileNotFoundError:

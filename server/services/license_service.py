@@ -73,32 +73,15 @@ VERIFY_INTERVAL_HOURS = 6
 def _get_machine_id() -> str:
     """Return a stable hardware-bound identifier for this machine.
 
-    Linux/Pi: /etc/machine-id  (systemd UUID, unique per device, never changes)
-    Windows:  HKLM MachineGuid (set at Windows installation time)
+    Primary: /etc/machine-id (systemd UUID, set at OS install, unique per device)
     Fallback: hostname + architecture (no MAC — easily spoofed)
     """
-    # Linux / Raspberry Pi / Orange Pi
     mid_path = Path("/etc/machine-id")
     if mid_path.exists():
         val = mid_path.read_text().strip()
         if val:
             return val
 
-    # Windows
-    try:
-        import winreg  # type: ignore
-        key = winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\Microsoft\Cryptography",
-        )
-        val, _ = winreg.QueryValueEx(key, "MachineGuid")
-        winreg.CloseKey(key)
-        if val:
-            return str(val)
-    except Exception:
-        pass
-
-    # Fallback — no MAC address (trivially changed in software)
     return f"{platform.node()}|{platform.machine()}|{platform.processor()}"
 
 
