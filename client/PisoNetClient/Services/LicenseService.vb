@@ -55,6 +55,19 @@ Namespace Services
 
         ' ── Startup sync (telemetry + trial-clock restore) ───────────────
 
+        ''' <summary>
+        ''' True after at least one successful POST to /api/status has anchored the
+        ''' trial clock with pisonex.com. Trial mode requires this to start — refusing
+        ''' to run when neither LicenseFirstRunDate nor a server anchor exists kills
+        ''' the offline-install + delete-license.dat trial-reset attack.
+        ''' </summary>
+        Private _lastSyncOk As Boolean = False
+        Public ReadOnly Property LastSyncOk As Boolean
+            Get
+                Return _lastSyncOk
+            End Get
+        End Property
+
         Public Async Function SyncStartupStatusAsync() As Task
             Try
                 ' POST telemetry to pisonex.com on startup.
@@ -66,11 +79,21 @@ Namespace Services
                 For Each kv In BuildTelemetry()
                     payload(kv.Key) = kv.Value
                 Next
+                ' Multi-source fingerprint hashes — let the server fuzzy-match returning
+                ' devices whose MachineGuid was edited after license.dat was deleted.
+                For Each kv In HardwareFingerprint.Collect()
+                    payload(kv.Key) = kv.Value
+                Next
 
                 Dim json = JsonSerializer.Serialize(payload)
                 Dim content = New StringContent(json, Encoding.UTF8, "application/json")
                 Dim resp = Await _httpClient.PostAsync($"{PISONEX_API}/api/status", content)
                 If resp.IsSuccessStatusCode Then
+                    _lastSyncOk = True
+                    ' Persist the anchor so the gate survives a process restart while
+                    ' offline. Once anchored, the device may run offline for the normal
+                    ' grace period without re-checking.
+                    LicenseStore.TrialAnchored = True
                     Dim body = Await resp.Content.ReadAsStringAsync()
                     Dim doc = JsonDocument.Parse(body)
 
@@ -211,6 +234,9 @@ Namespace Services
             For Each kv In BuildTelemetry()
                 payload(kv.Key) = kv.Value
             Next
+            For Each kv In HardwareFingerprint.Collect()
+                payload(kv.Key) = kv.Value
+            Next
 
             Try
                 Dim json = JsonSerializer.Serialize(payload)
@@ -317,6 +343,9 @@ Namespace Services
                 For Each kv In BuildTelemetry()
                     payload(kv.Key) = kv.Value
                 Next
+                For Each kv In HardwareFingerprint.Collect()
+                    payload(kv.Key) = kv.Value
+                Next
                 Dim json = JsonSerializer.Serialize(payload)
                 Dim content = New StringContent(json, Encoding.UTF8, "application/json")
                 Dim resp = Await _httpClient.PostAsync($"{PISONEX_API}/api/license/verify", content)
@@ -378,9 +407,43 @@ Namespace Services
 
         ' ── Status ───────────────────────────────────────────────────────
 
-        Public Function IsActivated() As Boolean
+        ''' <summary>
+        ''' Soft check: the user-visible activation strings exist. Returns True
+        ''' for both real activations and forged ones — used ONLY to decide
+        ''' whether the verify timer should attempt to fetch/refresh a token.
+        ''' Never use this to gate access to features.
+        ''' </summary>
+        Public Function HasActivationRecord() As Boolean
             Return Not String.IsNullOrEmpty(LicenseStore.LicenseKey) AndAlso
                    Not String.IsNullOrEmpty(LicenseStore.LicenseActivatedAt)
+        End Function
+
+        ''' <summary>
+        ''' True only when this install holds a pisonex.com-signed token bound
+        ''' to the current device. The token's signature is the only field in
+        ''' license.dat an attacker cannot forge — every other field (LicenseKey,
+        ''' LicenseActivatedAt, LicenseLastVerified) can be written by anyone
+        ''' with admin on the box, so they cannot be used as proof of activation
+        ''' on their own.
+        '''
+        ''' Accepts EXPIRED tokens (signature-only verify) so the 72h offline
+        ''' grace period continues to work — IsOfflineLocked() handles the
+        ''' freshness check separately.
+        ''' </summary>
+        Public Function IsActivated() As Boolean
+            ' Both string fields must still be present — they're the user-visible
+            ' state and other code paths assume LicenseKey is non-empty when
+            ' activated. But these alone are not sufficient.
+            If String.IsNullOrEmpty(LicenseStore.LicenseKey) Then Return False
+            If String.IsNullOrEmpty(LicenseStore.LicenseActivatedAt) Then Return False
+
+            ' The unforgeable part: a stored token whose signature verifies under
+            ' the embedded pisonex.com public key and whose `did` claim matches
+            ' the current hardware. Without this, anyone who can write to
+            ' license.dat could claim "activated" by adding two strings.
+            Dim claims = LicenseTokenVerifier.VerifySignature(
+                LicenseStore.LicenseToken, GetDeviceId())
+            Return claims IsNot Nothing
         End Function
 
         Public Function TrialDaysRemaining() As Integer
@@ -431,14 +494,23 @@ Namespace Services
                 End If
             End If
 
-            ' Fallback for installs without offline_since tracking yet
-            Dim lastVerified = LicenseStore.LicenseLastVerified
-            If String.IsNullOrEmpty(lastVerified) Then Return False
-            Dim lastDt As DateTime
-            If DateTime.TryParse(lastVerified, lastDt) Then
-                Return (DateTime.UtcNow - lastDt).TotalHours > OFFLINE_GRACE_HOURS
+            ' Fallback when offline_since isn't set yet. Use the token's `iat`
+            ' (issued-at) claim as the freshness anchor — it's part of the
+            ' signed payload, so an attacker cannot rewind it without
+            ' invalidating the signature. This replaces the old check against
+            ' the forgeable LicenseLastVerified string.
+            Dim sigClaims = LicenseTokenVerifier.VerifySignature(
+                LicenseStore.LicenseToken, GetDeviceId())
+            If sigClaims IsNot Nothing AndAlso sigClaims.IssuedAt > 0 Then
+                Dim issuedAt = DateTimeOffset.FromUnixTimeSeconds(sigClaims.IssuedAt).UtcDateTime
+                Return (DateTime.UtcNow - issuedAt).TotalHours > OFFLINE_GRACE_HOURS
             End If
-            Return False
+
+            ' Defensive: no signed token reached us (IsActivated should have
+            ' caught that, but in case the call path changes), treat as locked.
+            ' The old default of "Return False" here let a hand-edited
+            ' license.dat with empty last_verified run forever offline.
+            Return True
         End Function
 
         Public Function IsActive() As Boolean
@@ -491,11 +563,25 @@ Namespace Services
                 ' Re-anchor the trial clock every 6h so an attacker can't reset it
                 ' by deleting license.dat and staying offline until the next reboot.
                 Await SyncStartupStatusAsync()
-                If IsActivated() Then
+                ' Gate on HasActivationRecord — if a forged license.dat ever holds
+                ' strings without a real token, this verify path will ask the server
+                ' and either get a real token (it cannot, the key/device won't match)
+                ' or have ClearActivation wipe the strings.
+                If HasActivationRecord() Then
                     Dim valid = Await VerifyAsync()
                     If Not valid Then
-                        Debug.WriteLine("[LICENSE] Verification failed — clearing local license")
-                        LicenseStore.ClearActivation()
+                        ' Distinguish "server explicitly rejected" from "couldn't reach
+                        ' server." Only the former warrants clearing activation — a
+                        ' transient network blip must NOT deactivate a paying customer.
+                        ' VerifyAsync sets ServerRejected when the server returned a
+                        ' definitive non-success response; it sets OfflineSince when
+                        ' it hit a HttpRequestException / timeout.
+                        If LicenseStore.ServerRejected Then
+                            Debug.WriteLine("[LICENSE] Server rejected — clearing local license")
+                            LicenseStore.ClearActivation()
+                        Else
+                            Debug.WriteLine("[LICENSE] Verification failed (offline?) — keeping license, offline grace applies")
+                        End If
                     End If
                 End If
             End Sub
@@ -508,6 +594,24 @@ Namespace Services
                 LicenseStore.LicenseFirstRunDate = DateTime.UtcNow.ToString("o")
             End If
         End Sub
+
+        ''' <summary>
+        ''' Returns True only when this install is allowed to run in trial mode.
+        ''' Trial requires at least one successful pisonex.com anchor at some
+        ''' point — either now (LastSyncOk) or persisted from a previous run
+        ''' (LicenseStore.TrialAnchored).  Activated installs bypass this gate
+        ''' entirely; the existing IsActive() / IsOfflineLocked() rules govern
+        ''' them.
+        '''
+        ''' Closes the "install offline, get fresh 14 days, repeat" loop: if
+        ''' the very first run has no internet AND no prior anchor, the trial
+        ''' cannot start.
+        ''' </summary>
+        Public Function IsTrialAnchored() As Boolean
+            If IsActivated() Then Return True
+            If LicenseStore.TrialAnchored Then Return True
+            Return _lastSyncOk
+        End Function
 
     End Module
 

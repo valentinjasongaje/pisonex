@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ConfuserEx project for the PisoNetClient.
+
+  PROFILE: CONSERVATIVE
+  ─────────────────────
+  Goal: bump a "30-second dnSpy edit" attack into "weekend project for a
+  competent reverser" without breaking runtime behavior.
+
+  ENABLED protections:
+    - ctrl flow      : turns each method body into a state machine.
+                       Static call-graph analysis becomes useless.
+    - constants      : encrypts string and numeric literals.  An attacker
+                       grepping for "PISONEX_API" or "LicenseKey" in the
+                       binary finds nothing.
+    - anti debug     : refuses to run under a managed/unmanaged debugger.
+                       Stops dnSpy attach + breakpoint workflow.
+    - anti ildasm    : sets the SuppressIldasm attribute and adds a few
+                       structural tweaks.  Minor — ILSpy ignores this — but
+                       free.
+
+  DISABLED (intentionally):
+    - rename         : would rename PisoNetClient classes, including the
+                       JSON DTOs (HeartbeatResponse, ActivateResult, etc.).
+                       System.Text.Json deserialisation maps JSON keys to
+                       property names — rename them and deserialisation
+                       returns default values.  Re-enable later with an
+                       explicit <rule pattern="..."> excluding DTO types.
+    - anti tamper    : refuses to run if the assembly hash doesn't match
+                       what ConfuserEx baked in.  Sounds good, but breaks
+                       Authenticode signing (signing modifies the file
+                       after obfuscation -> tamper check fails at startup).
+                       Either sign-then-tamper (impossible — tamper has to
+                       know the final bytes) or use anti-tamper instead of
+                       Authenticode.  For now, prefer Authenticode.
+    - resources      : compresses embedded resources.  Already small, not
+                       worth the runtime cost.
+    - ref proxy      : adds proxy methods for external API calls.  Useful
+                       but slows startup noticeably; revisit later.
+
+  HOW TO USE:
+    Run pisonex/client/build-obfuscated.bat from a Developer Command Prompt.
+    See pisonex/client/obfuscation/README.md for the full workflow.
+-->
+<project outputDir="..\..\..\build\client-obfuscated"
+         baseDir="..\..\..\build\client-publish"
+         xmlns="http://confuser.codeplex.com">
+
+  <!-- Global rule: apply to every type in PisoNetClient.dll -->
+  <rule pattern="true" preset="none" inherit="false">
+    <protection id="anti debug"  />
+    <protection id="anti ildasm" />
+    <protection id="constants"   />
+    <protection id="ctrl flow"   />
+  </rule>
+
+  <!-- Module under protection.  Path is relative to baseDir above. -->
+  <module path="PisoNetClient.dll">
+    <!--
+      EXCLUSIONS — methods/types that must NOT be obfuscated.
+      Even with renaming disabled, control-flow + constants protection
+      can still break code that relies on reflection.  Add patterns
+      here if a feature breaks after obfuscation.
+
+      Example: if the licence-verifier ever uses reflection to read
+      claims, exclude it like this:
+        <rule pattern="name() = 'TokenClaims'" preset="none" inherit="false" />
+    -->
+  </module>
+
+</project>

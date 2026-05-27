@@ -72,6 +72,21 @@ Module Program
         ' pisonex.com (first_seen_at) if license.dat was deleted. EnsureFirstRunDate
         ' then only writes a fresh date if the server had no record either.
         LicenseService.SyncStartupStatusAsync().GetAwaiter().GetResult()
+
+        ' Trial-anchor gate: a trial install must have pinged pisonex.com at least
+        ' once. Without this gate, an attacker could install offline, run the full
+        ' 14-day trial, then ever-so-slightly re-install to reset the clock without
+        ' the server ever recording a first_seen_at for the device.
+        If Not LicenseService.IsTrialAnchored() Then
+            MessageBox.Show(
+                "Pisonex requires internet access on first start to activate your trial." & Environment.NewLine & Environment.NewLine &
+                "Please connect this PC to the internet and re-launch the application.",
+                "Activation Required",
+                MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Application.Exit()
+            Return
+        End If
+
         LicenseService.EnsureFirstRunDate()
         LicenseService.StartVerificationTimer()
 

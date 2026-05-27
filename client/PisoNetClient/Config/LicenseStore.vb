@@ -154,6 +154,23 @@ Namespace Config
         End Property
 
         ''' <summary>
+        ''' "true" once pisonex.com has anchored the trial clock at least once for
+        ''' this install. Required to run in trial mode — refusing to start when
+        ''' missing kills the offline-install trial-reset attack (install offline,
+        ''' use for 14 days, repeat with a fresh first_seen_at on first online ping).
+        ''' Persisted in the DPAPI-encrypted license.dat so deleting the file forces
+        ''' a re-anchor.
+        ''' </summary>
+        Public Property TrialAnchored As Boolean
+            Get
+                Return GetValue("TrialAnchored") = "true"
+            End Get
+            Set(v As Boolean)
+                SetValue("TrialAnchored", If(v, "true", ""))
+            End Set
+        End Property
+
+        ''' <summary>
         ''' ES256-signed JWT from pisonex.com. Stored alongside license data.
         ''' Verified on every load — file tampering breaks the signature.
         ''' </summary>

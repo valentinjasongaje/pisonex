@@ -34,13 +34,30 @@ Namespace Services
         ''' Returns Nothing if the token is missing, tampered, expired, or bound to a different device.
         ''' </summary>
         Public Function Verify(token As String, Optional expectedDeviceId As String = Nothing) As TokenClaims
+            Return DecodeAndVerify(token, expectedDeviceId, enforceExpiry:=True)
+        End Function
+
+        ''' <summary>
+        ''' Verifies signature + device binding ONLY — accepts expired tokens.
+        ''' Used by IsActivated() as proof that pisonex.com once issued a token
+        ''' for this device, even if the token is now past its 8h lifetime.
+        ''' The signature can only be produced by pisonex.com's private key, so
+        ''' a local attacker who writes garbage into license.dat cannot fake it.
+        ''' </summary>
+        Public Function VerifySignature(token As String, Optional expectedDeviceId As String = Nothing) As TokenClaims
+            Return DecodeAndVerify(token, expectedDeviceId, enforceExpiry:=False)
+        End Function
+
+        Private Function DecodeAndVerify(token As String,
+                                          expectedDeviceId As String,
+                                          enforceExpiry As Boolean) As TokenClaims
             If String.IsNullOrWhiteSpace(token) Then Return Nothing
 
             Try
                 Dim parts = token.Split("."c)
                 If parts.Length <> 3 Then Return Nothing
 
-                ' Verify ES256 signature (IEEE P1363 format = 64 bytes: râ€–s)
+                ' Verify ES256 signature (IEEE P1363 format = 64 bytes: r‖s)
                 Dim dataToVerify = Encoding.ASCII.GetBytes($"{parts(0)}.{parts(1)}")
                 Dim sigBytes = Base64UrlDecode(parts(2))
 
@@ -60,11 +77,14 @@ Namespace Services
                 Dim doc = JsonDocument.Parse(payloadJson)
                 Dim root = doc.RootElement
 
-                ' Check token expiry
+                ' Expiry is mandatory regardless of whether we enforce it — a token
+                ' with no exp claim is malformed.
                 Dim expElem As JsonElement
                 If Not root.TryGetProperty("exp", expElem) Then Return Nothing
                 Dim expUnix = expElem.GetInt64()
-                If DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expUnix Then Return Nothing
+                If enforceExpiry AndAlso DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expUnix Then
+                    Return Nothing
+                End If
 
                 Dim claims As New TokenClaims()
                 claims.ExpiresAt = expUnix
