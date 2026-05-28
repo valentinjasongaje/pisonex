@@ -202,6 +202,17 @@ def handle_command_line():
                 sys.exit(1)
             raise
     else:
+        # Default the 'install' command to Automatic start so the service comes
+        # up on boot with no manual step and no per-run admin prompt. pywin32's
+        # install otherwise defaults to Manual (SERVICE_DEMAND_START), which is
+        # why the service had to be started by hand after every reboot.
+        # Options must precede the command word for pywin32's parser, e.g.
+        #   PisonexServer.exe --startup auto install
+        # An explicit --startup on the command line still wins.
+        if "install" in sys.argv and "--startup" not in sys.argv:
+            idx = sys.argv.index("install")
+            sys.argv[idx:idx] = ["--startup", "auto"]
+
         # Handle install/remove/start/stop/debug
         win32serviceutil.HandleCommandLine(PisoNetService)
 

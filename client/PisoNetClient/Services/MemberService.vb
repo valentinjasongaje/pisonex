@@ -5,6 +5,11 @@ Imports PisoNetClient.Config
 
 Namespace Services
 
+    ' These three DTOs are excluded from obfuscation: System.Text.Json maps
+    ' JSON keys to the property names below, so renaming would break member
+    ' register/login/logout deserialization. DTOs hold no logic worth
+    ' protecting, so full exclusion is safe.
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
     Public Class MemberRegisterResponse
         Public Property success As Boolean
         Public Property user_id As Integer
@@ -13,6 +18,7 @@ Namespace Services
         Public Property [error] As String
     End Class
 
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
     Public Class MemberLoginResponse
         Public Property success As Boolean
         Public Property balance_seconds As Integer
@@ -20,6 +26,7 @@ Namespace Services
         Public Property [error] As String
     End Class
 
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
     Public Class MemberLogoutResponse
         Public Property success As Boolean
         Public Property remaining_seconds As Integer

@@ -11,12 +11,13 @@ Namespace Services
     ''' </summary>
     Public Module LicenseTokenVerifier
 
-        ' ES256 public key â€” matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com.
-        ' Generated 2026-05-23. Replace both keys together if rotating.
+        ' ES256 public key — matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com.
+        ' Generated 2026-05-28 (regenerated; the 2026-05-23 pair's private half
+        ' was never deployed). Replace both keys together if rotating.
         Private Const PUBLIC_KEY_PEM As String =
             "-----BEGIN PUBLIC KEY-----" & vbLf &
-            "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEMPqOTqe2MzuA4WZDi5LkXR8eDsDZ" & vbLf &
-            "LzZRzgFpKVqJaolIe9zRoFAZTEbuB0solxxBxQe0BZOGB35P377p6o6ppw==" & vbLf &
+            "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfs2Dsuq02WpHzOFovGzqPZ+QrKu+" & vbLf &
+            "pVBtuCV3iJrWgskL98kRiXaujl935uEhHtO/nCcL+qna9OsX4li5fevKVg==" & vbLf &
             "-----END PUBLIC KEY-----"
 
         Public Class TokenClaims

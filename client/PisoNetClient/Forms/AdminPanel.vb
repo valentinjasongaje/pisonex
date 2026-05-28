@@ -25,6 +25,7 @@ Namespace Forms
 
         ' ── Controls ──────────────────────────────────────────────────────────
         Private _txtUrl         As TextBox
+        Private _txtApiKey      As TextBox
         Private _nudPcNum       As NumericUpDown
         Private _picColor       As PictureBox
         Private _txtImgPath     As TextBox
@@ -115,6 +116,7 @@ Namespace Forms
         Private _lblLicExpiry   As Label
         Private _lblLicVerified As Label
         Private _lblLicResult   As Label
+        Private _lblLicToken    As Label
 
         ' Nav item definitions
         Private Shared ReadOnly NavLabels() As String = {
@@ -433,7 +435,7 @@ Namespace Forms
 
             page.Controls.Add(PageTitle("Connection Settings", New Point(LM, y))) : y += 34
 
-            Dim card = CardPanel(New Point(LM, y), New Size(IW, 232))
+            Dim card = CardPanel(New Point(LM, y), New Size(IW, 290))
             Dim cy = 14
 
             card.Controls.Add(SectionLabel("Server IP Address", New Point(14, cy))) : cy += 22
@@ -538,12 +540,22 @@ Namespace Forms
             card.Controls.Add(SectionLabel("PC Number", New Point(14, cy))) : cy += 22
             _nudPcNum = DarkNud(New Point(14, cy), 80, AppConfig.PCNumber, 1, 99)
             card.Controls.Add(_nudPcNum)
+            cy += 38
 
-            page.Controls.Add(card) : y += 242
+            ' Client API Key — must match the key generated on the server dashboard
+            ' (Settings -> Security). Paste it here to authenticate with the local
+            ' server. Leave blank if the server has client auth disabled.
+            card.Controls.Add(SectionLabel("Client API Key", New Point(14, cy))) : cy += 22
+            _txtApiKey = DarkTextBox(New Point(14, cy), IW - 32, AppConfig.ApiKey)
+            _txtApiKey.PlaceholderText = "Paste the key from the server's Security page (blank = server auth off)"
+            _txtApiKey.Font = New Font("Consolas", 9)
+            card.Controls.Add(_txtApiKey)
+
+            page.Controls.Add(card) : y += 300
 
             Dim infoCard = CardPanel(New Point(LM, y), New Size(IW, 48))
             infoCard.Controls.Add(InfoLabel(
-                "Server IP Address and PC Number take effect after restarting the client.",
+                "Server IP, PC Number, and API Key take effect after restarting the client.",
                 New Point(14, 10)))
             page.Controls.Add(infoCard)
 
@@ -1234,7 +1246,7 @@ Namespace Forms
             page.Controls.Add(PageTitle("License", New Point(LM, y))) : y += 34
 
             ' Status card
-            Dim statusCard = CardPanel(New Point(LM, y), New Size(IW, 200))
+            Dim statusCard = CardPanel(New Point(LM, y), New Size(IW, 252))
             Dim cy = 14
             statusCard.Controls.Add(SectionLabel("Activation Status", New Point(14, cy))) : cy += 26
 
@@ -1268,8 +1280,22 @@ Namespace Forms
             }
             statusCard.Controls.Add(_lblLicExpiry)
             statusCard.Controls.Add(_lblLicVerified)
+            cy += 24
 
-            page.Controls.Add(statusCard) : y += 210
+            ' Token diagnostic — shows exactly why a machine is activated vs trial
+            ' (token present / signature valid / device match / freshness).
+            statusCard.Controls.Add(SmallLabel("License Token", New Point(14, cy))) : cy += 18
+            _lblLicToken = New Label() With {
+                .Text = LicenseService.GetTokenDiagnostic(),
+                .AutoSize = False,
+                .Size = New Size(IW - 60, 32),
+                .Location = New Point(14, cy),
+                .ForeColor = ColSmall,
+                .Font = New Font("Segoe UI", 8)
+            }
+            statusCard.Controls.Add(_lblLicToken)
+
+            page.Controls.Add(statusCard) : y += 262
 
             ' Activate card
             Dim actCard = CardPanel(New Point(LM, y), New Size(IW, 160))
@@ -1328,6 +1354,10 @@ Namespace Forms
 
         Private Sub UpdateLicenseStatusDisplay()
             If _lblLicStatus Is Nothing Then Return
+
+            If _lblLicToken IsNot Nothing Then
+                _lblLicToken.Text = LicenseService.GetTokenDiagnostic()
+            End If
 
             Dim status = LicenseService.GetStatus()
             Select Case status
@@ -1416,6 +1446,7 @@ Namespace Forms
 
             AppConfig.SaveServerUrl("http://" & _txtUrl.Text.Trim())
             AppConfig.SavePCNumber(CInt(_nudPcNum.Value))
+            AppConfig.SaveApiKey(_txtApiKey.Text.Trim())
             AppConfig.SaveLockBgArgb(_currentBgColor.ToArgb())
             AppConfig.SaveLockBgImagePath(_txtImgPath.Text.Trim())
             AppConfig.SaveLockBgImageFit(If(_cmbBgFit.SelectedItem?.ToString(), "Contain"))

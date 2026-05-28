@@ -50,9 +50,16 @@ logger = logging.getLogger(__name__)
 license_service: LicenseService = None
 
 
-@asynccontextmanager
 def _ensure_firewall_rule():
-    """On Windows, add an inbound firewall rule for the server port (idempotent)."""
+    """On Windows, add an inbound firewall rule for the server port (idempotent).
+
+    Runs as a plain function (NOT a context manager). It was previously decorated
+    with @asynccontextmanager, which meant calling it just built an unused context
+    manager and the netsh body never executed — so the rule was never added and
+    LAN clients were silently blocked unless someone allowed it via an admin
+    firewall prompt. The service runs as LocalSystem, which has the rights netsh
+    needs, so with this fix the rule is created automatically on startup.
+    """
     if sys.platform != "win32":
         return
     import subprocess
@@ -123,6 +130,7 @@ def _enforce_secure_defaults():
         env_path.write_text("".join(lines), encoding="utf-8")
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     global license_service
 

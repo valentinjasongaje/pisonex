@@ -247,11 +247,43 @@ Namespace Services
                 Debug.WriteLine($"[LICENSE] Activate response: HTTP {CInt(resp.StatusCode)} — {body}")
 
                 If resp.IsSuccessStatusCode Then
+                    Dim doc = JsonDocument.Parse(body)
+
+                    ' Activation is only real if the server returns a token that
+                    ' actually verifies on THIS device. Without a verifiable token
+                    ' IsActivated() can never return True, so reporting success would
+                    ' silently drop the user back to trial mode. Validate first,
+                    ' persist second — never leave a half-activated state.
+                    Dim token As String = ""
+                    Dim tokenProp As JsonElement
+                    If doc.RootElement.TryGetProperty("token", tokenProp) AndAlso
+                       tokenProp.ValueKind = JsonValueKind.String Then
+                        token = tokenProp.GetString()
+                    End If
+
+                    If String.IsNullOrEmpty(token) Then
+                        Return New ActivateResult With {
+                            .Success = False,
+                            .ErrorMessage = "Activation incomplete: the licensing server did not issue a token. Contact support (server signing key may be missing)."
+                        }
+                    End If
+
+                    Dim activateClaims = LicenseTokenVerifier.VerifySignature(token, GetDeviceId())
+                    If activateClaims Is Nothing Then
+                        Return New ActivateResult With {
+                            .Success = False,
+                            .ErrorMessage = "Activation failed: the license token could not be verified on this device. Contact support (signing key mismatch)."
+                        }
+                    End If
+
+                    ' Token is valid — persist activation state.
                     LicenseStore.LicenseKey = licenseKey
                     LicenseStore.LicenseActivatedAt = DateTime.UtcNow.ToString("o")
                     LicenseStore.LicenseLastVerified = DateTime.UtcNow.ToString("o")
+                    LicenseStore.LicenseToken = token
+                    LicenseStore.OfflineSince = ""
+                    LicenseStore.ServerRejected = False
 
-                    Dim doc = JsonDocument.Parse(body)
                     Dim expiresAt = ""
                     Dim expProp As JsonElement
                     If doc.RootElement.TryGetProperty("expires_at", expProp) Then
@@ -259,12 +291,6 @@ Namespace Services
                             expiresAt = expProp.GetString()
                             LicenseStore.LicenseExpiresAt = expiresAt
                         End If
-                    End If
-
-                    Dim tokenProp As JsonElement
-                    If doc.RootElement.TryGetProperty("token", tokenProp) AndAlso
-                       tokenProp.ValueKind = JsonValueKind.String Then
-                        LicenseStore.LicenseToken = tokenProp.GetString()
                     End If
 
                     Return New ActivateResult With {
@@ -544,6 +570,36 @@ Namespace Services
             Return LicenseStatus.Trial
         End Function
 
+        ''' <summary>
+        ''' Human-readable token state for the Admin Panel diagnostic. Reports
+        ''' whether a signed token is present, whether its signature verifies,
+        ''' whether it is bound to this device, and its freshness — so support
+        ''' can see at a glance WHY a machine shows trial vs activated.
+        ''' </summary>
+        Public Function GetTokenDiagnostic() As String
+            Dim token = LicenseStore.LicenseToken
+            If String.IsNullOrEmpty(token) Then
+                Return "No token stored — activation never returned one (check server signing key)."
+            End If
+
+            ' Signature-only check, device binding ignored, to isolate the cause.
+            Dim sigClaims = LicenseTokenVerifier.VerifySignature(token, Nothing)
+            If sigClaims Is Nothing Then
+                Return "Token present but signature INVALID — key mismatch or tampered file."
+            End If
+
+            ' Now enforce device binding.
+            Dim boundClaims = LicenseTokenVerifier.VerifySignature(token, GetDeviceId())
+            If boundClaims Is Nothing Then
+                Return "Signature OK but token is bound to a DIFFERENT device."
+            End If
+
+            Dim expDt = DateTimeOffset.FromUnixTimeSeconds(boundClaims.ExpiresAt).UtcDateTime
+            Dim fresh = DateTimeOffset.UtcNow.ToUnixTimeSeconds() <= boundClaims.ExpiresAt
+            Dim freshLabel = If(fresh, "fresh", "expired (offline grace applies)")
+            Return $"Valid — signature OK, device match, token {freshLabel} (exp {expDt:yyyy-MM-dd HH:mm} UTC)."
+        End Function
+
         Public Function GetMaskedKey() As String
             Dim key = LicenseStore.LicenseKey
             If String.IsNullOrEmpty(key) Then Return ""
@@ -558,7 +614,11 @@ Namespace Services
 
         Public Sub StartVerificationTimer()
             If _verifyTimer IsNot Nothing Then Return
-            _verifyTimer = New System.Timers.Timer(6 * 60 * 60 * 1000)  ' 6 hours
+            ' Verify hourly. Combined with the server's 2h token TTL, a device
+            ' deactivated on pisonex.com loses access within ~1h instead of ~6h.
+            ' On a LAN café (~20 PCs) this is one extra pisonex.com request per
+            ' PC per hour — negligible load.
+            _verifyTimer = New System.Timers.Timer(1 * 60 * 60 * 1000)  ' 1 hour
             AddHandler _verifyTimer.Elapsed, Async Sub(s, e)
                 ' Re-anchor the trial clock every 6h so an attacker can't reset it
                 ' by deleting license.dat and staying offline until the next reboot.

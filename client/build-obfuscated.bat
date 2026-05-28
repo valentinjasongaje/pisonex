@@ -38,6 +38,9 @@ if exist "%CONFUSER_PROJ%" del "%CONFUSER_PROJ%"
 >>"%CONFUSER_PROJ%" echo     ^<protection id="anti ildasm" /^>
 >>"%CONFUSER_PROJ%" echo     ^<protection id="constants" /^>
 >>"%CONFUSER_PROJ%" echo     ^<protection id="ctrl flow" /^>
+>>"%CONFUSER_PROJ%" echo     ^<protection id="rename"^>
+>>"%CONFUSER_PROJ%" echo       ^<argument name="renPublic" value="true" /^>
+>>"%CONFUSER_PROJ%" echo     ^</protection^>
 >>"%CONFUSER_PROJ%" echo   ^</rule^>
 >>"%CONFUSER_PROJ%" echo   ^<module path="PisoNetClient.dll" /^>
 >>"%CONFUSER_PROJ%" echo ^</project^>

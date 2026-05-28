@@ -7,10 +7,30 @@ import platform
 import sys
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+
+
+def _parse_iso_utc_naive(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-8601 string into a NAIVE UTC datetime.
+
+    pisonex.com returns timestamps with a 'Z' suffix (e.g.
+    "2026-05-24T13:56:42.295Z"), which datetime.fromisoformat parses as
+    timezone-AWARE. The rest of this module compares against datetime.utcnow()
+    (naive), and mixing aware/naive raises TypeError. Normalising everything to
+    naive UTC here keeps subtraction/comparison safe.
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 import httpx
 from jose import jwt, exceptions as jose_exceptions
@@ -29,10 +49,11 @@ else:
 from config import settings as _settings
 
 # ── ES256 public key (matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com) ────
-# Generated 2026-05-23. Replace both keys together if rotating.
+# Generated 2026-05-28 (regenerated; the 2026-05-23 pair's private half was
+# never deployed). Replace both keys together if rotating.
 _LICENSE_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEMPqOTqe2MzuA4WZDi5LkXR8eDsDZ
-LzZRzgFpKVqJaolIe9zRoFAZTEbuB0solxxBxQe0BZOGB35P377p6o6ppw==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfs2Dsuq02WpHzOFovGzqPZ+QrKu+
+pVBtuCV3iJrWgskL98kRiXaujl935uEhHtO/nCcL+qna9OsX4li5fevKVg==
 -----END PUBLIC KEY-----"""
 
 
@@ -134,24 +155,16 @@ class LicenseService:
             if resp.status_code == 200:
                 data = resp.json()
                 server_date = data.get("first_seen_at")
-                if server_date:
-                    local_first_run = self._data.get("first_run")
-                    should_update = False
-                    if not local_first_run:
-                        should_update = True
-                    else:
-                        try:
-                            local_dt = datetime.fromisoformat(local_first_run)
-                            server_dt = datetime.fromisoformat(server_date)
-                            # Use the earlier date — prevents forward-dating the trial
-                            if server_dt < local_dt:
-                                should_update = True
-                        except (ValueError, TypeError):
-                            should_update = True
-                    if should_update:
-                        self._data["first_run"] = server_date
+                server_dt = _parse_iso_utc_naive(server_date)
+                if server_dt is not None:
+                    local_dt = _parse_iso_utc_naive(self._data.get("first_run"))
+                    # Use the EARLIER of local vs server (both normalised to naive
+                    # UTC). Store as a naive ISO string so downstream subtraction
+                    # against datetime.utcnow() never mixes aware/naive datetimes.
+                    if local_dt is None or server_dt < local_dt:
+                        self._data["first_run"] = server_dt.isoformat()
                         self._save()
-                        logger.info("Trial start date anchored to server: %s", server_date)
+                        logger.info("Trial start date anchored to server: %s", server_dt.isoformat())
         except Exception as e:
             logger.warning("Failed to sync status with pisonex.com: %s", e)
 
@@ -196,12 +209,17 @@ class LicenseService:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{PISONEX_API}/api/license/activate",
-                json=_signed_payload({
+                # Unsigned payload — pisonex.com's verifyRequestHmac only validates
+                # _sig when present, and the local server's LICENSE_HMAC_SECRET is a
+                # per-install random value that pisonex.com cannot verify (it would
+                # return "Invalid request signature"). The VB client sends unsigned
+                # too. Replay/abuse is already gated by license-key + device checks.
+                json={
                     "license_key": license_key,
                     "device_id": device_id,
                     "device_label": device_label,
                     "device_type": "server",
-                }),
+                },
             )
 
         body = resp.json()
@@ -227,7 +245,7 @@ class LicenseService:
                 async with httpx.AsyncClient(timeout=15) as client:
                     await client.post(
                         f"{PISONEX_API}/api/license/deactivate-device",
-                        json=_signed_payload({"license_key": key, "device_id": device_id}),
+                        json={"license_key": key, "device_id": device_id},
                     )
             except Exception as e:
                 logger.warning("Remote deactivation failed: %s", e)
@@ -249,7 +267,7 @@ class LicenseService:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/license/verify",
-                    json=_signed_payload({"license_key": key, "device_id": device_id}),
+                    json={"license_key": key, "device_id": device_id},
                 )
 
             try:
@@ -292,14 +310,10 @@ class LicenseService:
     # ── Verification ─────────────────────────────────────────────────
 
     def should_verify(self) -> bool:
-        last = self._data.get("last_verified")
-        if not last:
+        last_dt = _parse_iso_utc_naive(self._data.get("last_verified"))
+        if last_dt is None:
             return True
-        try:
-            last_dt = datetime.fromisoformat(last)
-            return (datetime.utcnow() - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
-        except (ValueError, TypeError):
-            return True
+        return (datetime.utcnow() - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
 
     # ── Status checks ────────────────────────────────────────────────
 
@@ -307,10 +321,8 @@ class LicenseService:
         return bool(self._data.get("license_key") and self._data.get("activated_at"))
 
     def _first_run_date(self) -> datetime:
-        try:
-            return datetime.fromisoformat(self._data["first_run"])
-        except (KeyError, ValueError):
-            return datetime.utcnow()
+        dt = _parse_iso_utc_naive(self._data.get("first_run"))
+        return dt if dt is not None else datetime.utcnow()
 
     def trial_days_remaining(self) -> int:
         elapsed = (datetime.utcnow() - self._first_run_date()).days

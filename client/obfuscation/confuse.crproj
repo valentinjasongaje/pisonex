@@ -2,10 +2,15 @@
 <!--
   ConfuserEx project for the PisoNetClient.
 
-  PROFILE: CONSERVATIVE
-  ─────────────────────
+  PROFILE: STANDARD (renaming enabled)
+  ────────────────────────────────────
   Goal: bump a "30-second dnSpy edit" attack into "weekend project for a
   competent reverser" without breaking runtime behavior.
+
+  NOTE: the build scripts (build-obfuscated.bat and build/build-client.bat)
+  generate their own .crproj on the fly with absolute paths. THIS file is a
+  documentation/reference copy of the protection set — keep it in sync, but
+  edits here do not affect the actual build.
 
   ENABLED protections:
     - ctrl flow      : turns each method body into a state machine.
@@ -18,14 +23,18 @@
     - anti ildasm    : sets the SuppressIldasm attribute and adds a few
                        structural tweaks.  Minor — ILSpy ignores this — but
                        free.
+    - rename (renPublic=true) : scrambles class/method/field names, INCLUDING
+                       public members (this is an app, not a library, so no
+                       external code consumes the public API). IsActive,
+                       LicenseService, GetDeviceId etc. become single-letter
+                       names. The 4 JSON DTO classes are excluded at the
+                       source via <Obfuscation(Exclude:=True,
+                       ApplyToMembers:=True)> attributes (HeartbeatResponse,
+                       MemberRegisterResponse, MemberLoginResponse,
+                       MemberLogoutResponse) so System.Text.Json
+                       deserialisation keeps working.
 
   DISABLED (intentionally):
-    - rename         : would rename PisoNetClient classes, including the
-                       JSON DTOs (HeartbeatResponse, ActivateResult, etc.).
-                       System.Text.Json deserialisation maps JSON keys to
-                       property names — rename them and deserialisation
-                       returns default values.  Re-enable later with an
-                       explicit <rule pattern="..."> excluding DTO types.
     - anti tamper    : refuses to run if the assembly hash doesn't match
                        what ConfuserEx baked in.  Sounds good, but breaks
                        Authenticode signing (signing modifies the file
@@ -52,6 +61,12 @@
     <protection id="anti ildasm" />
     <protection id="constants"   />
     <protection id="ctrl flow"   />
+    <protection id="rename">
+      <!-- renPublic=true is required for an application: nothing external
+           references our public API, so public members are safe to rename.
+           Without this, ConfuserEx skips all Public classes/members. -->
+      <argument name="renPublic" value="true" />
+    </protection>
   </rule>
 
   <!-- Module under protection.  Path is relative to baseDir above. -->

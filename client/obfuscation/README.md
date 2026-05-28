@@ -101,16 +101,22 @@ The script:
 See the comment block at the top of `obfuscation/confuse.crproj` for the
 full rationale. Short version:
 
-**Enabled (conservative profile):**
+**Enabled (standard profile):**
 - `ctrl flow` — static analysis of control flow becomes useless.
 - `constants` — string and numeric literals are encrypted in the binary.
 - `anti debug` — refuses to attach a debugger at runtime.
 - `anti ildasm` — minor; sets `SuppressIldasm`.
+- `rename` (`renPublic=true`) — scrambles class/method/field names,
+  including public members. `IsActive`, `LicenseService`, `GetDeviceId`
+  etc. become single-letter names, so dnSpy users can't navigate by name.
+  The 4 JSON DTO classes are excluded at the source via
+  `<Obfuscation(Exclude:=True, ApplyToMembers:=True)>` attributes
+  (`HeartbeatResponse`, `MemberRegisterResponse`, `MemberLoginResponse`,
+  `MemberLogoutResponse`) so System.Text.Json deserialization keeps
+  working. The metrics DTOs are safe automatically because they pin JSON
+  keys with `<JsonPropertyName>` attributes.
 
 **Deliberately disabled:**
-- `rename` — would rename JSON DTO properties and break heartbeat
-  deserialization. Re-enable later with an explicit exclusion list for
-  `HeartbeatResponse`, `ActivateResult`, etc.
 - `anti tamper` — would conflict with Authenticode code-signing (which
   is the next thing to add). Pick one of the two.
 

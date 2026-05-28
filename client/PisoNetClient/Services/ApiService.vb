@@ -6,6 +6,10 @@ Imports PisoNetClient.Config
 
 Namespace Services
 
+    ' Excluded from obfuscation: System.Text.Json maps JSON keys to these
+    ' property names. Renaming them would break heartbeat deserialization.
+    ' DTOs hold no logic worth protecting, so full exclusion is safe.
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
     Public Class HeartbeatResponse
         Public Property is_locked As Boolean
         Public Property remaining_seconds As Integer
