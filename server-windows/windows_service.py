@@ -3,20 +3,23 @@ Windows Service wrapper for PisoNet Server.
 
 Allows running the FastAPI server as a Windows Service that auto-starts on boot.
 
-Installation:
-  python windows_service.py install
+Installation (must be run as Administrator):
+  PisonexServer.exe install         # installs in DELAYED AUTO start mode
+                                    # and configures crash auto-restart
+  PisonexServer.exe start           # starts the service immediately
 
-Start/Stop:
-  net start PisoNetServer
-  net stop PisoNetServer
+Start/Stop afterwards:
+  net start PisonexServer
+  net stop  PisonexServer
 
 Remove:
-  python windows_service.py remove
+  PisonexServer.exe remove
 """
 
 import sys
 import os
 import logging
+import subprocess
 import threading
 import servicemanager
 import win32serviceutil
@@ -25,7 +28,7 @@ import win32event
 import win32evtlogutil
 from pathlib import Path
 
-# ── Working directory resolution ──────────────────────────────────────────────
+# ── Working directory resolution ──────────────────────────────────────────────────────────────
 # When frozen by PyInstaller (onedir), sys.executable is PisoNetServer.exe.
 # When running as a Windows service the CWD is C:\Windows\System32 by default,
 # so we must change to the folder that contains the exe / this script so that
@@ -48,6 +51,8 @@ else:
 
 os.environ['PISONEX_BUNDLE_DIR'] = str(_BUNDLE_DIR)
 
+_NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — suppress console popups when service is running
+
 
 def _ensure_env():
     """Create .env with secure defaults on first install if it doesn't exist.
@@ -64,6 +69,7 @@ def _ensure_env():
 
     import secrets
     secret_key = secrets.token_hex(32)
+    hmac_secret = secrets.token_hex(32)
 
     env_path.write_text(
         f"# Pisonex Server Configuration — auto-generated on first run\n"
@@ -79,6 +85,7 @@ def _ensure_env():
         f"ADMIN_USERNAME=admin\n"
         f"ADMIN_PASSWORD=admin123\n\n"
         f"CLIENT_API_KEY=\n\n"
+        f"LICENSE_HMAC_SECRET={hmac_secret}\n\n"
         f"MEMBERSHIP_ENABLED=false\n"
         f"ABSORPTION_ENABLED=false\n"
         f"LOGOUT_DEDUCTION_MINUTES=5\n"
@@ -178,6 +185,48 @@ class PisoNetService(win32serviceutil.ServiceFramework):
             win32event.SetEvent(self.hWaitStop)
 
 
+def _configure_post_install():
+    """After 'install' completes, set the service to delayed-auto-start and
+    configure failure recovery so a crash auto-restarts the service instead
+    of requiring a manual restart.
+
+    Uses sc.exe rather than ChangeServiceConfig2 directly so the logic is
+    transparent and matches what an admin would type manually.
+    """
+    name = PisoNetService._svc_name_
+    try:
+        # Delayed auto-start: starts shortly after login so it doesn't fight
+        # with networking/storage drivers during early boot.
+        subprocess.run(
+            ["sc.exe", "config", name, "start=", "delayed-auto"],
+            capture_output=True, text=True, creationflags=_NO_WINDOW,
+        )
+        # Failure recovery: restart after 5s, then 10s, then every 30s.
+        # 'reset= 86400' clears the failure counter after 24h of clean running.
+        subprocess.run(
+            [
+                "sc.exe", "failure", name,
+                "reset=", "86400",
+                "actions=", "restart/5000/restart/10000/restart/30000",
+            ],
+            capture_output=True, text=True, creationflags=_NO_WINDOW,
+        )
+        # Allow the service to interact with the system on failure (default off)
+        subprocess.run(
+            ["sc.exe", "failureflag", name, "1"],
+            capture_output=True, text=True, creationflags=_NO_WINDOW,
+        )
+        print(
+            f"\nService '{name}' configured for delayed auto-start with crash auto-restart.\n"
+            f"Start it now with:  {Path(sys.executable).name if getattr(sys, 'frozen', False) else 'python windows_service.py'} start\n"
+        )
+    except Exception as e:
+        print(f"Warning: post-install configuration failed ({e}). "
+              f"Run as Administrator and retry, or use:\n"
+              f"  sc config {name} start= delayed-auto\n"
+              f"  sc failure {name} reset= 86400 actions= restart/5000/restart/10000/restart/30000\n")
+
+
 def handle_command_line():
     """Handle command line arguments."""
     if len(sys.argv) == 1:
@@ -193,7 +242,7 @@ def handle_command_line():
                 print(
                     f"\nERROR: This must be run via the Windows Service Control Manager.\n"
                     f"\nUsage (run as Administrator):\n"
-                    f"  {exe} install   -- register the service\n"
+                    f"  {exe} install   -- register the service (delayed auto-start)\n"
                     f"  {exe} start     -- start the service\n"
                     f"  {exe} stop      -- stop the service\n"
                     f"  {exe} remove    -- unregister the service\n"
@@ -201,9 +250,27 @@ def handle_command_line():
                 )
                 sys.exit(1)
             raise
-    else:
-        # Handle install/remove/start/stop/debug
-        win32serviceutil.HandleCommandLine(PisoNetService)
+        return
+
+    # Inject --startup delayed before 'install' if the caller didn't specify
+    # a startup type.  win32serviceutil otherwise defaults to MANUAL, which
+    # means the service won't auto-start on boot — the #1 cause of
+    # "server didn't start when I powered the PC on" reports.
+    args = list(sys.argv)
+    is_install = any(a == "install" for a in args[1:])
+    already_specified = any(a == "--startup" or a.startswith("--startup=") for a in args[1:])
+    if is_install and not already_specified:
+        # Insert immediately after argv[0] so it precedes 'install'
+        args.insert(1, "--startup")
+        args.insert(2, "delayed")
+        sys.argv = args
+
+    # Handle install/remove/start/stop/debug
+    win32serviceutil.HandleCommandLine(PisoNetService)
+
+    # Apply post-install configuration (start mode + failure recovery)
+    if is_install:
+        _configure_post_install()
 
 
 if __name__ == "__main__":

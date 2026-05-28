@@ -32,6 +32,11 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Embed a UAC manifest so manual launches (install/start/stop subcommands)
+    # trigger an elevation prompt instead of silently failing on a standard
+    # account.  Doesn't affect the service runtime — SCM already launches the
+    # service as LocalSystem regardless of this flag.
+    uac_admin=True,
 )
 coll = COLLECT(
     exe,
