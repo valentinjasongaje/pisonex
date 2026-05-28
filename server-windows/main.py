@@ -3,7 +3,6 @@ import logging
 import logging.handlers
 import os
 import sys
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -24,7 +23,7 @@ from services.session_service import SessionService
 from services.license_service import LicenseService
 from services.membership_service import MembershipService
 
-# ── Logging setup ─────────────────────────────────────────────────────────────
+# ── Logging setup ───────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,21 +44,13 @@ _BUNDLE_DIR = Path(os.environ.get('PISONEX_BUNDLE_DIR', Path(__file__).parent))
 
 logger = logging.getLogger(__name__)
 
-# ── App lifespan (startup / shutdown) ─────────────────────────────────────────
+# ── App lifespan (startup / shutdown) ─────────────────────────────────────────────
 
 license_service: LicenseService = None
 
 
 def _ensure_firewall_rule():
-    """On Windows, add an inbound firewall rule for the server port (idempotent).
-
-    Runs as a plain function (NOT a context manager). It was previously decorated
-    with @asynccontextmanager, which meant calling it just built an unused context
-    manager and the netsh body never executed — so the rule was never added and
-    LAN clients were silently blocked unless someone allowed it via an admin
-    firewall prompt. The service runs as LocalSystem, which has the rights netsh
-    needs, so with this fix the rule is created automatically on startup.
-    """
+    """On Windows, add an inbound firewall rule for the server port (idempotent)."""
     if sys.platform != "win32":
         return
     import subprocess
@@ -130,7 +121,6 @@ def _enforce_secure_defaults():
         env_path.write_text("".join(lines), encoding="utf-8")
 
 
-@asynccontextmanager
 async def lifespan(app: FastAPI):
     global license_service
 
@@ -527,7 +517,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Session context middleware ────────────────────────────────────────────────
+# ── Session context middleware ───────────────────────────────────────────────────────────────────
 # Parses the pisonet_session cookie and attaches user info to request.state so
 # Jinja2 templates can access it via request.state.user_role / .username without
 # requiring each route to pass it explicitly in the template context dict.
@@ -548,7 +538,7 @@ async def attach_session_to_request(request: Request, call_next):
     return await call_next(request)
 
 
-# ── License enforcement middleware ─────────────────────────────────────────
+# ── License enforcement middleware ──────────────────────────────────────────────────
 # Blocks API requests when license is expired or offline-locked.
 # Allows: dashboard, static, auth, license, health, heartbeat (so clients know status).
 
@@ -584,7 +574,7 @@ async def license_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# ── API routers ───────────────────────────────────────────────────────────────
+# ── API routers ────────────────────────────────────────────────────────────────────
 
 app.include_router(auth.router)
 app.include_router(pc.router)
@@ -594,7 +584,7 @@ app.include_router(license_router)
 app.include_router(member_router)
 app.include_router(dashboard_router)
 
-# ── Static files ───────────────────────────────────────────────────────────────
+# ── Static files ────────────────────────────────────────────────────────────────────────
 
 app.mount("/static", StaticFiles(directory=str(_BUNDLE_DIR / "dashboard" / "static")), name="static")
 
@@ -604,14 +594,14 @@ def root():
     return RedirectResponse("/dashboard")
 
 
-# ── Health check ──────────────────────────────────────────────────────────────
+# ── Health check ────────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
     return {"status": "ok", "version": "1.0.0"}
 
 
-# ── Dev entry point ───────────────────────────────────────────────────────────
+# ── Dev entry point ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn

@@ -123,6 +123,146 @@ def _get_machine_id() -> str:
     return f"{platform.node()}|{platform.machine()}|{platform.processor()}"
 
 
+# ── Per-component hardware fingerprints ───────────────────────────────────────
+# Cached after first collection — hardware doesn't change during a run.
+_fp_cache: Optional[dict] = None
+_NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+
+
+def _run_powershell(cmd: str, timeout: int = 10) -> str:
+    """Run a PowerShell snippet and return the trimmed stdout."""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd],
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _run_wmic(*args: str, timeout: int = 5) -> str:
+    """Run a wmic command. Returns the first non-blank, non-header line.
+    Empty string when wmic is unavailable (Windows 11 24H2+ has removed it).
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["wmic"] + list(args),
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW,
+        )
+        header = args[-1].lower()
+        for line in r.stdout.splitlines():
+            stripped = line.strip()
+            if stripped and stripped.lower() != header:
+                return stripped
+    except Exception:
+        pass
+    return ""
+
+
+def _get_hardware_fingerprints() -> dict:
+    """Collect per-component hardware fingerprint hashes.
+
+    Sends 7 independent identifiers to pisonex.com so the server-side fuzzy
+    matcher can recognise a returning device even after MachineGuid has been
+    edited or license.json deleted (trial-reset attack).  A match on ≥4 of 7
+    components is enough to re-anchor the original first_seen_at date.
+
+    Each component value is SHA-256 hashed before transmission — the raw
+    serial numbers never leave the machine.  Empty string means 'unavailable';
+    the web API ignores empties in the fuzzy matcher.
+
+    Tries wmic first (still present on Windows 10 + many Win11 installs);
+    falls back to PowerShell Get-CimInstance for Win11 24H2+ where wmic is
+    removed.
+    """
+    global _fp_cache
+    if _fp_cache is not None:
+        return _fp_cache
+
+    fps: dict = {
+        "fp_machine_guid": "",
+        "fp_cpu_id": "",
+        "fp_bios_serial": "",
+        "fp_baseboard_serial": "",
+        "fp_disk_serial": "",
+        "fp_system_uuid": "",
+        "fp_mac_address": "",
+    }
+
+    def _h(val: str) -> str:
+        v = (val or "").strip()
+        # Drop obvious placeholder values that the fuzzy matcher would
+        # treat as a genuine match across unrelated machines.
+        if not v or v.lower() in ("none", "to be filled by o.e.m.", "default string", "system serial number", "0", "00000000", "unknown"):
+            return ""
+        return hashlib.sha256(v.encode()).hexdigest()
+
+    if sys.platform == "win32":
+        # MachineGuid — same source as device_id (registry, never needs wmic)
+        try:
+            import winreg  # type: ignore
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography",
+            )
+            val, _ = winreg.QueryValueEx(key, "MachineGuid")
+            winreg.CloseKey(key)
+            fps["fp_machine_guid"] = _h(str(val))
+        except Exception:
+            pass
+
+        # Probe wmic once: if the binary is gone (Win11 24H2+), skip it.
+        wmic_ok = _run_wmic("os", "get", "caption", timeout=3) != ""
+
+        def _get(wmic_args, ps_cmd):
+            v = _run_wmic(*wmic_args) if wmic_ok else ""
+            if not v:
+                v = _run_powershell(ps_cmd)
+            return v
+
+        fps["fp_cpu_id"] = _h(_get(
+            ("cpu", "get", "ProcessorId"),
+            "(Get-CimInstance Win32_Processor | Select-Object -First 1).ProcessorId",
+        ))
+        fps["fp_bios_serial"] = _h(_get(
+            ("bios", "get", "SerialNumber"),
+            "(Get-CimInstance Win32_BIOS).SerialNumber",
+        ))
+        fps["fp_baseboard_serial"] = _h(_get(
+            ("baseboard", "get", "SerialNumber"),
+            "(Get-CimInstance Win32_BaseBoard).SerialNumber",
+        ))
+        fps["fp_disk_serial"] = _h(_get(
+            ("diskdrive", "where", "index=0", "get", "SerialNumber"),
+            "(Get-CimInstance Win32_DiskDrive | Where-Object Index -eq 0).SerialNumber",
+        ))
+        fps["fp_system_uuid"] = _h(_get(
+            ("csproduct", "get", "UUID"),
+            "(Get-CimInstance Win32_ComputerSystemProduct).UUID",
+        ))
+
+        # MAC address via uuid.getnode().  Docs guarantee a *random* 48-bit
+        # value with the multicast bit (LSB of the first octet) set when no
+        # real NIC is found — that random value differs each install and
+        # would actively pollute the fuzzy matcher, so we drop it.
+        try:
+            import uuid as _uuid
+            mac = _uuid.getnode()
+            is_random = ((mac >> 40) & 0x01) == 0x01
+            if not is_random:
+                fps["fp_mac_address"] = _h(f"{mac:012x}")
+        except Exception:
+            pass
+
+    _fp_cache = fps
+    return fps
+
+
 class LicenseStatus(str, Enum):
     ACTIVATED = "activated"
     TRIAL = "trial"
@@ -135,7 +275,7 @@ class LicenseService:
         self._data: dict = {}
         self._load()
 
-    # ── Persistence ──────────────────────────────────────────────────
+    # ── Persistence ─────────────────────────────────────────────────────────
 
     def _load(self):
         if LICENSE_FILE.exists():
@@ -151,7 +291,7 @@ class LicenseService:
         LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
         LICENSE_FILE.write_text(json.dumps(self._data, indent=2))
 
-    # ── Startup sync (telemetry + trial-clock restore) ───────────────
+    # ── Startup sync (telemetry + trial-clock restore) ───────────────────────
 
     async def sync_startup_status(self) -> None:
         """POST to /api/status for telemetry and to anchor the trial clock.
@@ -161,13 +301,18 @@ class LicenseService:
           - Deleting license.json → local first_run resets to now, but server
             returns the original date and we correct it immediately.
           - Editing first_run to a future date → server date is earlier, we fix it.
+
+        Hardware fingerprints are included so the server-side fuzzy matcher can
+        re-anchor the trial clock even when MachineGuid has been edited and the
+        composite device_id no longer matches the stored record.
         """
         try:
             device_id = self.get_device_id()
+            fps = _get_hardware_fingerprints()
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/status",
-                    json={"device_id": device_id},
+                    json={"device_id": device_id, **fps},
                 )
             if resp.status_code == 200:
                 data = resp.json()
@@ -185,7 +330,7 @@ class LicenseService:
         except Exception as e:
             logger.warning("Failed to sync status with pisonex.com: %s", e)
 
-    # ── Device ID ────────────────────────────────────────────────────
+    # ── Device ID ────────────────────────────────────────────────────────────────
 
     def get_device_id(self) -> str:
         # Always derive from hardware — never trust the cached value.
@@ -198,7 +343,7 @@ class LicenseService:
             self._save()
         return device_id
 
-    # ── Token verification ───────────────────────────────────────────
+    # ── Token verification ───────────────────────────────────────────────────────────
 
     def _get_valid_token_claims(self) -> Optional[dict]:
         """Return verified token claims if a valid, unexpired token is stored.
@@ -215,13 +360,22 @@ class LicenseService:
         if claims.get("did") != self.get_device_id():
             logger.warning("license_token device_id mismatch — ignoring stored token")
             return None
+        # Verify the token's license_key (sub) matches the stored license_key.
+        # Blocks an attacker who pastes a token from a different (still-valid)
+        # license that they own onto a machine whose license has been revoked.
+        local_key = self._data.get("license_key")
+        token_sub = claims.get("sub")
+        if local_key and token_sub and local_key.strip().upper() != str(token_sub).strip().upper():
+            logger.warning("license_token license_key mismatch — ignoring stored token")
+            return None
         return claims
 
-    # ── Activation ───────────────────────────────────────────────────
+    # ── Activation ───────────────────────────────────────────────────────────────────
 
     async def activate(self, license_key: str) -> dict:
         device_id = self.get_device_id()
         device_label = f"Pisonex Server ({platform.node()})"
+        fps = _get_hardware_fingerprints()
 
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -236,6 +390,7 @@ class LicenseService:
                     "device_id": device_id,
                     "device_label": device_label,
                     "device_type": "server",
+                    **fps,
                 },
             )
 
@@ -279,12 +434,13 @@ class LicenseService:
             return {"valid": False, "error": "No license key"}
 
         device_id = self.get_device_id()
+        fps = _get_hardware_fingerprints()
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/license/verify",
-                    json={"license_key": key, "device_id": device_id},
+                    json={"license_key": key, "device_id": device_id, **fps},
                 )
 
             try:
@@ -324,15 +480,23 @@ class LicenseService:
             logger.warning("License verification error: %s", e)
             return {"valid": False, "error": str(e)}
 
-    # ── Verification ─────────────────────────────────────────────────
+    # ── Verification ────────────────────────────────────────────────────────────────
 
     def should_verify(self) -> bool:
+        # Combines the robust ISO parser (handles pisonex.com's "...Z" timestamps)
+        # with the clock-rollback defense.
         last_dt = _parse_iso_utc_naive(self._data.get("last_verified"))
         if last_dt is None:
             return True
-        return (datetime.utcnow() - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
+        now = datetime.utcnow()
+        # Clock-rollback defense: a last_verified in the future means the clock
+        # was moved backwards — force a fresh verify (the server-side timestamp
+        # check rejects if the gap is too large).
+        if last_dt > now:
+            return True
+        return (now - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
 
-    # ── Status checks ────────────────────────────────────────────────
+    # ── Status checks ────────────────────────────────────────────────────────────────
 
     def is_activated(self) -> bool:
         return bool(self._data.get("license_key") and self._data.get("activated_at"))
