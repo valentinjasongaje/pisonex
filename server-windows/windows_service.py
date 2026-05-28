@@ -25,7 +25,7 @@ import win32event
 import win32evtlogutil
 from pathlib import Path
 
-# ── Working directory resolution ──────────────────────────────────────────────
+# ── Working directory resolution ──────────────────────────────────────────────────────────────
 # When frozen by PyInstaller (onedir), sys.executable is PisoNetServer.exe.
 # When running as a Windows service the CWD is C:\Windows\System32 by default,
 # so we must change to the folder that contains the exe / this script so that
@@ -64,6 +64,7 @@ def _ensure_env():
 
     import secrets
     secret_key = secrets.token_hex(32)
+    hmac_secret = secrets.token_hex(32)
 
     env_path.write_text(
         f"# Pisonex Server Configuration — auto-generated on first run\n"
@@ -79,6 +80,7 @@ def _ensure_env():
         f"ADMIN_USERNAME=admin\n"
         f"ADMIN_PASSWORD=admin123\n\n"
         f"CLIENT_API_KEY=\n\n"
+        f"LICENSE_HMAC_SECRET={hmac_secret}\n\n"
         f"MEMBERSHIP_ENABLED=false\n"
         f"ABSORPTION_ENABLED=false\n"
         f"LOGOUT_DEDUCTION_MINUTES=5\n"

@@ -102,6 +102,91 @@ def _get_machine_id() -> str:
     return f"{platform.node()}|{platform.machine()}|{platform.processor()}"
 
 
+# ── Per-component hardware fingerprints ───────────────────────────────────────
+# Cached after first collection — hardware doesn't change during a run.
+_fp_cache: Optional[dict] = None
+
+
+def _get_hardware_fingerprints() -> dict:
+    """Collect per-component hardware fingerprint hashes.
+
+    Sends 7 independent identifiers to pisonex.com so the server-side fuzzy
+    matcher can recognise a returning device even after MachineGuid has been
+    edited or license.json deleted (trial-reset attack).  A match on ≥4 of 7
+    components is enough to re-anchor the original first_seen_at date.
+
+    Each component value is SHA-256 hashed before transmission — the raw
+    serial numbers never leave the machine.  Empty string means 'unavailable';
+    the web API ignores empties in the fuzzy matcher.
+    """
+    global _fp_cache
+    if _fp_cache is not None:
+        return _fp_cache
+
+    fps: dict = {
+        "fp_machine_guid": "",
+        "fp_cpu_id": "",
+        "fp_bios_serial": "",
+        "fp_baseboard_serial": "",
+        "fp_disk_serial": "",
+        "fp_system_uuid": "",
+        "fp_mac_address": "",
+    }
+
+    def _h(val: str) -> str:
+        v = (val or "").strip()
+        return hashlib.sha256(v.encode()).hexdigest() if v else ""
+
+    if sys.platform == "win32":
+        import subprocess
+
+        # Suppress the console window when running as a Windows service
+        _NO_WINDOW = 0x08000000
+
+        def _wmic(*args: str) -> str:
+            """Run a wmic command; return the first non-blank, non-header line."""
+            try:
+                r = subprocess.run(
+                    ["wmic"] + list(args),
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=_NO_WINDOW,
+                )
+                header = args[-1].lower()
+                for line in r.stdout.splitlines():
+                    stripped = line.strip()
+                    if stripped and stripped.lower() != header:
+                        return stripped
+            except Exception:
+                pass
+            return ""
+
+        # Machine GUID — same source as device_id
+        try:
+            import winreg  # type: ignore
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography",
+            )
+            val, _ = winreg.QueryValueEx(key, "MachineGuid")
+            winreg.CloseKey(key)
+            fps["fp_machine_guid"] = _h(str(val))
+        except Exception:
+            pass
+
+        fps["fp_cpu_id"]           = _h(_wmic("cpu", "get", "ProcessorId"))
+        fps["fp_bios_serial"]      = _h(_wmic("bios", "get", "SerialNumber"))
+        fps["fp_baseboard_serial"] = _h(_wmic("baseboard", "get", "SerialNumber"))
+        fps["fp_disk_serial"]      = _h(_wmic("diskdrive", "where", "index=0", "get", "SerialNumber"))
+        fps["fp_system_uuid"]      = _h(_wmic("csproduct", "get", "UUID"))
+
+        # MAC address via Python stdlib — one of 7, so cannot alone defeat fuzzy match
+        import uuid as _uuid
+        fps["fp_mac_address"] = _h(f"{_uuid.getnode():012x}")
+
+    _fp_cache = fps
+    return fps
+
+
 class LicenseStatus(str, Enum):
     ACTIVATED = "activated"
     TRIAL = "trial"
@@ -114,7 +199,7 @@ class LicenseService:
         self._data: dict = {}
         self._load()
 
-    # ── Persistence ──────────────────────────────────────────────────
+    # ── Persistence ─────────────────────────────────────────────────────────
 
     def _load(self):
         if LICENSE_FILE.exists():
@@ -130,7 +215,7 @@ class LicenseService:
         LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
         LICENSE_FILE.write_text(json.dumps(self._data, indent=2))
 
-    # ── Startup sync (telemetry + trial-clock restore) ───────────────
+    # ── Startup sync (telemetry + trial-clock restore) ───────────────────────
 
     async def sync_startup_status(self) -> None:
         """POST to /api/status for telemetry and to anchor the trial clock.
@@ -140,13 +225,18 @@ class LicenseService:
           - Deleting license.json → local first_run resets to now, but server
             returns the original date and we correct it immediately.
           - Editing first_run to a future date → server date is earlier, we fix it.
+
+        Hardware fingerprints are included so the server-side fuzzy matcher can
+        re-anchor the trial clock even when MachineGuid has been edited and the
+        composite device_id no longer matches the stored record.
         """
         try:
             device_id = self.get_device_id()
+            fps = _get_hardware_fingerprints()
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/status",
-                    json={"device_id": device_id},
+                    json={"device_id": device_id, **fps},
                 )
             if resp.status_code == 200:
                 data = resp.json()
@@ -172,7 +262,7 @@ class LicenseService:
         except Exception as e:
             logger.warning("Failed to sync status with pisonex.com: %s", e)
 
-    # ── Device ID ────────────────────────────────────────────────────
+    # ── Device ID ────────────────────────────────────────────────────────────────
 
     def get_device_id(self) -> str:
         # Always derive from hardware — never trust the cached value.
@@ -185,7 +275,7 @@ class LicenseService:
             self._save()
         return device_id
 
-    # ── Token verification ───────────────────────────────────────────
+    # ── Token verification ───────────────────────────────────────────────────────────
 
     def _get_valid_token_claims(self) -> Optional[dict]:
         """Return verified token claims if a valid, unexpired token is stored.
@@ -204,11 +294,12 @@ class LicenseService:
             return None
         return claims
 
-    # ── Activation ───────────────────────────────────────────────────
+    # ── Activation ───────────────────────────────────────────────────────────────────
 
     async def activate(self, license_key: str) -> dict:
         device_id = self.get_device_id()
         device_label = f"Pisonex Server ({platform.node()})"
+        fps = _get_hardware_fingerprints()
 
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -218,6 +309,7 @@ class LicenseService:
                     "device_id": device_id,
                     "device_label": device_label,
                     "device_type": "server",
+                    **fps,
                 }),
             )
 
@@ -261,12 +353,13 @@ class LicenseService:
             return {"valid": False, "error": "No license key"}
 
         device_id = self.get_device_id()
+        fps = _get_hardware_fingerprints()
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/license/verify",
-                    json=_signed_payload({"license_key": key, "device_id": device_id}),
+                    json=_signed_payload({"license_key": key, "device_id": device_id, **fps}),
                 )
 
             try:
@@ -306,7 +399,7 @@ class LicenseService:
             logger.warning("License verification error: %s", e)
             return {"valid": False, "error": str(e)}
 
-    # ── Verification ─────────────────────────────────────────────────
+    # ── Verification ────────────────────────────────────────────────────────────────
 
     def should_verify(self) -> bool:
         last = self._data.get("last_verified")
@@ -318,7 +411,7 @@ class LicenseService:
         except (ValueError, TypeError):
             return True
 
-    # ── Status checks ────────────────────────────────────────────────
+    # ── Status checks ────────────────────────────────────────────────────────────────
 
     def is_activated(self) -> bool:
         return bool(self._data.get("license_key") and self._data.get("activated_at"))
