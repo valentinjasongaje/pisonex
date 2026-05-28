@@ -105,6 +105,42 @@ def _get_machine_id() -> str:
 # ── Per-component hardware fingerprints ───────────────────────────────────────
 # Cached after first collection — hardware doesn't change during a run.
 _fp_cache: Optional[dict] = None
+_NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+
+
+def _run_powershell(cmd: str, timeout: int = 10) -> str:
+    """Run a PowerShell snippet and return the trimmed stdout."""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd],
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _run_wmic(*args: str, timeout: int = 5) -> str:
+    """Run a wmic command. Returns the first non-blank, non-header line.
+    Empty string when wmic is unavailable (Windows 11 24H2+ has removed it).
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["wmic"] + list(args),
+            capture_output=True, text=True, timeout=timeout,
+            creationflags=_NO_WINDOW,
+        )
+        header = args[-1].lower()
+        for line in r.stdout.splitlines():
+            stripped = line.strip()
+            if stripped and stripped.lower() != header:
+                return stripped
+    except Exception:
+        pass
+    return ""
 
 
 def _get_hardware_fingerprints() -> dict:
@@ -118,6 +154,10 @@ def _get_hardware_fingerprints() -> dict:
     Each component value is SHA-256 hashed before transmission — the raw
     serial numbers never leave the machine.  Empty string means 'unavailable';
     the web API ignores empties in the fuzzy matcher.
+
+    Tries wmic first (still present on Windows 10 + many Win11 installs);
+    falls back to PowerShell Get-CimInstance for Win11 24H2+ where wmic is
+    removed.
     """
     global _fp_cache
     if _fp_cache is not None:
@@ -135,32 +175,14 @@ def _get_hardware_fingerprints() -> dict:
 
     def _h(val: str) -> str:
         v = (val or "").strip()
-        return hashlib.sha256(v.encode()).hexdigest() if v else ""
+        # Drop obvious placeholder values that the fuzzy matcher would
+        # treat as a genuine match across unrelated machines.
+        if not v or v.lower() in ("none", "to be filled by o.e.m.", "default string", "system serial number", "0", "00000000", "unknown"):
+            return ""
+        return hashlib.sha256(v.encode()).hexdigest()
 
     if sys.platform == "win32":
-        import subprocess
-
-        # Suppress the console window when running as a Windows service
-        _NO_WINDOW = 0x08000000
-
-        def _wmic(*args: str) -> str:
-            """Run a wmic command; return the first non-blank, non-header line."""
-            try:
-                r = subprocess.run(
-                    ["wmic"] + list(args),
-                    capture_output=True, text=True, timeout=5,
-                    creationflags=_NO_WINDOW,
-                )
-                header = args[-1].lower()
-                for line in r.stdout.splitlines():
-                    stripped = line.strip()
-                    if stripped and stripped.lower() != header:
-                        return stripped
-            except Exception:
-                pass
-            return ""
-
-        # Machine GUID — same source as device_id
+        # MachineGuid — same source as device_id (registry, never needs wmic)
         try:
             import winreg  # type: ignore
             key = winreg.OpenKey(
@@ -173,15 +195,48 @@ def _get_hardware_fingerprints() -> dict:
         except Exception:
             pass
 
-        fps["fp_cpu_id"]           = _h(_wmic("cpu", "get", "ProcessorId"))
-        fps["fp_bios_serial"]      = _h(_wmic("bios", "get", "SerialNumber"))
-        fps["fp_baseboard_serial"] = _h(_wmic("baseboard", "get", "SerialNumber"))
-        fps["fp_disk_serial"]      = _h(_wmic("diskdrive", "where", "index=0", "get", "SerialNumber"))
-        fps["fp_system_uuid"]      = _h(_wmic("csproduct", "get", "UUID"))
+        # Probe wmic once: if the binary is gone (Win11 24H2+), skip it.
+        wmic_ok = _run_wmic("os", "get", "caption", timeout=3) != ""
 
-        # MAC address via Python stdlib — one of 7, so cannot alone defeat fuzzy match
-        import uuid as _uuid
-        fps["fp_mac_address"] = _h(f"{_uuid.getnode():012x}")
+        def _get(wmic_args, ps_cmd):
+            v = _run_wmic(*wmic_args) if wmic_ok else ""
+            if not v:
+                v = _run_powershell(ps_cmd)
+            return v
+
+        fps["fp_cpu_id"] = _h(_get(
+            ("cpu", "get", "ProcessorId"),
+            "(Get-CimInstance Win32_Processor | Select-Object -First 1).ProcessorId",
+        ))
+        fps["fp_bios_serial"] = _h(_get(
+            ("bios", "get", "SerialNumber"),
+            "(Get-CimInstance Win32_BIOS).SerialNumber",
+        ))
+        fps["fp_baseboard_serial"] = _h(_get(
+            ("baseboard", "get", "SerialNumber"),
+            "(Get-CimInstance Win32_BaseBoard).SerialNumber",
+        ))
+        fps["fp_disk_serial"] = _h(_get(
+            ("diskdrive", "where", "index=0", "get", "SerialNumber"),
+            "(Get-CimInstance Win32_DiskDrive | Where-Object Index -eq 0).SerialNumber",
+        ))
+        fps["fp_system_uuid"] = _h(_get(
+            ("csproduct", "get", "UUID"),
+            "(Get-CimInstance Win32_ComputerSystemProduct).UUID",
+        ))
+
+        # MAC address via uuid.getnode().  Docs guarantee a *random* 48-bit
+        # value with the multicast bit (LSB of the first octet) set when no
+        # real NIC is found — that random value differs each install and
+        # would actively pollute the fuzzy matcher, so we drop it.
+        try:
+            import uuid as _uuid
+            mac = _uuid.getnode()
+            is_random = ((mac >> 40) & 0x01) == 0x01
+            if not is_random:
+                fps["fp_mac_address"] = _h(f"{mac:012x}")
+        except Exception:
+            pass
 
     _fp_cache = fps
     return fps
@@ -291,6 +346,14 @@ class LicenseService:
         # Verify device binding: token must have been issued for this device
         if claims.get("did") != self.get_device_id():
             logger.warning("license_token device_id mismatch — ignoring stored token")
+            return None
+        # Verify the token's license_key (sub) matches the stored license_key.
+        # Blocks an attacker who pastes a token from a different (still-valid)
+        # license that they own onto a machine whose license has been revoked.
+        local_key = self._data.get("license_key")
+        token_sub = claims.get("sub")
+        if local_key and token_sub and local_key.strip().upper() != str(token_sub).strip().upper():
+            logger.warning("license_token license_key mismatch — ignoring stored token")
             return None
         return claims
 
@@ -407,7 +470,14 @@ class LicenseService:
             return True
         try:
             last_dt = datetime.fromisoformat(last)
-            return (datetime.utcnow() - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
+            now = datetime.utcnow()
+            # Clock-rollback defense: if the stored last_verified is in the
+            # future relative to the current clock, the local clock has been
+            # moved backwards.  Force a fresh verify; the server-side timestamp
+            # check will reject if the gap is too large.
+            if last_dt > now:
+                return True
+            return (now - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
         except (ValueError, TypeError):
             return True
 
