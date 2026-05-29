@@ -122,6 +122,13 @@ async def lifespan(app: FastAPI):
         else:
             settings.CLIENT_API_KEY = ""
             logger.info("Client API key not set — client auth disabled")
+        # Load admin-configured coin GPIO settings from DB into live settings
+        _apply_coin_config(srv_cfg)
+        logger.info(
+            "Coin slot config: COIN_PIN=%s RELAY_PIN=%s EDGE=%s DEBOUNCE=%sms TIMEOUT=%ss",
+            settings.COIN_PIN, settings.RELAY_PIN, settings.COIN_EDGE,
+            settings.COIN_DEBOUNCE_MS, settings.COIN_PULSE_TIMEOUT,
+        )
     finally:
         db.close()
 
@@ -233,6 +240,28 @@ def _migrate_schema():
             cursor.execute(f"ALTER TABLE membership_config ADD COLUMN {col_name} {col_type} DEFAULT 0")
             migrated.append(f"membership_config.{col_name} (added)")
 
+    # Add coin-slot GPIO config columns to server_config if missing
+    # (only applies to installs that already have a server_config table — fresh
+    # installs get the columns from Base.metadata.create_all instead).
+    def table_exists(table: str) -> bool:
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        )
+        return cursor.fetchone() is not None
+
+    if table_exists("server_config"):
+        new_server_columns = [
+            ("coin_pin", "INTEGER"),
+            ("relay_pin", "INTEGER"),
+            ("coin_edge", "VARCHAR(10)"),
+            ("coin_debounce_ms", "INTEGER"),
+            ("coin_pulse_timeout", "VARCHAR(16)"),
+        ]
+        for col_name, col_type in new_server_columns:
+            if not has_column("server_config", col_name):
+                cursor.execute(f"ALTER TABLE server_config ADD COLUMN {col_name} {col_type}")
+                migrated.append(f"server_config.{col_name} (added)")
+
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
         cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")
@@ -300,10 +329,70 @@ def _seed_defaults(db):
         logger.info("Created default membership config")
 
     if not db.query(ServerConfig).first():
-        db.add(ServerConfig(id=1, client_api_key=""))
+        db.add(ServerConfig(
+            id=1,
+            client_api_key="",
+            coin_pin=settings.COIN_PIN,
+            relay_pin=settings.RELAY_PIN,
+            coin_edge=settings.COIN_EDGE,
+            coin_debounce_ms=settings.COIN_DEBOUNCE_MS,
+            coin_pulse_timeout=str(settings.COIN_PULSE_TIMEOUT),
+        ))
         logger.info("Created default server config (client auth disabled)")
 
     db.commit()
+
+
+def _apply_coin_config(srv_cfg) -> None:
+    """Copy admin-editable coin GPIO settings from a ServerConfig row into the
+    live `settings` object so the CoinSlot picks them up. NULL columns leave the
+    .env / config.py default in place. Safe to call repeatedly."""
+    if srv_cfg is None:
+        return
+    if srv_cfg.coin_pin is not None:
+        settings.COIN_PIN = srv_cfg.coin_pin
+    if srv_cfg.relay_pin is not None:
+        settings.RELAY_PIN = srv_cfg.relay_pin
+    if srv_cfg.coin_edge:
+        settings.COIN_EDGE = srv_cfg.coin_edge
+    if srv_cfg.coin_debounce_ms is not None:
+        settings.COIN_DEBOUNCE_MS = srv_cfg.coin_debounce_ms
+    if srv_cfg.coin_pulse_timeout:
+        try:
+            settings.COIN_PULSE_TIMEOUT = float(srv_cfg.coin_pulse_timeout)
+        except (TypeError, ValueError):
+            pass
+
+
+def rebuild_hardware_controller() -> bool:
+    """Tear down and recreate the coin-slot hardware controller so that changed
+    GPIO pin settings take effect without a full server restart.
+
+    Returns True if a controller is running afterwards, False if hardware is
+    unavailable (e.g. running off-Pi in dev). Callers should _apply_coin_config
+    (or update `settings`) BEFORE calling this so the new CoinSlot reads the
+    updated pins.
+    """
+    global hw_controller
+    old = hw_controller
+    hw_controller = None
+    if old is not None:
+        try:
+            old.cleanup()
+        except Exception as e:
+            logger.warning("Error cleaning up old hardware controller: %s", e)
+
+    try:
+        from hardware.controller import HardwareController
+        db = SessionLocal()
+        svc = SessionService(db)
+        hw_controller = HardwareController(svc)
+        logger.info("Hardware controller rebuilt with new coin settings")
+        return True
+    except Exception as e:
+        logger.warning("Hardware controller not started after rebuild: %s", e)
+        hw_controller = None
+        return False
 
 
 def _init_wallpapers():

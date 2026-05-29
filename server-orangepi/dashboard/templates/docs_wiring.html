@@ -35,7 +35,6 @@
 .role          { display: inline-block; font-size: .72rem; font-weight: 600; padding: .15rem .45rem; border-radius: 3px; font-family: monospace; letter-spacing: .04em; }
 .role-out      { background: rgba(245,158,11,.18); color: #f59e0b; }
 .role-in       { background: rgba(79,142,247,.18); color: #4f8ef7; }
-.role-i2c      { background: rgba(167,139,250,.18); color: #a78bfa; }
 .role-pwr      { background: rgba(34,197,94,.18); color: #22c55e; }
 .role-gnd      { background: rgba(239,68,68,.18); color: #ef4444; }
 
@@ -71,19 +70,25 @@
 <div class="page-header">
   <h1>🔌 Hardware Wiring Guide</h1>
   <div class="header-stats">
-    <span class="stat-pill">4 Components</span>
+    <span class="stat-pill">2 Components</span>
     <span class="stat-pill online">BCM GPIO Numbering</span>
-    <span class="stat-pill">Raspberry Pi</span>
+    <span class="stat-pill">Orange Pi</span>
   </div>
+</div>
+
+<div class="w-note">
+  This build uses the <strong>coin slot only</strong> — the keypad and LCD have
+  been removed. Coin acceptance is triggered from each PC's <strong>Insert
+  Coin</strong> button on the client lock screen. The GPIO pins below can be
+  changed any time from <strong>Settings → Coin Slot Hardware</strong> without
+  editing files.
 </div>
 
 <!-- Tabs -->
 <div class="w-tabs">
   <button class="w-tab active" onclick="showTab('overview')">📋 Overview</button>
-  <button class="w-tab" onclick="showTab('keypad')">⌨️ Keypad</button>
   <button class="w-tab" onclick="showTab('coinslot')">🪙 Coin Slot</button>
   <button class="w-tab" onclick="showTab('relay')">⚡ Relay</button>
-  <button class="w-tab" onclick="showTab('lcd')">🖵 LCD Display</button>
   <button class="w-tab" onclick="showTab('troubleshoot')">🔧 Troubleshoot</button>
 </div>
 
@@ -95,59 +100,35 @@
   <div class="w-grid">
     <div class="w-card">
       <h4>Components Used</h4>
-      <p><strong>4×3 Matrix Keypad</strong> — PC number entry</p>
       <p><strong>UCB Mini v4 Coin Acceptor</strong> — detects ₱1, ₱5, ₱10</p>
       <p><strong>Relay Module</strong> — cuts coin acceptor power when idle</p>
-      <p><strong>I2C LCD 20×4</strong> — display feedback to user (PCF8574)</p>
     </div>
     <div class="w-card">
       <h4>GPIO Numbering</h4>
       <p>All GPIO numbers in this guide use <strong>OPi.GPIO BCM mode</strong> (Allwinner SoC port numbering: PA0=0, PB0=32, PC0=64, etc.).</p>
       <p>To list available pins, run: <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px;font-size:.8rem">gpio readall</code> on your Orange Pi terminal.</p>
-      <p>I2C must be <strong>enabled</strong> via <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px;font-size:.8rem">sudo orangepi-config</code> or by adding the I2C overlay to <code>/boot/armbianEnv.txt</code>.</p>
+      <p>The coin and relay pins are editable from <strong>Settings → Coin Slot Hardware</strong>.</p>
     </div>
   </div>
 
-  <div class="w-label">Full GPIO Pin Summary</div>
+  <div class="w-label">Full GPIO Pin Summary (defaults — editable in Settings)</div>
   <div class="card" style="padding:0">
     <table class="pin-tbl">
       <tr><th>BCM GPIO</th><th>Physical Pin</th><th>Component</th><th>Role</th><th>Direction</th></tr>
-      <tr><td><span class="bcm">GPIO 2</span></td><td><span class="phys">Pin 3</span></td><td>LCD I2C</td><td>SDA (data)</td><td><span class="role role-i2c">I2C</span></td></tr>
-      <tr><td><span class="bcm">GPIO 3</span></td><td><span class="phys">Pin 5</span></td><td>LCD I2C</td><td>SCL (clock)</td><td><span class="role role-i2c">I2C</span></td></tr>
       <tr><td><span class="bcm">GPIO 4</span></td><td><span class="phys">Pin 7</span></td><td>Coin Slot SIG</td><td>Pulse input</td><td><span class="role role-in">INPUT</span></td></tr>
-      <tr><td><span class="bcm">GPIO 5</span></td><td><span class="phys">Pin 29</span></td><td>Keypad Row 4</td><td>Drive row HIGH</td><td><span class="role role-out">OUTPUT</span></td></tr>
       <tr><td><span class="bcm">GPIO 6</span></td><td><span class="phys">Pin 31</span></td><td>Relay</td><td>Relay control</td><td><span class="role role-out">OUTPUT</span></td></tr>
-      <tr><td><span class="bcm">GPIO 9</span></td><td><span class="phys">Pin 21</span></td><td>Keypad Col 1</td><td>Read column</td><td><span class="role role-in">INPUT</span></td></tr>
-      <tr><td><span class="bcm">GPIO 10</span></td><td><span class="phys">Pin 19</span></td><td>Keypad Col 3</td><td>Read column</td><td><span class="role role-in">INPUT</span></td></tr>
-      <tr><td><span class="bcm">GPIO 11</span></td><td><span class="phys">Pin 23</span></td><td>Keypad Col 2</td><td>Read column</td><td><span class="role role-in">INPUT</span></td></tr>
-      <tr><td><span class="bcm">GPIO 17</span></td><td><span class="phys">Pin 11</span></td><td>Keypad Row 1</td><td>Drive row HIGH</td><td><span class="role role-out">OUTPUT</span></td></tr>
-      <tr><td><span class="bcm">GPIO 22</span></td><td><span class="phys">Pin 15</span></td><td>Keypad Row 3</td><td>Drive row HIGH</td><td><span class="role role-out">OUTPUT</span></td></tr>
-      <tr><td><span class="bcm">GPIO 27</span></td><td><span class="phys">Pin 13</span></td><td>Keypad Row 2</td><td>Drive row HIGH</td><td><span class="role role-out">OUTPUT</span></td></tr>
     </table>
   </div>
 
   <div class="w-label">Complete System Wiring Diagram</div>
   <div class="ascii">                    ┌───────────────────────────────────────┐
-                    │           Raspberry Pi                │
+                    │             Orange Pi                 │
                     │                                       │
    5V ─────────────►│ Pin 2   ──────────────► Relay VCC    │
-   GND ────────────►│ Pin 6   ──────────────► Relay GND    │
+   GND ────────────►│ Pin 14  ──────────────► Relay GND    │
                     │ GPIO 6  (Pin 31) ─────► Relay IN     │
                     │                                       │
                     │ GPIO 4  (Pin  7) ◄──── Coin SIG*     │  * via voltage divider
-                    │                                       │
-                    │ GPIO 17 (Pin 11) ─────► KP Row 1     │
-                    │ GPIO 27 (Pin 13) ─────► KP Row 2     │
-                    │ GPIO 22 (Pin 15) ─────► KP Row 3     │
-                    │ GPIO  5 (Pin 29) ─────► KP Row 4     │
-                    │ GPIO  9 (Pin 21) ◄──── KP Col 1      │
-                    │ GPIO 11 (Pin 23) ◄──── KP Col 2      │
-                    │ GPIO 10 (Pin 19) ◄──── KP Col 3      │
-                    │                                       │
-                    │ GPIO 2  (Pin  3) ─────► LCD SDA      │
-                    │ GPIO 3  (Pin  5) ─────► LCD SCL      │
-                    │ 5V      (Pin  4) ─────► LCD VCC      │
-                    │ GND     (Pin  6) ─────► LCD GND      │
                     └───────────────────────────────────────┘
 
    Relay:                              UCB Mini v4:
@@ -162,110 +143,6 @@
                                                2kΩ
                                                 │
                                                GND</div>
-</div>
-
-<!-- ══════════════════════════════════════════════════════════════════
-     TAB: KEYPAD
-═══════════════════════════════════════════════════════════════════ -->
-<div class="w-pane" id="tab-keypad">
-
-  <div class="w-grid">
-    <div class="w-card">
-      <h4>Component</h4>
-      <p><strong>Type:</strong> 4 rows × 3 columns membrane matrix keypad (12 keys)</p>
-      <p><strong>Keys:</strong> 1–9, *, 0, #</p>
-      <p><strong>Special:</strong> <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">#</code> = Confirm &nbsp;|&nbsp; <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">*</code> = Cancel</p>
-      <p><strong>Scan interval:</strong> 50 ms (configurable via <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">KEYPAD_SCAN_INTERVAL</code>)</p>
-    </div>
-    <div class="w-card">
-      <h4>Key Layout</h4>
-      <div class="ascii" style="font-size:.9rem;padding:.6rem 1rem">┌───┬───┬───┐
-│ 1 │ 2 │ 3 │  ← Row 1  GPIO 17
-├───┼───┼───┤
-│ 4 │ 5 │ 6 │  ← Row 2  GPIO 27
-├───┼───┼───┤
-│ 7 │ 8 │ 9 │  ← Row 3  GPIO 22
-├───┼───┼───┤
-│ * │ 0 │ # │  ← Row 4  GPIO 5
-└───┴───┴───┘
-  ↑   ↑   ↑
-G9  G11  G10
-C1   C2   C3</div>
-    </div>
-  </div>
-
-  <div class="w-label">GPIO Connection Table</div>
-  <div class="card" style="padding:0">
-    <table class="pin-tbl">
-      <tr><th>Keypad Wire</th><th>BCM GPIO</th><th>Physical Pin</th><th>Direction</th><th>Pull</th></tr>
-      <tr><td>Row 1 (1 2 3)</td><td><span class="bcm">GPIO 17</span></td><td><span class="phys">Pin 11</span></td><td><span class="role role-out">OUTPUT</span></td><td>—</td></tr>
-      <tr><td>Row 2 (4 5 6)</td><td><span class="bcm">GPIO 27</span></td><td><span class="phys">Pin 13</span></td><td><span class="role role-out">OUTPUT</span></td><td>—</td></tr>
-      <tr><td>Row 3 (7 8 9)</td><td><span class="bcm">GPIO 22</span></td><td><span class="phys">Pin 15</span></td><td><span class="role role-out">OUTPUT</span></td><td>—</td></tr>
-      <tr><td>Row 4 (* 0 #)</td><td><span class="bcm">GPIO 5</span></td><td><span class="phys">Pin 29</span></td><td><span class="role role-out">OUTPUT</span></td><td>—</td></tr>
-      <tr><td>Col 1 (1 4 7 *)</td><td><span class="bcm">GPIO 9</span></td><td><span class="phys">Pin 21</span></td><td><span class="role role-in">INPUT</span></td><td>PULL-DOWN</td></tr>
-      <tr><td>Col 2 (2 5 8 0)</td><td><span class="bcm">GPIO 11</span></td><td><span class="phys">Pin 23</span></td><td><span class="role role-in">INPUT</span></td><td>PULL-DOWN</td></tr>
-      <tr><td>Col 3 (3 6 9 #)</td><td><span class="bcm">GPIO 10</span></td><td><span class="phys">Pin 19</span></td><td><span class="role role-in">INPUT</span></td><td>PULL-DOWN</td></tr>
-    </table>
-  </div>
-
-  <div class="w-label">Physical Flat-Cable Connector Order (pins 1–7, left to right)</div>
-  <div class="card" style="padding:0">
-    <table class="pin-tbl">
-      <tr><th>Connector Pin</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th></tr>
-      <tr>
-        <td>Keypad Signal</td>
-        <td>Col 2</td><td>Row 1</td><td>Col 1</td><td>Col 3</td><td>Row 4</td><td>Row 3</td><td>Row 2</td>
-      </tr>
-      <tr>
-        <td>RPi GPIO</td>
-        <td><span class="bcm">GPIO 11</span></td>
-        <td><span class="bcm">GPIO 17</span></td>
-        <td><span class="bcm">GPIO 9</span></td>
-        <td><span class="bcm">GPIO 10</span></td>
-        <td><span class="bcm">GPIO 5</span></td>
-        <td><span class="bcm">GPIO 22</span></td>
-        <td><span class="bcm">GPIO 27</span></td>
-      </tr>
-      <tr>
-        <td>Physical Pin</td>
-        <td><span class="phys">Pin 23</span></td>
-        <td><span class="phys">Pin 11</span></td>
-        <td><span class="phys">Pin 21</span></td>
-        <td><span class="phys">Pin 19</span></td>
-        <td><span class="phys">Pin 29</span></td>
-        <td><span class="phys">Pin 15</span></td>
-        <td><span class="phys">Pin 13</span></td>
-      </tr>
-    </table>
-  </div>
-
-  <div class="w-note">⚠️ The connector pin order does <strong>not</strong> match the GPIO config array order. GPIO config is ordered logically (R1→R4, C1→C3) to match the key map — not the physical connector sequence.</div>
-
-  <div class="w-label">How the Scan Works</div>
-  <div class="w-card" style="margin-bottom:1rem">
-    <p>Rows are driven <strong>HIGH one at a time</strong>. Columns are read as inputs with internal pull-down resistors. A key press shorts its row wire to its column wire — the column reads HIGH while that row is active.</p>
-  </div>
-  <div class="ascii">Example: User presses key "5" (Row 2, Col 2)
-
-1. Drive GPIO 27 (R2) → HIGH
-2. Read GPIO  9 (C1) → LOW   (no connection)
-3. Read GPIO 11 (C2) → HIGH  ← key pressed!  KEY_MAP[1][1] = '5'
-4. Drive GPIO 27 (R2) → LOW
-5. Continue to next row…</div>
-
-  <div class="w-label">Wiring Diagram</div>
-  <div class="ascii"> Raspberry Pi                  4×3 Keypad
- ┌──────────┐                 ┌──────────┐
- │ GPIO 17  ├────────────────►│ Row 1    │
- │ GPIO 27  ├────────────────►│ Row 2    │
- │ GPIO 22  ├────────────────►│ Row 3    │
- │ GPIO  5  ├────────────────►│ Row 4    │
- │          │                 │          │
- │ GPIO  9  │◄────────────────┤ Col 1    │
- │ GPIO 11  │◄────────────────┤ Col 2    │
- │ GPIO 10  │◄────────────────┤ Col 3    │
- └──────────┘                 └──────────┘
- (Cols use internal pull-down — no external resistors needed)</div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════
@@ -290,10 +167,10 @@ C1   C2   C3</div>
     </div>
   </div>
 
-  <div class="w-warn">⚠️ <strong>CRITICAL:</strong> The UCB Mini v4 outputs a 5V signal. The Raspberry Pi GPIO is <strong>3.3V tolerant only</strong>. You MUST use a voltage divider before connecting to GPIO — direct connection will permanently damage the GPIO pin.</div>
+  <div class="w-warn">⚠️ <strong>CRITICAL:</strong> The UCB Mini v4 outputs a 5V signal. The Orange Pi GPIO is <strong>3.3V tolerant only</strong>. You MUST use a voltage divider before connecting to GPIO — direct connection will permanently damage the GPIO pin.</div>
 
   <div class="w-label">Voltage Divider Circuit (5V → 3.3V)</div>
-  <div class="ascii">  UCB Mini v4                              Raspberry Pi
+  <div class="ascii">  UCB Mini v4                              Orange Pi
   SIG (5V) ──────── 1kΩ ──────┬──────── GPIO 4 (Pin 7)
                                │
                               2kΩ            Vout = 5 × 2/(1+2) = 3.33V ✓
@@ -325,13 +202,13 @@ C1   C2   C3</div>
       <h4>FALLING (default)</h4>
       <p>Signal rests <strong>HIGH</strong>, goes LOW on each coin pulse.</p>
       <p>Typical for boards with an optocoupler that inverts the signal.</p>
-      <p>Set in <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">.env</code>: <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">COIN_EDGE=FALLING</code></p>
+      <p>Set in <strong>Settings → Coin Slot Hardware</strong>: Signal Edge = FALLING.</p>
     </div>
     <div class="w-card">
       <h4>RISING</h4>
       <p>Signal rests <strong>LOW</strong>, goes HIGH on each coin pulse.</p>
       <p>Typical for direct/buffer connections without signal inversion.</p>
-      <p>Set in <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">.env</code>: <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">COIN_EDGE=RISING</code></p>
+      <p>Set in <strong>Settings → Coin Slot Hardware</strong>: Signal Edge = RISING.</p>
     </div>
   </div>
   <div class="w-tip">Run <code>sudo venv/bin/python test_coin_signal.py</code> to auto-detect which polarity your board uses before configuring.</div>
@@ -367,20 +244,20 @@ C1   C2   C3</div>
   <div class="w-grid">
     <div class="w-card">
       <h4>Purpose</h4>
-      <p>The relay <strong>cuts power to the coin acceptor</strong> when no PC is selected. This prevents coins from registering when no session is pending, and stops the coin acceptor drawing 12V power unnecessarily.</p>
+      <p>The relay <strong>cuts power to the coin acceptor</strong> when no PC is accepting coins. This prevents coins from registering when no session is pending, and stops the coin acceptor drawing 12V power unnecessarily.</p>
     </div>
     <div class="w-card">
       <h4>Behavior</h4>
       <p><strong>GPIO 6 HIGH →</strong> Relay ON → Coin acceptor powered → accepts coins</p>
       <p><strong>GPIO 6 LOW &nbsp;→</strong> Relay OFF → Coin acceptor unpowered → rejects coins</p>
-      <p>Relay activates only in <strong>AWAITING_COINS</strong> state, deactivates on all other transitions.</p>
+      <p>Relay activates only while the slot is <strong>accepting coins</strong> for a PC, and deactivates on idle timeout.</p>
     </div>
   </div>
 
   <div class="w-label">GPIO Connection</div>
   <div class="card" style="padding:0">
     <table class="pin-tbl">
-      <tr><th>Relay Pin</th><th>BCM GPIO / RPi Pin</th><th>Direction</th><th>Notes</th></tr>
+      <tr><th>Relay Pin</th><th>BCM GPIO / OPi Pin</th><th>Direction</th><th>Notes</th></tr>
       <tr><td>IN (control)</td><td><span class="bcm">GPIO 6</span> / <span class="phys">Pin 31</span></td><td><span class="role role-out">OUTPUT</span></td><td>HIGH = relay ON</td></tr>
       <tr><td>VCC</td><td><span class="phys">Pin 2 (5V)</span></td><td><span class="role role-pwr">POWER</span></td><td>5V supply from Pi</td></tr>
       <tr><td>GND</td><td><span class="phys">Pin 14 (GND)</span></td><td><span class="role role-gnd">GND</span></td><td>Common ground</td></tr>
@@ -400,16 +277,15 @@ C1   C2   C3</div>
   <div class="w-label">State Logic</div>
   <div class="card" style="padding:0">
     <table class="pin-tbl">
-      <tr><th>Hardware State</th><th>GPIO 6</th><th>Relay</th><th>Coin Acceptor</th></tr>
+      <tr><th>Controller State</th><th>GPIO 6</th><th>Relay</th><th>Coin Acceptor</th></tr>
       <tr><td>IDLE</td><td>LOW</td><td>OFF (open)</td><td>No power — coins rejected</td></tr>
-      <tr><td>PC_SELECTION</td><td>LOW</td><td>OFF (open)</td><td>No power — coins rejected</td></tr>
-      <tr><td>AWAITING_COINS</td><td>HIGH</td><td>ON (closed)</td><td>Powered — coins accepted</td></tr>
-      <tr><td>PROCESSING</td><td>HIGH → LOW</td><td>ON → OFF</td><td>Disabled after coin registered</td></tr>
+      <tr><td>ACCEPTING (client pressed Insert Coin)</td><td>HIGH</td><td>ON (closed)</td><td>Powered — coins accepted</td></tr>
+      <tr><td>Idle timeout reached</td><td>HIGH → LOW</td><td>ON → OFF</td><td>Power cut — back to IDLE</td></tr>
     </table>
   </div>
 
   <div class="w-label">Wiring Diagram</div>
-  <div class="ascii"> Raspberry Pi                Relay Module               External Load
+  <div class="ascii"> Orange Pi                   Relay Module               External Load
  ┌──────────┐               ┌──────────┐
  │ Pin 2    ├──── 5V ──────►│ VCC      │
  │ Pin 14   ├──── GND ─────►│ GND      │
@@ -422,142 +298,18 @@ C1   C2   C3</div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════
-     TAB: LCD
-═══════════════════════════════════════════════════════════════════ -->
-<div class="w-pane" id="tab-lcd">
-
-  <div class="w-grid">
-    <div class="w-card">
-      <h4>Component</h4>
-      <p><strong>Type:</strong> 20×4 character LCD with I2C backpack (PCF8574)</p>
-      <p><strong>Default I2C address:</strong> <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">0x27</code></p>
-      <p><strong>Alternate address:</strong> <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">0x3F</code> (some boards)</p>
-      <p><strong>Library:</strong> RPLCD (<code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">pip install RPLCD</code>)</p>
-    </div>
-    <div class="w-card">
-      <h4>I2C Setup (required)</h4>
-      <p>I2C must be enabled on the Orange Pi:</p>
-      <p><code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px;display:block;margin-bottom:.4rem">sudo orangepi-config</code>
-      System → Hardware → enable i2c-0 (or i2c-1) → Reboot</p>
-      <p>Or on Armbian, add <code>overlays=i2c0</code> to <code>/boot/armbianEnv.txt</code> and reboot.</p>
-      <p>Detect the LCD address:</p>
-      <p><code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">sudo i2cdetect -y 0</code> or <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">sudo i2cdetect -y 1</code></p>
-    </div>
-  </div>
-
-  <div class="w-label">GPIO / I2C Connection</div>
-  <div class="card" style="padding:0">
-    <table class="pin-tbl">
-      <tr><th>LCD Backpack Pin</th><th>BCM GPIO</th><th>RPi Physical Pin</th><th>Signal</th></tr>
-      <tr><td>VCC</td><td>—</td><td><span class="phys">Pin 2 or Pin 4 (5V)</span></td><td><span class="role role-pwr">POWER</span></td></tr>
-      <tr><td>GND</td><td>—</td><td><span class="phys">Pin 6, 9, 14, 20… (GND)</span></td><td><span class="role role-gnd">GND</span></td></tr>
-      <tr><td>SDA</td><td><span class="bcm">GPIO 2</span></td><td><span class="phys">Pin 3</span></td><td><span class="role role-i2c">I2C DATA</span></td></tr>
-      <tr><td>SCL</td><td><span class="bcm">GPIO 3</span></td><td><span class="phys">Pin 5</span></td><td><span class="role role-i2c">I2C CLOCK</span></td></tr>
-    </table>
-  </div>
-
-  <div class="w-label">Wiring Diagram</div>
-  <div class="ascii"> Raspberry Pi                I2C LCD (PCF8574 backpack)
- ┌──────────┐               ┌──────────────┐
- │ Pin 2    ├──── 5V ──────►│ VCC          │
- │ Pin 6    ├──── GND ─────►│ GND          │
- │ Pin 3    ├──── SDA ─────►│ SDA          │  (GPIO 2)
- │ Pin 5    ├──── SCL ─────►│ SCL          │  (GPIO 3)
- └──────────┘               └──────────────┘</div>
-
-  <div class="w-label">Screen Reference</div>
-  <div class="card" style="padding:0;overflow:auto">
-    <table class="pin-tbl">
-      <tr><th>Screen</th><th>Line 1</th><th>Line 2</th><th>Line 3</th><th>Line 4</th></tr>
-      <tr><td><code>idle()</code></td><td>Pisonex v1.0</td><td>Enter PC number</td><td>then press #</td><td>—</td></tr>
-      <tr><td><code>pc_entry(n)</code></td><td>Pisonex v1.0</td><td>PC Number: [n_]</td><td># confirm * cancel</td><td>—</td></tr>
-      <tr><td><code>pc_selected(n)</code></td><td>PC XX selected</td><td>Insert coins</td><td>* to cancel</td><td>—</td></tr>
-      <tr><td><code>inserting_coins()</code></td><td>PC XX selected</td><td>Inserted: ₱N</td><td>Time: N min</td><td>—</td></tr>
-      <tr><td><code>coin_inserted()</code></td><td>₱N added!</td><td>+N min</td><td>Total: N min</td><td>—</td></tr>
-      <tr><td><code>error(msg)</code></td><td>ERROR</td><td>&lt;message&gt;</td><td>—</td><td>—</td></tr>
-      <tr><td><code>offline(n)</code></td><td>PC XX</td><td>is offline</td><td>—</td><td>—</td></tr>
-      <tr><td><code>timeout()</code></td><td>Timed out</td><td>Returning…</td><td>—</td><td>—</td></tr>
-    </table>
-  </div>
-
-  <div class="w-label">Configuration (.env)</div>
-  <div class="w-grid">
-    <div class="w-card">
-      <h4>I2C Address</h4>
-      <p>If the display doesn't work, check its actual address with <code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">sudo i2cdetect -y 1</code> and update:</p>
-      <p><code style="background:rgba(79,142,247,.1);color:var(--accent);padding:.1rem .3rem;border-radius:3px">LCD_I2C_ADDRESS=0x3F</code></p>
-    </div>
-    <div class="w-card">
-      <h4>Contrast Adjustment</h4>
-      <p>If characters are visible but dim or completely blank, adjust the <strong>small blue potentiometer</strong> on the I2C backpack board with a small screwdriver.</p>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════════════════════════════
      TAB: TROUBLESHOOT
 ═══════════════════════════════════════════════════════════════════ -->
 <div class="w-pane" id="tab-troubleshoot">
 
-  <div class="w-label" style="margin-top:0">Diagnostic Test Scripts</div>
+  <div class="w-label" style="margin-top:0">Diagnostic Test Script</div>
   <div class="w-grid">
-    <div class="w-card">
-      <h4>Test Keypad</h4>
-      <p>Run on the Pi — press every key to verify all 12 register correctly. Shows which GPIO pins are involved per key press and diagnoses wiring faults by group.</p>
-      <div class="ascii" style="font-size:.78rem;padding:.6rem .85rem;margin-top:.5rem">sudo systemctl stop pisonet
-cd /home/shogunlee3214/Documents/pisonex/server
-sudo venv/bin/python test_keypad.py</div>
-    </div>
     <div class="w-card">
       <h4>Test Coin Slot</h4>
       <p>Insert coins while running — shows every pulse transition with timestamp and auto-detects whether <code>COIN_EDGE</code> should be RISING or FALLING.</p>
       <div class="ascii" style="font-size:.78rem;padding:.6rem .85rem;margin-top:.5rem">sudo systemctl stop pisonet
 cd /home/shogunlee3214/Documents/pisonex/server
 sudo venv/bin/python test_coin_signal.py</div>
-    </div>
-  </div>
-
-  <div class="w-label">Keypad Issues</div>
-  <div class="trouble-card open" id="tr-keypad">
-    <div class="trouble-hd" onclick="toggleTrouble(this)">
-      <span>⌨️</span>
-      <h4>Keypad Troubleshooting</h4>
-      <span class="ep-chevron" style="color:var(--text-dim);font-size:.75rem">▶</span>
-    </div>
-    <div class="trouble-body">
-      <table class="trouble-tbl">
-        <tr><th>Symptom</th><th>Likely Cause</th><th>Fix</th></tr>
-        <tr>
-          <td class="symptom">Entire row dead (e.g. 1,2,3 all fail)</td>
-          <td class="cause">Row wire disconnected or wrong GPIO</td>
-          <td class="fix">Re-check the row GPIO connection for that row. Run <code>test_keypad.py</code>.</td>
-        </tr>
-        <tr>
-          <td class="symptom">Entire column dead (e.g. 3,6,9,# all fail)</td>
-          <td class="cause">Col wire disconnected or wrong GPIO</td>
-          <td class="fix">Re-check the column GPIO connection. Update <code>KEYPAD_COLS</code> in <code>.env</code> if needed.</td>
-        </tr>
-        <tr>
-          <td class="symptom">Wrong key registered when a key is pressed</td>
-          <td class="cause">Row or column wires in wrong order</td>
-          <td class="fix">Run <code>test_keypad.py</code>, compare actual vs expected output, swap GPIO pins in config.</td>
-        </tr>
-        <tr>
-          <td class="symptom">Two separate columns/rows both fail (e.g. 3,6,9 and *,0 fail but # works)</td>
-          <td class="cause">Two wires swapped (e.g. R4 ↔ C3 connector pins)</td>
-          <td class="fix">Swap <code>KEYPAD_ROWS[3]</code> and <code>KEYPAD_COLS[2]</code> in <code>config.py</code> or <code>.env</code>.</td>
-        </tr>
-        <tr>
-          <td class="symptom">No keys detected at all</td>
-          <td class="cause">OPi.GPIO not installed or I2C/SPI conflict</td>
-          <td class="fix">Run <code>pip install OPi.GPIO</code>. Check server logs for GPIO errors.</td>
-        </tr>
-        <tr>
-          <td class="symptom">Key registers multiple times per press</td>
-          <td class="cause">Scan interval too fast or no debounce</td>
-          <td class="fix">Increase <code>KEYPAD_SCAN_INTERVAL</code> in <code>.env</code> (default 0.05s).</td>
-        </tr>
-      </table>
     </div>
   </div>
 
@@ -574,17 +326,17 @@ sudo venv/bin/python test_coin_signal.py</div>
         <tr>
           <td class="symptom">No coin detected at all</td>
           <td class="cause">Wrong signal polarity</td>
-          <td class="fix">Run <code>test_coin_signal.py</code>, set <code>COIN_EDGE=RISING</code> or <code>FALLING</code> accordingly in <code>.env</code>.</td>
+          <td class="fix">Run <code>test_coin_signal.py</code>, set Signal Edge to RISING or FALLING accordingly in <code>Settings → Coin Slot Hardware</code>.</td>
         </tr>
         <tr>
           <td class="symptom">Coin detected but wrong count (e.g. ₱5 shows as ₱1)</td>
           <td class="cause">Debounce too aggressive — swallowing pulses</td>
-          <td class="fix">Lower <code>COIN_DEBOUNCE_MS</code> (try 20ms) in <code>.env</code>.</td>
+          <td class="fix">Lower the Debounce value (try 20ms) in <code>Settings → Coin Slot Hardware</code>.</td>
         </tr>
         <tr>
           <td class="symptom">One coin counted multiple times</td>
           <td class="cause">Debounce too loose — counting noise</td>
-          <td class="fix">Raise <code>COIN_DEBOUNCE_MS</code> (try 40ms) in <code>.env</code>.</td>
+          <td class="fix">Raise the Debounce value (try 40ms) in <code>Settings → Coin Slot Hardware</code>.</td>
         </tr>
         <tr>
           <td class="symptom">GPIO overvoltage warning or pin damaged</td>
@@ -594,51 +346,17 @@ sudo venv/bin/python test_coin_signal.py</div>
         <tr>
           <td class="symptom">Coin accepted when no PC is selected</td>
           <td class="cause">Relay not cutting power</td>
-          <td class="fix">Check relay wiring and GPIO 6 signal with a multimeter.</td>
+          <td class="fix">Check relay wiring and the Relay Pin signal with a multimeter.</td>
         </tr>
         <tr>
           <td class="symptom">Coin acceptor never powers on</td>
           <td class="cause">Relay wired to NC instead of NO</td>
           <td class="fix">Move the 12V wire from NC contact to NO contact on the relay.</td>
         </tr>
-      </table>
-    </div>
-  </div>
-
-  <div class="w-label">LCD Issues</div>
-  <div class="trouble-card open" id="tr-lcd">
-    <div class="trouble-hd" onclick="toggleTrouble(this)">
-      <span>🖵</span>
-      <h4>LCD Troubleshooting</h4>
-      <span class="ep-chevron" style="color:var(--text-dim);font-size:.75rem">▶</span>
-    </div>
-    <div class="trouble-body">
-      <table class="trouble-tbl">
-        <tr><th>Symptom</th><th>Likely Cause</th><th>Fix</th></tr>
         <tr>
-          <td class="symptom">Nothing displayed at all</td>
-          <td class="cause">Wrong I2C address</td>
-          <td class="fix">Run <code>sudo i2cdetect -y 1</code>, update <code>LCD_I2C_ADDRESS</code> in <code>.env</code> (try <code>0x3F</code>).</td>
-        </tr>
-        <tr>
-          <td class="symptom">I2C device not found at any address</td>
-          <td class="cause">I2C disabled or wiring issue</td>
-          <td class="fix">Enable I2C via <code>sudo orangepi-config</code> or add <code>overlays=i2c0</code> to <code>/boot/armbianEnv.txt</code> and reboot. Check SDA/SCL wiring.</td>
-        </tr>
-        <tr>
-          <td class="symptom">Garbled or blocky characters</td>
-          <td class="cause">Contrast too low / too high</td>
-          <td class="fix">Adjust the small blue potentiometer on the I2C backpack.</td>
-        </tr>
-        <tr>
-          <td class="symptom">Backlight on but no characters</td>
-          <td class="cause">Contrast set to minimum</td>
-          <td class="fix">Turn the potentiometer clockwise slowly until characters appear.</td>
-        </tr>
-        <tr>
-          <td class="symptom">ImportError: No module named 'RPLCD'</td>
-          <td class="cause">Library not installed</td>
-          <td class="fix">Run <code>sudo venv/bin/pip install RPLCD</code>.</td>
+          <td class="symptom">Insert Coin button does nothing</td>
+          <td class="cause">No coin hardware detected, or coin slot disabled for that PC</td>
+          <td class="fix">Check the server logs for "Hardware controller started", verify the PC is online, and that the coin slot is enabled for it.</td>
         </tr>
       </table>
     </div>

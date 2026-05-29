@@ -198,6 +198,14 @@ class LicenseService:
         if claims.get("did") != self.get_device_id():
             logger.warning("license_token device_id mismatch — ignoring stored token")
             return None
+        # Verify the token's license_key (sub) matches the stored license_key.
+        # Blocks an attacker who pastes a token from a different (still-valid)
+        # license that they own onto a machine whose license has been revoked.
+        local_key = self._data.get("license_key")
+        token_sub = claims.get("sub")
+        if local_key and token_sub and local_key.strip().upper() != str(token_sub).strip().upper():
+            logger.warning("license_token license_key mismatch — ignoring stored token")
+            return None
         return claims
 
     # ── Activation ───────────────────────────────────────────────────
@@ -313,7 +321,13 @@ class LicenseService:
         last_dt = _parse_iso_utc_naive(self._data.get("last_verified"))
         if last_dt is None:
             return True
-        return (datetime.utcnow() - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
+        now = datetime.utcnow()
+        # Clock-rollback defense: a last_verified in the future means the clock
+        # was moved backwards — force a fresh verify (the server-side timestamp
+        # check rejects if the gap is too large).
+        if last_dt > now:
+            return True
+        return (now - last_dt) > timedelta(hours=VERIFY_INTERVAL_HOURS)
 
     # ── Status checks ────────────────────────────────────────────────
 

@@ -131,3 +131,14 @@ class ServerConfig(Base):
     # Empty string = client auth disabled (default). Non-empty = all PC clients
     # must send this value in the X-API-Key header.
     client_api_key = Column(String(128), nullable=False, default="")
+
+    # ── Coin slot GPIO configuration (admin-editable, hot-reloaded) ──────────
+    # These mirror the COIN_* values in config.py / .env so an admin can re-pin
+    # the coin acceptor and relay from the dashboard without editing files or
+    # SSHing into the Pi. On save the hardware controller is rebuilt so the new
+    # pins take effect immediately. NULL columns fall back to the .env defaults.
+    coin_pin           = Column(Integer, nullable=True)   # BCM pin reading coin pulses
+    relay_pin          = Column(Integer, nullable=True)   # BCM pin powering the acceptor
+    coin_edge          = Column(String(10), nullable=True)  # "RISING" | "FALLING"
+    coin_debounce_ms   = Column(Integer, nullable=True)   # software debounce window (ms)
+    coin_pulse_timeout = Column(String(16), nullable=True)  # seconds of silence to finalize (stored as text to allow decimals)
