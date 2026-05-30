@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -68,6 +69,15 @@ class Settings(BaseSettings):
     KEYPAD_SCAN_INTERVAL: float = 0.05
     PC_IDLE_TIMEOUT: int = 30       # seconds before returning to idle screen
     DISPLAY_CONFIRM_DELAY: int = 3  # seconds to show confirmation message
+
+    @field_validator("LCD_I2C_ADDRESS", mode="before")
+    @classmethod
+    def _parse_hex_int(cls, v):
+        # Allow hex strings like "0x27" from the .env file (the plain int
+        # parser only accepts decimal strings and rejects the 0x prefix).
+        if isinstance(v, str):
+            return int(v.strip(), 0)
+        return v
 
 
 settings = Settings()
