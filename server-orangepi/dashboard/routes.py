@@ -1219,12 +1219,25 @@ def settings_page(
     cfg = msvc.get_config()
     srv_cfg = db.query(ServerConfig).first()
     api_key = srv_cfg.client_api_key if srv_cfg else ""
+
+    # Coin slot GPIO config — prefer the DB value, fall back to live settings
+    def _cfg(attr, default):
+        val = getattr(srv_cfg, attr, None) if srv_cfg else None
+        return val if val not in (None, "") else default
+
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "config": cfg,
         "api_key_enabled": bool(api_key),
         "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
         "branch_name": settings.BRANCH_NAME,
+        "coin": {
+            "coin_pin": _cfg("coin_pin", settings.COIN_PIN),
+            "relay_pin": _cfg("relay_pin", settings.RELAY_PIN),
+            "coin_edge": _cfg("coin_edge", settings.COIN_EDGE),
+            "coin_debounce_ms": _cfg("coin_debounce_ms", settings.COIN_DEBOUNCE_MS),
+            "coin_pulse_timeout": _cfg("coin_pulse_timeout", settings.COIN_PULSE_TIMEOUT),
+        },
     })
 
 
@@ -1311,6 +1324,110 @@ def clear_api_key(
 
     settings.CLIENT_API_KEY = ""
     return {"status": "disabled"}
+
+
+class CoinConfigBody(BaseModel):
+    coin_pin: int
+    relay_pin: int
+    coin_edge: str
+    coin_debounce_ms: int
+    coin_pulse_timeout: float
+
+
+@router.post("/api/settings/coin-config")
+def save_coin_config(
+    body: CoinConfigBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Persist the coin-slot GPIO settings (DB + .env), apply them to the live
+    `settings`, and rebuild the hardware controller so the new pins take effect
+    immediately — no server restart required."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    # ── Validate ─────────────────────────────────────────────────────────────
+    # BCM/OPi pin numbers: Raspberry Pi exposes up to 27, but Orange Pi's
+    # Allwinner SoC numbering reaches into the low hundreds, so allow 0-255.
+    edge = body.coin_edge.strip().upper()
+    if edge not in ("RISING", "FALLING"):
+        raise HTTPException(status_code=400, detail="coin_edge must be RISING or FALLING")
+    if not (0 <= body.coin_pin <= 255):
+        raise HTTPException(status_code=400, detail="coin_pin out of range (0-255)")
+    if not (0 <= body.relay_pin <= 255):
+        raise HTTPException(status_code=400, detail="relay_pin out of range (0-255)")
+    if body.coin_pin == body.relay_pin:
+        raise HTTPException(status_code=400, detail="coin_pin and relay_pin must be different")
+    if not (0 <= body.coin_debounce_ms <= 1000):
+        raise HTTPException(status_code=400, detail="coin_debounce_ms out of range (0-1000)")
+    if not (0.1 <= body.coin_pulse_timeout <= 30.0):
+        raise HTTPException(status_code=400, detail="coin_pulse_timeout out of range (0.1-30)")
+
+    pulse_timeout = round(body.coin_pulse_timeout, 2)
+
+    # ── Persist to DB ──────────────────────────────────────────────────────────
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1, client_api_key="")
+        db.add(srv_cfg)
+    srv_cfg.coin_pin = body.coin_pin
+    srv_cfg.relay_pin = body.relay_pin
+    srv_cfg.coin_edge = edge
+    srv_cfg.coin_debounce_ms = body.coin_debounce_ms
+    srv_cfg.coin_pulse_timeout = str(pulse_timeout)
+    db.commit()
+
+    # ── Persist to .env (so it survives a DB reset / matches config.py defaults) ─
+    env_path = Path(__file__).parent.parent / ".env"
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    def _set_env(key: str, value: str):
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith(f"{key}="):
+                lines[i] = f"{key}={value}\n"
+                return
+        lines.append(f"{key}={value}\n")
+
+    _set_env("COIN_PIN", str(body.coin_pin))
+    _set_env("RELAY_PIN", str(body.relay_pin))
+    _set_env("COIN_EDGE", edge)
+    _set_env("COIN_DEBOUNCE_MS", str(body.coin_debounce_ms))
+    _set_env("COIN_PULSE_TIMEOUT", str(pulse_timeout))
+    env_path.write_text("".join(lines), encoding="utf-8")
+
+    # ── Apply to live settings + rebuild hardware ────────────────────────────────
+    settings.COIN_PIN = body.coin_pin
+    settings.RELAY_PIN = body.relay_pin
+    settings.COIN_EDGE = edge
+    settings.COIN_DEBOUNCE_MS = body.coin_debounce_ms
+    settings.COIN_PULSE_TIMEOUT = pulse_timeout
+
+    hardware_active = False
+    try:
+        import main
+        hardware_active = main.rebuild_hardware_controller()
+    except Exception as e:
+        # Settings are saved even if the rebuild fails (e.g. running off-Pi).
+        # The next restart will apply them. Surface the detail to the admin.
+        return {
+            "status": "saved",
+            "hardware_active": False,
+            "detail": f"Settings saved but hardware reload failed: {e}",
+        }
+
+    return {
+        "status": "ok",
+        "hardware_active": hardware_active,
+        "coin_pin": body.coin_pin,
+        "relay_pin": body.relay_pin,
+        "coin_edge": edge,
+        "coin_debounce_ms": body.coin_debounce_ms,
+        "coin_pulse_timeout": pulse_timeout,
+    }
 
 
 @router.get("/membership", response_class=HTMLResponse)

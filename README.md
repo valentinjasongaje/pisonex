@@ -1,6 +1,13 @@
 # PISONEX — Centralized Internet Café Management System
 
-A Raspberry Pi-based PisoNet system with coin slot, keypad, LCD, and VB.NET PC clients.
+A Raspberry Pi / Orange Pi-based PisoNet system with a coin slot and VB.NET PC clients.
+
+> **Note:** The keypad and LCD have been removed from the current hardware build —
+> the system runs **coin-slot only**. Coin acceptance is triggered from each PC's
+> **Insert Coin** button on the client lock screen. The `keypad.py` / `lcd.py`
+> drivers are kept in the repo (unused) so the keypad/LCD build can be re-enabled
+> later. The coin and relay GPIO pins are editable from **Settings → Coin Slot
+> Hardware** in the dashboard (no file edits or restart needed).
 
 ## Project Structure
 
@@ -19,9 +26,9 @@ pisonex/
 │   │   └── admin.py         Admin endpoints
 │   ├── hardware/            GPIO hardware drivers
 │   │   ├── coin_slot.py     Coin pulse detection
-│   │   ├── keypad.py        3x4 matrix keypad scanner
-│   │   ├── lcd.py           20x4 I2C LCD controller
-│   │   └── controller.py    Main state machine
+│   │   ├── keypad.py        3x4 matrix keypad scanner (kept, unused)
+│   │   ├── lcd.py           20x4 I2C LCD controller (kept, unused)
+│   │   └── controller.py    Coin-slot controller
 │   ├── services/
 │   │   ├── session_service.py  Session business logic
 │   │   └── rate_service.py     Coin-to-time conversion
@@ -54,13 +61,18 @@ bash deploy/install.sh
 journalctl -u pisonet -f
 ```
 
-### Configure GPIO pins in server/.env
+### Configure GPIO pins
+
+The coin and relay pins can be set from the dashboard at **Settings → Coin Slot
+Hardware** (applied immediately, no restart). They can also be set in `server/.env`
+as defaults:
 
 ```env
 COIN_PIN=4
-KEYPAD_ROWS=[17,27,22,10]
-KEYPAD_COLS=[9,11,5]
-LCD_I2C_ADDRESS=0x27
+RELAY_PIN=6
+COIN_EDGE=FALLING
+COIN_DEBOUNCE_MS=30
+COIN_PULSE_TIMEOUT=3.0
 ```
 
 ### Windows PC Client
@@ -94,17 +106,15 @@ Default credentials: `admin` / `admin123`
 ## Hardware Wiring
 
 ```
-COIN SLOT   → GPIO 4   (with 10kΩ pull-up to 3.3V)
-KEYPAD ROW0 → GPIO 17
-KEYPAD ROW1 → GPIO 27
-KEYPAD ROW2 → GPIO 22
-KEYPAD ROW3 → GPIO 10
-KEYPAD COL0 → GPIO 9
-KEYPAD COL1 → GPIO 11
-KEYPAD COL2 → GPIO 5
-LCD SDA     → GPIO 2  (I2C)
-LCD SCL     → GPIO 3  (I2C)
+COIN SLOT SIG → GPIO 4   (via 1kΩ + 2kΩ voltage divider: 5V → 3.3V)
+RELAY IN      → GPIO 6   (HIGH = coin acceptor powered)
+RELAY VCC     → 5V  (Pin 2)
+RELAY GND     → GND (Pin 14)
 ```
+
+The relay switches 12V to the UCB Mini v4 coin acceptor so it is only powered
+while a PC is accepting coins. See the in-dashboard **Hardware Wiring Guide**
+(Docs → Wiring) for full diagrams. Default pins are editable in Settings.
 
 ## Client Behavior When Server Is Unreachable
 

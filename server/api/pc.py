@@ -285,7 +285,7 @@ def request_coins(pc_number: int):
     if hw_controller is None:
         raise HTTPException(
             status_code=503,
-            detail="No coin slot hardware on this server. Use the keypad unit instead.",
+            detail="No coin slot hardware available on this server.",
         )
     ok, message = hw_controller.request_coins_for_pc(pc_number)
     if not ok:

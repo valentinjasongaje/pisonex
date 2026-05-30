@@ -77,6 +77,67 @@
   </div>
 </div>
 
+<!-- Coin Slot Hardware -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Coin Slot Hardware</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    GPIO pins and timing for the UCB&nbsp;Mini coin acceptor and its power relay.
+    Use BCM numbering (run <code>pinout</code> on a Raspberry Pi, or
+    <code>gpio readall</code> on an Orange Pi). Saving re-initialises the coin
+    hardware immediately — no restart needed.
+  </p>
+
+  <div class="form-group" style="margin-top:.5rem;">
+    <label for="cfg-coin-pin" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Coin Signal Pin</label>
+    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Pin that reads coin pulses from the acceptor.</p>
+    <input type="number" id="cfg-coin-pin" min="0" max="255"
+      value="{{ coin.coin_pin }}" style="max-width:140px;width:100%;" />
+  </div>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-relay-pin" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Relay Pin</label>
+    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Pin that powers the coin acceptor (HIGH = powered).</p>
+    <input type="number" id="cfg-relay-pin" min="0" max="255"
+      value="{{ coin.relay_pin }}" style="max-width:140px;width:100%;" />
+  </div>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-coin-edge" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Signal Edge</label>
+    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">
+      FALLING for boards with an optocoupler (active-LOW); RISING for direct/buffered signals.
+    </p>
+    <select id="cfg-coin-edge" style="max-width:180px;width:100%;">
+      <option value="FALLING" {% if coin.coin_edge == "FALLING" %}selected{% endif %}>FALLING</option>
+      <option value="RISING" {% if coin.coin_edge == "RISING" %}selected{% endif %}>RISING</option>
+    </select>
+  </div>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-coin-debounce" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Debounce</label>
+    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Ignore pulses closer together than this (0-1000).</p>
+    <div class="input-suffix" style="max-width:180px;">
+      <input type="number" id="cfg-coin-debounce" min="0" max="1000"
+        value="{{ coin.coin_debounce_ms }}" />
+      <span class="suffix">ms</span>
+    </div>
+  </div>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-coin-timeout" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Pulse Timeout</label>
+    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Silence before a coin batch is finalised (0.1-30).</p>
+    <div class="input-suffix" style="max-width:180px;">
+      <input type="number" id="cfg-coin-timeout" min="0.1" max="30" step="0.1"
+        value="{{ coin.coin_pulse_timeout }}" />
+      <span class="suffix">sec</span>
+    </div>
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="saveCoinConfig()">Save</button>
+    <span id="coin-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
 <!-- Security -->
 <div class="card" style="max-width:480px;margin-bottom:1.25rem;">
   <h2>Security</h2>
@@ -204,6 +265,45 @@ function saveIdleShutdown() {
 function savePresetAmounts() {
   const val = document.getElementById('cfg-preset-amounts').checked;
   _saveConfig({ preset_amounts_enabled: val }, 'preset-status');
+}
+
+async function saveCoinConfig() {
+  const el = document.getElementById('coin-status');
+  const body = {
+    coin_pin: parseInt(document.getElementById('cfg-coin-pin').value),
+    relay_pin: parseInt(document.getElementById('cfg-relay-pin').value),
+    coin_edge: document.getElementById('cfg-coin-edge').value,
+    coin_debounce_ms: parseInt(document.getElementById('cfg-coin-debounce').value),
+    coin_pulse_timeout: parseFloat(document.getElementById('cfg-coin-timeout').value),
+  };
+  if (isNaN(body.coin_pin) || isNaN(body.relay_pin) ||
+      isNaN(body.coin_debounce_ms) || isNaN(body.coin_pulse_timeout)) {
+    el.textContent = 'Please fill in all fields.';
+    el.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  const res = await fetch('/dashboard/api/settings/coin-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) {
+    const data = await res.json();
+    if (data.hardware_active) {
+      el.textContent = 'Saved — coin hardware reloaded.';
+    } else if (data.detail) {
+      el.textContent = data.detail;
+    } else {
+      el.textContent = 'Saved (no coin hardware detected on this server).';
+    }
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    let msg = 'Failed to save.';
+    try { const d = await res.json(); if (d.detail) msg = d.detail; } catch (e) {}
+    el.textContent = msg;
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 5000);
 }
 
 async function generateKey() {
