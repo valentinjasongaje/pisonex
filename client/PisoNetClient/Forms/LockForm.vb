@@ -82,9 +82,13 @@ Namespace Forms
         Private _pnlReceivingCoins As Panel
         Private _lblCoinIcon       As Label
         Private _lblCoinText       As Label
+        Private _lblCoinProgress   As Label   ' live "₱15 inserted · +1h 30m"
         Private _coinPulseTimer    As System.Windows.Forms.Timer
         Private _coinPulseAlpha    As Integer = 255
         Private _coinPulseUp       As Boolean = False
+
+        ' Done-inserting-coins button (shown only while receiving coins)
+        Private _btnDoneCoins     As Button
 
         ' Insert Coin button
         Private _btnInsertCoin    As Button
@@ -110,6 +114,7 @@ Namespace Forms
         Public Event MemberRegisterRequested(username As String, password As String)
         Public Event MemberLogoutRequested()
         Public Event InsertCoinRequested()
+        Public Event DoneInsertingCoinsRequested()
 
         ' ── P/Invoke ──────────────────────────────────────────────────────────
 
@@ -548,7 +553,7 @@ Namespace Forms
 
             ' ── Receiving-coins indicator (shown when hardware controller is accepting coins for this PC) ──
             _pnlReceivingCoins = New Panel() With {
-                .Size = New Size(280, 44),
+                .Size = New Size(300, 68),
                 .BackColor = Color.Transparent,
                 .Visible = False
             }
@@ -572,11 +577,37 @@ Namespace Forms
                 .Location = New Point(42, 11)
             }
 
-            _pnlReceivingCoins.Controls.AddRange({_lblCoinIcon, _lblCoinText})
+            _lblCoinProgress = New Label() With {
+                .Text = "",
+                .Font = New Font("Segoe UI", 10, FontStyle.Regular),
+                .ForeColor = Color.FromArgb(230, 230, 235),
+                .BackColor = Color.Transparent,
+                .AutoSize = True,
+                .Location = New Point(42, 38)
+            }
+
+            _pnlReceivingCoins.Controls.AddRange({_lblCoinIcon, _lblCoinText, _lblCoinProgress})
 
             ' Pulse animation timer — coin icon gently fades in/out
             _coinPulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
             AddHandler _coinPulseTimer.Tick, AddressOf OnCoinPulseTick
+
+            ' ── Done inserting coins button (shown only while receiving coins) ──
+            _btnDoneCoins = New Button() With {
+                .Text = "Done inserting Coins",
+                .Size = New Size(220, 40),
+                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(250, 204, 21),
+                .BackColor = Color.FromArgb(40, 34, 12),
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor = Cursors.Hand,
+                .Visible = False
+            }
+            _btnDoneCoins.FlatAppearance.BorderColor = Color.FromArgb(250, 204, 21)
+            _btnDoneCoins.FlatAppearance.BorderSize = 1
+            _btnDoneCoins.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 46, 16)
+            _btnDoneCoins.FlatAppearance.MouseDownBackColor = Color.FromArgb(70, 58, 20)
+            AddHandler _btnDoneCoins.Click, AddressOf OnDoneCoinsClick
 
             ' ── Insert Coin button (shown when coin slot enabled and not yet receiving) ──
             _btnInsertCoin = New Button() With {
@@ -630,8 +661,9 @@ Namespace Forms
             _idlePulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
             AddHandler _idlePulseTimer.Tick, AddressOf OnIdlePulseTick
 
-            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
+            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _btnDoneCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
             _btnInsertCoin.BringToFront()
+            _btnDoneCoins.BringToFront()
         End Sub
 
         Private Sub OnStatusPillPaint(sender As Object, e As PaintEventArgs)
@@ -938,7 +970,7 @@ Namespace Forms
         End Sub
 
         Private Function GetLayoutKey() As String
-            Return $"{_pnlMember.Visible}|{_pnlMember.Height}|{_pnlReceivingCoins.Visible}|{_lblLicenseWarn.Visible}|{_btnInsertCoin.Visible}"
+            Return $"{_pnlMember.Visible}|{_pnlMember.Height}|{_pnlReceivingCoins.Visible}|{_lblLicenseWarn.Visible}|{_btnInsertCoin.Visible}|{_btnDoneCoins.Visible}"
         End Function
 
         Private Sub CenterLabels()
@@ -983,6 +1015,13 @@ Namespace Forms
                     _lblSub.Bottom + 20)
             End If
 
+            ' Done inserting coins button — centered, just below the receiving panel
+            If _btnDoneCoins.Visible Then
+                _btnDoneCoins.Location = New Point(
+                    (Me.ClientSize.Width - _btnDoneCoins.Width) \ 2,
+                    _pnlReceivingCoins.Bottom + 14)
+            End If
+
             ' Idle shutdown panel — bottom-left corner, minimal
             If _pnlIdleShutdown.Visible Then
                 _pnlIdleShutdown.Location = New Point(
@@ -994,11 +1033,13 @@ Namespace Forms
             If _pnlMember.Visible Then
                 Dim memberBaseY = If(_pnlIdleShutdown.Visible,
                                      _pnlIdleShutdown.Bottom + 16,
-                                     If(_pnlReceivingCoins.Visible,
-                                        _pnlReceivingCoins.Bottom + 16,
-                                        If(_btnInsertCoin.Visible,
-                                           _btnInsertCoin.Bottom + 16,
-                                           _lblSub.Bottom + 28)))
+                                     If(_btnDoneCoins.Visible,
+                                        _btnDoneCoins.Bottom + 16,
+                                        If(_pnlReceivingCoins.Visible,
+                                           _pnlReceivingCoins.Bottom + 16,
+                                           If(_btnInsertCoin.Visible,
+                                              _btnInsertCoin.Bottom + 16,
+                                              _lblSub.Bottom + 28))))
                 _pnlMember.Location = New Point(
                     (Me.ClientSize.Width - _pnlMember.Width) \ 2,
                     memberBaseY)
@@ -1739,8 +1780,17 @@ Namespace Forms
                 _coinPulseTimer.Start()
                 _lblSub.Text = "Coins are being loaded to this PC…"
                 _lblSub.ForeColor = Color.FromArgb(250, 204, 21)
+                ' Show the Done button so the user can finish at any time
+                _btnDoneCoins.Visible = True
+                _btnDoneCoins.Enabled = True
+                _btnDoneCoins.Text = "Done inserting Coins"
             Else
                 _coinPulseTimer.Stop()
+                ' Hide the Done button and clear the running-total line
+                _btnDoneCoins.Visible = False
+                _btnDoneCoins.Enabled = True
+                _btnDoneCoins.Text = "Done inserting Coins"
+                _lblCoinProgress.Text = ""
                 ' Restore Insert Coin button visibility based on current slot state
                 UpdateInsertCoinVisibility()
                 If Not _memberLoggedIn Then
@@ -1750,6 +1800,27 @@ Namespace Forms
             End If
             CenterLabels()
         End Sub
+
+        ''' <summary>Updates the live "₱X inserted · +Hh Mm" line while coins are
+        ''' being inserted. Cleared (empty) when pesos &lt;= 0.</summary>
+        Public Sub UpdateCoinProgress(pesos As Integer, seconds As Integer)
+            If Me.InvokeRequired Then Me.Invoke(Sub() UpdateCoinProgress(pesos, seconds)) : Return
+            If pesos <= 0 Then
+                _lblCoinProgress.Text = ""
+            Else
+                _lblCoinProgress.Text = $"₱{pesos} inserted · +{FormatHm(seconds)}"
+            End If
+        End Sub
+
+        ''' <summary>Formats a duration as "1h 30m" / "30m" / "0m".</summary>
+        Private Shared Function FormatHm(totalSeconds As Integer) As String
+            Dim h = totalSeconds \ 3600
+            Dim m = (totalSeconds Mod 3600) \ 60
+            If h > 0 AndAlso m > 0 Then Return $"{h}h {m}m"
+            If h > 0 Then Return $"{h}h"
+            If m > 0 Then Return $"{m}m"
+            Return "0m"
+        End Function
 
         Public Sub ShowMemberError(message As String)
             If Me.InvokeRequired Then Me.Invoke(Sub() ShowMemberError(message)) : Return
@@ -1807,6 +1878,14 @@ Namespace Forms
             _btnInsertCoin.Enabled = False
             _btnInsertCoin.Text    = "Connecting…"
             RaiseEvent InsertCoinRequested()
+        End Sub
+
+        Private Sub OnDoneCoinsClick(sender As Object, e As EventArgs)
+            _btnDoneCoins.Enabled = False
+            _btnDoneCoins.Text    = "Closing…"
+            RaiseEvent DoneInsertingCoinsRequested()
+            ' On success the next heartbeat reports receiving_coins=False,
+            ' which calls ShowReceivingCoins(False) and restores the screen.
         End Sub
 
         ' ── Keyboard handling (form-level, for keys that reach here) ─────────

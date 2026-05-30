@@ -35,6 +35,8 @@ Namespace Services
         Public Property zero_time_logout_seconds As Integer = 0
         Public Property idle_shutdown_seconds As Integer = 0
         Public Property receiving_coins As Boolean = False
+        Public Property coin_progress_pesos As Integer = 0
+        Public Property coin_progress_seconds As Integer = 0
         Public Property minimum_logout_minutes As Integer = 0
         ' Branch / earnings fields — piggybacked to forward on the hourly pisonex.com ping
         Public Property branch_name As String = ""
@@ -87,6 +89,32 @@ Namespace Services
         Public Async Function RequestCoinsAsync() As Task(Of (Ok As Boolean, Detail As String))
             Try
                 Dim url = $"{_baseUrl}/api/pc/{_pcNumber}/request-coins"
+                Dim response = Await _client.PostAsync(url, Nothing)
+                If response.IsSuccessStatusCode Then
+                    Return (True, String.Empty)
+                End If
+                ' Read the server's error detail for a user-friendly message
+                Dim body = Await response.Content.ReadAsStringAsync()
+                Dim detail As String = "Unknown error"
+                Try
+                    Dim doc = Text.Json.JsonDocument.Parse(body)
+                    Dim d = doc.RootElement.GetProperty("detail").GetString()
+                    If Not String.IsNullOrEmpty(d) Then detail = d
+                Catch
+                End Try
+                Return (False, detail)
+            Catch
+                Return (False, "Server unreachable")
+            End Try
+        End Function
+
+        ''' <summary>
+        ''' Tells the server the user is done inserting coins; the slot is flushed
+        ''' and closed immediately. Returns (True, "") on success, or (False, reason).
+        ''' </summary>
+        Public Async Function DoneInsertingCoinsAsync() As Task(Of (Ok As Boolean, Detail As String))
+            Try
+                Dim url = $"{_baseUrl}/api/pc/{_pcNumber}/done-coins"
                 Dim response = Await _client.PostAsync(url, Nothing)
                 If response.IsSuccessStatusCode Then
                     Return (True, String.Empty)

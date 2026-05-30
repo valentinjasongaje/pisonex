@@ -174,6 +174,28 @@ def is_receiving_coins(pc_number: int) -> bool:
         return _receiving_coins.get(pc_number, False)
 
 
+# ── Live coin-insertion running total (cumulative pesos this coin session) ────
+_coin_progress: dict[int, int] = {}     # pc_number → cumulative pesos inserted
+
+
+def set_coin_progress(pc_number: int, pesos: int) -> None:
+    """Store the running peso total for the PC currently inserting coins."""
+    with _lock:
+        _coin_progress[pc_number] = pesos
+
+
+def get_coin_progress(pc_number: int) -> int:
+    """Return the running peso total for this PC (0 if none in progress)."""
+    with _lock:
+        return _coin_progress.get(pc_number, 0)
+
+
+def clear_coin_progress(pc_number: int) -> None:
+    """Reset the running total once the coin slot closes for this PC."""
+    with _lock:
+        _coin_progress.pop(pc_number, None)
+
+
 # ── Member-PC binding (volatile, rebuilt from DB on startup) ──────────────────
 
 _member_pc_binding: dict[int, int] = {}     # pc_number → user_id

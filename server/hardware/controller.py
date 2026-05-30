@@ -72,6 +72,7 @@ class HardwareController:
         self._coin.disable()
         if self._selected_pc is not None:
             command_store.set_receiving_coins(self._selected_pc, False)
+            command_store.clear_coin_progress(self._selected_pc)
         self._selected_pc = None
         self._accepting = False
         self._total_pesos = 0
@@ -128,6 +129,27 @@ class HardwareController:
 
         return True, "Ready to accept coins"
 
+    def close_coins_for_pc(self, pc_number: int) -> tuple[bool, str]:
+        """
+        Close the coin slot for a PC immediately. Called when a client presses
+        'Done inserting Coins'. Flushes any coins still being counted so they
+        are credited, then powers down the acceptor. Returns (success, message).
+        """
+        # Validate ownership without holding the lock across the flush.
+        with self._lock:
+            if not self._accepting or self._selected_pc != pc_number:
+                return False, "Coin slot is not open for this PC"
+
+        # Flush the in-progress batch OUTSIDE the lock: flush_pending() → _finalize
+        # → _on_complete → _on_coin, which acquires self._lock itself (non-reentrant).
+        self._coin.flush_pending()
+
+        with self._lock:
+            if self._accepting and self._selected_pc == pc_number:
+                self._close_slot()
+        logger.info("PC %02d: coin slot closed via client Done request", pc_number)
+        return True, "Coin slot closed"
+
     def simulate_coin(self, pesos: int):
         """Inject a coin without physical hardware — for development/testing."""
         self._coin.simulate_coin(pesos)
@@ -145,10 +167,13 @@ class HardwareController:
             return
         if not self._is_license_active():
             return
-        # Extend the idle window so multi-coin insertion doesn't time out mid-way
+        # Extend the idle window so multi-coin insertion doesn't time out mid-way,
+        # and publish the live running total (finalized batches + current batch)
+        # so the client can display it.
         with self._lock:
             if self._accepting:
                 self._reset_idle_timer()
+                command_store.set_coin_progress(pc, self._total_pesos + pesos)
 
     def _on_coin(self, pesos: int):
         with self._lock:
@@ -198,6 +223,8 @@ class HardwareController:
                 if self._accepting and self._selected_pc == pc_number:
                     self._total_pesos += pesos
                     self._reset_idle_timer()
+                    # Keep the displayed total monotonic across batch finalization
+                    command_store.set_coin_progress(pc_number, self._total_pesos)
 
         except Exception as e:
             logger.error("Error processing ₱%d for PC %02d: %s", pesos, pc_number, e)

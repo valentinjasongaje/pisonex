@@ -132,11 +132,13 @@ Module Program
         AddHandler _session.CommandReceived, AddressOf OnCommandReceived
         AddHandler _session.WallpaperChanged, AddressOf OnWallpaperChanged
         AddHandler _session.ReceivingCoinsChanged, AddressOf OnReceivingCoinsChanged
+        AddHandler _session.CoinProgressChanged, AddressOf OnCoinProgressChanged
         AddHandler _session.CoinSlotChanged, AddressOf OnCoinSlotChanged
         AddHandler _session.MembershipUpdated, AddressOf OnMembershipUpdated
 
         ' Insert Coin event from lock form
         AddHandler _lockMgr.LockFormInsertCoinRequested, AddressOf OnInsertCoinRequested
+        AddHandler _lockMgr.LockFormDoneInsertingCoinsRequested, AddressOf OnDoneInsertingCoinsRequested
 
         ' Membership events from lock form and overlay
         AddHandler _lockMgr.LockFormLoginRequested, AddressOf OnMemberLogin
@@ -268,6 +270,10 @@ Module Program
         _lockMgr.ShowReceivingCoins(If(LicenseService.IsActive(), isReceiving, False))
     End Sub
 
+    Private Sub OnCoinProgressChanged(pesos As Integer, seconds As Integer)
+        _lockMgr.UpdateCoinProgress(pesos, seconds)
+    End Sub
+
     Private Sub OnCoinSlotChanged(enabled As Boolean)
         _lockMgr.UpdateCoinSlot(enabled)
     End Sub
@@ -296,6 +302,19 @@ Module Program
             End If
             ' On success the next heartbeat returns receiving_coins=True,
             ' which triggers ShowReceivingCoins(True) and hides the button.
+        End Function)
+    End Sub
+
+    Private Sub OnDoneInsertingCoinsRequested()
+        Task.Run(Async Function()
+            Dim result = Await _api.DoneInsertingCoinsAsync()
+            If Not result.Ok Then
+                _notifs.Show("Coin Slot",
+                    "Could not close the coin slot. It may have already closed.",
+                    ToastType.Warning)
+            End If
+            ' On success the next heartbeat reports receiving_coins=False,
+            ' which triggers ShowReceivingCoins(False) and restores the screen.
         End Function)
     End Sub
 

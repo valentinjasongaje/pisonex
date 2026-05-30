@@ -165,6 +165,13 @@ def heartbeat(
     # Is the hardware controller currently accepting coins for this PC?
     receiving_coins = command_store.is_receiving_coins(pc_number)
 
+    # Live running total of coins inserted so far (for the client display).
+    coin_progress_pesos = command_store.get_coin_progress(pc_number)
+    coin_progress_seconds = 0
+    if coin_progress_pesos > 0:
+        from services.rate_service import pesos_to_seconds
+        coin_progress_seconds = pesos_to_seconds(coin_progress_pesos, db)
+
     # Minimum logout minutes (from membership config, 0 if not configured)
     minimum_logout_minutes = cfg.minimum_logout_minutes if cfg else 0
 
@@ -193,6 +200,8 @@ def heartbeat(
         zero_time_logout_seconds=zero_time_logout_seconds,
         idle_shutdown_seconds=idle_shutdown_seconds,
         receiving_coins=receiving_coins,
+        coin_progress_pesos=coin_progress_pesos,
+        coin_progress_seconds=coin_progress_seconds,
         minimum_logout_minutes=minimum_logout_minutes,
         branch_name=settings.BRANCH_NAME,
         today_pesos=today_earnings["total_pesos"],
@@ -288,6 +297,25 @@ def request_coins(pc_number: int):
             detail="No coin slot hardware available on this server.",
         )
     ok, message = hw_controller.request_coins_for_pc(pc_number)
+    if not ok:
+        raise HTTPException(status_code=409, detail=message)
+    return {"status": "ok"}
+
+
+@router.post("/{pc_number}/done-coins", dependencies=[_ClientAuth])
+def done_coins(pc_number: int):
+    """
+    Called by a PC client when the user presses 'Done inserting Coins'.
+    Flushes any coins still being counted and closes the slot immediately.
+    Returns 503 on Windows/no-hardware deployments where the controller is absent.
+    """
+    from main import hw_controller
+    if hw_controller is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No coin slot hardware available on this server.",
+        )
+    ok, message = hw_controller.close_coins_for_pc(pc_number)
     if not ok:
         raise HTTPException(status_code=409, detail=message)
     return {"status": "ok"}

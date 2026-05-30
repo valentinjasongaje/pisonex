@@ -31,6 +31,9 @@ Namespace Services
         ' Receiving-coins dedup — only fire event when state changes
         Private _lastReceivingCoins As Boolean = False
 
+        ' Coin-progress dedup — only fire event when the running total changes
+        Private _lastCoinProgressPesos As Integer = -1
+
         ' Coin-slot-enabled dedup — only fire event when state changes
         Private _lastCoinSlotEnabled As Boolean = True
 
@@ -57,6 +60,8 @@ Namespace Services
         Public Event WallpaperChanged(url As String, hash As String)
         ''' <summary>Fired when the server signals that the hardware controller is accepting coins for this PC.</summary>
         Public Event ReceivingCoinsChanged(isReceiving As Boolean)
+
+        Public Event CoinProgressChanged(pesos As Integer, seconds As Integer)
         ''' <summary>Fired when the server's coin_slot_enabled flag changes (global or per-PC).</summary>
         Public Event CoinSlotChanged(enabled As Boolean)
         ''' <summary>Fired when membership state changes in heartbeat (enabled, username, balance, etc.).</summary>
@@ -245,6 +250,12 @@ Namespace Services
             If response.receiving_coins <> _lastReceivingCoins Then
                 _lastReceivingCoins = response.receiving_coins
                 RaiseEvent ReceivingCoinsChanged(response.receiving_coins)
+            End If
+
+            ' Live coin-insertion running total — fire when the peso total changes
+            If response.coin_progress_pesos <> _lastCoinProgressPesos Then
+                _lastCoinProgressPesos = response.coin_progress_pesos
+                RaiseEvent CoinProgressChanged(response.coin_progress_pesos, response.coin_progress_seconds)
             End If
 
             ' Coin slot enabled — only fire event when state changes

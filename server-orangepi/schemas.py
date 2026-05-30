@@ -34,6 +34,8 @@ class PCHeartbeatResponse(BaseModel):
     zero_time_logout_seconds: int = 0
     idle_shutdown_seconds: int = 0
     receiving_coins: bool = False
+    coin_progress_pesos: int = 0
+    coin_progress_seconds: int = 0
     minimum_logout_minutes: int = 0
     # Branch / earnings fields — piggybacked onto the hourly pisonex.com status ping
     branch_name: str = ""

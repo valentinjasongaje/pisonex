@@ -256,6 +256,18 @@ class CoinSlot:
             logger.info("CoinSlot: finalized ₱%d", amount)
             self._on_complete(amount)
 
+    def flush_pending(self):
+        """Finalize any pulses counted so far immediately.
+
+        Used when the client presses 'Done inserting Coins' so coins still
+        being counted in the current batch are credited and not lost. Safe to
+        call with an empty batch — _finalize is a no-op when no pulses pending.
+        """
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+        self._finalize()
+
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def cleanup(self):

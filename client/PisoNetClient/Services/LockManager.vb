@@ -16,6 +16,7 @@ Namespace Services
         Public Event LockFormRegisterRequested(username As String, password As String)
         Public Event LockFormLogoutRequested()
         Public Event LockFormInsertCoinRequested()
+        Public Event LockFormDoneInsertingCoinsRequested()
 
         Public Sub New()
             _lockForm = New Forms.LockForm()
@@ -24,6 +25,7 @@ Namespace Services
             AddHandler _lockForm.MemberRegisterRequested, Sub(u, p) RaiseEvent LockFormRegisterRequested(u, p)
             AddHandler _lockForm.MemberLogoutRequested, Sub() RaiseEvent LockFormLogoutRequested()
             AddHandler _lockForm.InsertCoinRequested, Sub() RaiseEvent LockFormInsertCoinRequested()
+            AddHandler _lockForm.DoneInsertingCoinsRequested, Sub() RaiseEvent LockFormDoneInsertingCoinsRequested()
         End Sub
 
         Public Sub LockPC()
@@ -80,6 +82,10 @@ Namespace Services
             _lockForm.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                           canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
                                           minimumLogoutMinutes, serverLicensed)
+        End Sub
+
+        Public Sub UpdateCoinProgress(pesos As Integer, seconds As Integer)
+            _lockForm.UpdateCoinProgress(pesos, seconds)
         End Sub
 
         Public Sub ShowReceivingCoins(isReceiving As Boolean)
