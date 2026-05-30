@@ -15,7 +15,12 @@ Namespace Services
         ' Local session state — authoritative while server is unreachable
         Private _remainingSeconds As Integer = 0
         Private _isLocked As Boolean = True
-        Private _serverReachable As Boolean = True
+        ' Start False so the FIRST successful heartbeat fires ServerConnectionRestored,
+        ' which drives HideOfflineStatus → UpdateInsertCoinVisibility so the Insert Coin
+        ' button is shown once connectivity + coin-slot state are known. (If left True,
+        ' an instantly-reachable server never fires the reconnect path and the button
+        ' would stay hidden.)
+        Private _serverReachable As Boolean = False
         Private _sessionToken As String = Nothing
 
         ' Low-time warning flags — reset each time a new session starts
