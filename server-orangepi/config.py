@@ -47,12 +47,13 @@ class Settings(BaseSettings):
     IDLE_AUTO_SHUTDOWN_MINUTES: int = 5
     MEMBER_HEARTBEAT_TIMEOUT_MINUTES: int = 60
 
-    # GPIO pins — Orange Pi SoC numbering via OPi.GPIO BCM mode.
+    # GPIO pins — Orange Pi SoC numbering via OPi.GPIO SUNXI mode.
     # Allwinner SoC ports: PA0=0, PA1=1 ... PB0=32, PC0=64, PC1=65 etc.
-    # These defaults are placeholders — set the correct values in .env to match
-    # your actual wiring. Run 'gpio readall' on the board to list available pins.
-    COIN_PIN: int = 4
-    RELAY_PIN: int = 6
+    # Defaults: COIN_PIN=12 (PA12, physical pin 3), RELAY_PIN=11 (PA11, physical pin 5).
+    # Set the correct values in .env / dashboard to match your wiring.
+    # Run 'gpio readall' on the board to list available pins.
+    COIN_PIN: int = 12
+    RELAY_PIN: int = 11
     KEYPAD_ROWS: list[int] = [17, 27, 22, 5]   # R1, R2, R3, R4
     KEYPAD_COLS: list[int] = [9, 11, 10]        # C1, C2, C3
     LCD_I2C_ADDRESS: int = 0x27

@@ -7,6 +7,22 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
+def _sunxi_name(pin) -> str:
+    """Convert a SUNXI GPIO number to its port name for OPi.GPIO SUNXI mode.
+
+    SUNXI numbering (matches gpio readall / the .env docs):
+        PA0=0  PA12=12 ... PB0=32 ... PC0=64 ...
+    On the Orange Pi One, PA12 = physical pin 3 (coin signal) and
+    PA11 = physical pin 5 (relay). Accepts an int or an existing 'PA12' string.
+    """
+    if isinstance(pin, str):
+        return pin.strip().upper()
+    n = int(pin)
+    bank = n // 32
+    offset = n % 32
+    return f"P{chr(ord('A') + bank)}{offset}"
+
+
 class CoinSlot:
     """
     Detects coin pulses from a UCB Mini v4 coin acceptor (GPIO pin, BCM 4).
@@ -20,19 +36,19 @@ class CoinSlot:
     This avoids the "Failed to add edge detection" RuntimeError that occurs when
     a pin has a stuck kernel interrupt from a previous run.
 
-    Wiring:
+    Wiring (Orange Pi One, SUNXI mode):
         UCB Mini v4 12V  →  Relay COM/NO (switched 12V line from PSU)
         UCB Mini v4 GND  →  External 12V PSU (−) + Pi GND  (common ground)
-        UCB Mini v4 SIG  →  1 kΩ → BCM 4 (Pin 7)
+        UCB Mini v4 SIG  →  1 kΩ → PA12 (physical pin 3)
                                          ↓
                                         2 kΩ   (voltage divider: 5V → 3.3V)
                                          ↓
-                                        GND (Pin 9)
+                                        GND (physical pin 9)
 
         Relay (custom board):
-            Relay signal  →  BCM 6 (Pin 31)   HIGH = relay ON = coin acceptor powered
-            Relay VCC     →  Pi Pin 2  (5V)
-            Relay GND     →  Pi Pin 14 (GND)
+            Relay signal  →  PA11 (physical pin 5)  HIGH = relay ON = acceptor powered
+            Relay VCC     →  Pin 2  (5V)
+            Relay GND     →  Pin 6  (GND)
             Relay COM     →  12V PSU (+)
             Relay NO      →  UCB Mini v4 12V
     """
@@ -52,6 +68,8 @@ class CoinSlot:
         self._last_pulse_time = 0.0
         self._enabled = False
         self._relay_ok = False          # True only if relay pin configured OK
+        self._coin_ch: str | None = None   # SUNXI port name, e.g. "PA12"
+        self._relay_ch: str | None = None  # SUNXI port name, e.g. "PA11"
         self._detect_edge = "FALLING"   # overwritten in _setup_gpio
         self._stop_polling: threading.Event | None = None
         self._poll_thread: threading.Thread | None = None
@@ -72,22 +90,27 @@ class CoinSlot:
         try:
             import OPi.GPIO as GPIO
             self._GPIO = GPIO
-            GPIO.setmode(GPIO.BCM)
+            # SUNXI mode: pins are addressed by Allwinner port name (PA12, PB0…).
+            # This is independent of header revision and matches 'gpio readall'.
+            GPIO.setmode(GPIO.SUNXI)
         except ImportError:
             self._GPIO = None
             logger.warning("CoinSlot: OPi.GPIO not available — running in simulation mode")
             return
 
+        self._coin_ch = _sunxi_name(settings.COIN_PIN)
+        self._relay_ch = _sunxi_name(settings.RELAY_PIN)
+
         # ── Relay pin ────────────────────────────────────────────────────────
         try:
-            GPIO.setup(settings.RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(self._relay_ch, GPIO.OUT, initial=GPIO.LOW)
             self._relay_ok = True
-            logger.info("CoinSlot: relay pin BCM %d ready — starts LOW (unpowered)",
-                        settings.RELAY_PIN)
+            logger.info("CoinSlot: relay pin %s ready — starts LOW (unpowered)",
+                        self._relay_ch)
         except Exception as e:
-            logger.error("CoinSlot: relay pin BCM %d setup FAILED: %s — relay will not work. "
+            logger.error("CoinSlot: relay pin %s setup FAILED: %s — relay will not work. "
                          "Set a valid RELAY_PIN from Settings → Coin Slot Hardware.",
-                         settings.RELAY_PIN, e)
+                         self._relay_ch, e)
 
         # ── Coin signal pin (polling — no sysfs interrupt) ───────────────────
         # FALLING + PUD_UP  → custom board with optocoupler (active-LOW pulse)
@@ -101,9 +124,9 @@ class CoinSlot:
         self._detect_edge = edge_name
 
         try:
-            GPIO.setup(settings.COIN_PIN, GPIO.IN, pull_up_down=pull)
-            logger.info("CoinSlot: coin pin BCM %d ready (%s, %s) — polling mode",
-                        settings.COIN_PIN, pull_name, edge_name)
+            GPIO.setup(self._coin_ch, GPIO.IN, pull_up_down=pull)
+            logger.info("CoinSlot: coin pin %s ready (%s, %s) — polling mode",
+                        self._coin_ch, pull_name, edge_name)
 
             self._stop_polling = threading.Event()
             self._poll_thread = threading.Thread(
@@ -114,8 +137,8 @@ class CoinSlot:
             self._poll_thread.start()
 
         except Exception as e:
-            logger.error("CoinSlot: coin pin BCM %d setup FAILED: %s — coin detection will not work",
-                         settings.COIN_PIN, e)
+            logger.error("CoinSlot: coin pin %s setup FAILED: %s — coin detection will not work",
+                         self._coin_ch, e)
 
     # ── Polling thread ────────────────────────────────────────────────────────
 
@@ -126,10 +149,10 @@ class CoinSlot:
         v4's ~50 ms pulses while adding negligible CPU load on the Pi.
         """
         GPIO = self._GPIO
-        last_level = GPIO.input(settings.COIN_PIN)
+        last_level = GPIO.input(self._coin_ch)
 
         while not self._stop_polling.is_set():
-            level = GPIO.input(settings.COIN_PIN)
+            level = GPIO.input(self._coin_ch)
 
             if level != last_level:
                 is_match = (
@@ -137,7 +160,7 @@ class CoinSlot:
                     (self._detect_edge == "RISING"  and level == 1)
                 )
                 if is_match:
-                    self._pulse_detected(settings.COIN_PIN)
+                    self._pulse_detected(self._coin_ch)
                 last_level = level
 
             time.sleep(0.001)   # 1 ms poll interval
@@ -147,18 +170,18 @@ class CoinSlot:
     def enable(self):
         """Power the coin acceptor via relay and enable pulse detection."""
         if self._GPIO and self._relay_ok:
-            self._GPIO.output(settings.RELAY_PIN, self._GPIO.HIGH)
-            logger.info("CoinSlot: relay BCM %d → HIGH (coin acceptor powered)",
-                        settings.RELAY_PIN)
+            self._GPIO.output(self._relay_ch, self._GPIO.HIGH)
+            logger.info("CoinSlot: relay %s → HIGH (coin acceptor powered)",
+                        self._relay_ch)
         self._enabled = True
 
     def disable(self):
         """Cut power to coin acceptor via relay and clear any pending pulses."""
         self._enabled = False
         if self._GPIO and self._relay_ok:
-            self._GPIO.output(settings.RELAY_PIN, self._GPIO.LOW)
-            logger.info("CoinSlot: relay BCM %d → LOW (coin acceptor unpowered)",
-                        settings.RELAY_PIN)
+            self._GPIO.output(self._relay_ch, self._GPIO.LOW)
+            logger.info("CoinSlot: relay %s → LOW (coin acceptor unpowered)",
+                        self._relay_ch)
         with self._lock:
             self._pulse_count = 0
             if self._timer:
