@@ -51,6 +51,7 @@ class CoinSlot:
         self._timer: threading.Timer | None = None
         self._last_pulse_time = 0.0
         self._enabled = False
+        self._relay_ok = False          # True only if relay pin configured OK
         self._detect_edge = "FALLING"   # overwritten in _setup_gpio
         self._stop_polling: threading.Event | None = None
         self._poll_thread: threading.Thread | None = None
@@ -80,10 +81,12 @@ class CoinSlot:
         # ── Relay pin ────────────────────────────────────────────────────────
         try:
             GPIO.setup(settings.RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
+            self._relay_ok = True
             logger.info("CoinSlot: relay pin BCM %d ready — starts LOW (unpowered)",
                         settings.RELAY_PIN)
         except Exception as e:
-            logger.error("CoinSlot: relay pin BCM %d setup FAILED: %s — relay will not work",
+            logger.error("CoinSlot: relay pin BCM %d setup FAILED: %s — relay will not work. "
+                         "Set a valid RELAY_PIN from Settings → Coin Slot Hardware.",
                          settings.RELAY_PIN, e)
 
         # ── Coin signal pin (polling — no sysfs interrupt) ───────────────────
@@ -143,7 +146,7 @@ class CoinSlot:
 
     def enable(self):
         """Power the coin acceptor via relay and enable pulse detection."""
-        if self._GPIO:
+        if self._GPIO and self._relay_ok:
             self._GPIO.output(settings.RELAY_PIN, self._GPIO.HIGH)
             logger.info("CoinSlot: relay BCM %d → HIGH (coin acceptor powered)",
                         settings.RELAY_PIN)
@@ -152,7 +155,7 @@ class CoinSlot:
     def disable(self):
         """Cut power to coin acceptor via relay and clear any pending pulses."""
         self._enabled = False
-        if self._GPIO:
+        if self._GPIO and self._relay_ok:
             self._GPIO.output(settings.RELAY_PIN, self._GPIO.LOW)
             logger.info("CoinSlot: relay BCM %d → LOW (coin acceptor unpowered)",
                         settings.RELAY_PIN)
