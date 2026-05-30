@@ -1847,6 +1847,9 @@ Namespace Forms
                                      Not _isRequestingCoin AndAlso
                                      _isConnected AndAlso
                                      Not _pnlReceivingCoins.Visible
+            ' Reposition so the button lands centered below the sub-message rather
+            ' than at its default (0,0) the first time it becomes visible.
+            CenterLabels()
         End Sub
 
         Public Sub UpdateCoinSlot(enabled As Boolean)
