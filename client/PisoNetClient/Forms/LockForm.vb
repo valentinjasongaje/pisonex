@@ -552,8 +552,11 @@ Namespace Forms
                                            _lblInlineError, _lblModeToggle})
 
             ' ── Receiving-coins indicator (shown when hardware controller is accepting coins for this PC) ──
+            ' Wider, taller card so the title row and the live running-total line both
+            ' breathe. The title (dot + "Receiving Coins…") is centered as a unit by
+            ' LayoutReceivingPanel(); the progress line is a full-width centered label.
             _pnlReceivingCoins = New Panel() With {
-                .Size = New Size(300, 68),
+                .Size = New Size(420, 132),
                 .BackColor = Color.Transparent,
                 .Visible = False
             }
@@ -561,29 +564,33 @@ Namespace Forms
 
             _lblCoinIcon = New Label() With {
                 .Text = "●",
-                .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+                .Font = New Font("Segoe UI", 16, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(250, 204, 21),
                 .BackColor = Color.Transparent,
                 .AutoSize = True,
-                .Location = New Point(16, 10)
+                .Location = New Point(20, 22)
             }
 
             _lblCoinText = New Label() With {
                 .Text = "Receiving Coins…",
-                .Font = New Font("Segoe UI", 12, FontStyle.Bold),
+                .Font = New Font("Segoe UI", 17, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(250, 204, 21),
                 .BackColor = Color.Transparent,
                 .AutoSize = True,
-                .Location = New Point(42, 11)
+                .Location = New Point(48, 20)
             }
 
+            ' Live "₱15 inserted · +1h 30m" — full-width centered so it never drifts
+            ' out of its container regardless of how long the text grows.
             _lblCoinProgress = New Label() With {
                 .Text = "",
-                .Font = New Font("Segoe UI", 10, FontStyle.Regular),
-                .ForeColor = Color.FromArgb(230, 230, 235),
+                .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(236, 238, 244),
                 .BackColor = Color.Transparent,
-                .AutoSize = True,
-                .Location = New Point(42, 38)
+                .AutoSize = False,
+                .Size = New Size(420, 34),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Location = New Point(0, 78)
             }
 
             _pnlReceivingCoins.Controls.AddRange({_lblCoinIcon, _lblCoinText, _lblCoinProgress})
@@ -593,10 +600,11 @@ Namespace Forms
             AddHandler _coinPulseTimer.Tick, AddressOf OnCoinPulseTick
 
             ' ── Done inserting coins button (shown only while receiving coins) ──
+            ' Secondary, gold-outline variant — larger and rounded to match the CTA.
             _btnDoneCoins = New Button() With {
                 .Text = "Done inserting Coins",
-                .Size = New Size(220, 40),
-                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                .Size = New Size(280, 54),
+                .Font = New Font("Segoe UI", 13, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(250, 204, 21),
                 .BackColor = Color.FromArgb(40, 34, 12),
                 .FlatStyle = FlatStyle.Flat,
@@ -604,16 +612,18 @@ Namespace Forms
                 .Visible = False
             }
             _btnDoneCoins.FlatAppearance.BorderColor = Color.FromArgb(250, 204, 21)
-            _btnDoneCoins.FlatAppearance.BorderSize = 1
+            _btnDoneCoins.FlatAppearance.BorderSize = 2
             _btnDoneCoins.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 46, 16)
             _btnDoneCoins.FlatAppearance.MouseDownBackColor = Color.FromArgb(70, 58, 20)
+            _btnDoneCoins.Region = RoundedRegion(_btnDoneCoins.Width, _btnDoneCoins.Height, 14)
             AddHandler _btnDoneCoins.Click, AddressOf OnDoneCoinsClick
 
             ' ── Insert Coin button (shown when coin slot enabled and not yet receiving) ──
+            ' Primary CTA — big, gold, rounded.
             _btnInsertCoin = New Button() With {
                 .Text = "Insert Coin",
-                .Size = New Size(200, 46),
-                .Font = New Font("Segoe UI", 12, FontStyle.Bold),
+                .Size = New Size(300, 66),
+                .Font = New Font("Segoe UI", 16, FontStyle.Bold),
                 .ForeColor = Color.FromArgb(24, 16, 4),
                 .BackColor = Color.FromArgb(250, 204, 21),
                 .FlatStyle = FlatStyle.Flat,
@@ -621,8 +631,9 @@ Namespace Forms
                 .Visible = False
             }
             _btnInsertCoin.FlatAppearance.BorderSize = 0
-            _btnInsertCoin.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 188, 8)
+            _btnInsertCoin.FlatAppearance.MouseOverBackColor = Color.FromArgb(255, 214, 41)
             _btnInsertCoin.FlatAppearance.MouseDownBackColor = Color.FromArgb(235, 175, 0)
+            _btnInsertCoin.Region = RoundedRegion(_btnInsertCoin.Width, _btnInsertCoin.Height, 16)
             AddHandler _btnInsertCoin.Click, AddressOf OnInsertCoinClick
 
             ' ── Idle auto-shutdown countdown card (minimal, bottom-left) ─────────
@@ -1103,6 +1114,7 @@ Namespace Forms
         ' ── Server-status API ─────────────────────────────────────────────────
 
         Public Sub ShowOfflineStatus()
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() ShowOfflineStatus()) : Return
             _isConnected = False
             _lblOffline.Visible  = True
@@ -1112,6 +1124,7 @@ Namespace Forms
         End Sub
 
         Public Sub HideOfflineStatus()
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() HideOfflineStatus()) : Return
             _isConnected = True
             _lblOffline.Visible = False
@@ -1482,6 +1495,9 @@ Namespace Forms
                                        balanceSeconds As Integer, canLogout As Boolean,
                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
                                        minimumLogoutMinutes As Integer, serverLicensed As Boolean)
+            ' Guard against the form being disposed/torn down while a heartbeat callback
+            ' is still in flight (app shutdown) — otherwise Invoke throws ObjectDisposedException.
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then
                 Me.Invoke(Sub() UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                                     canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
@@ -1636,12 +1652,45 @@ Namespace Forms
 
         ' ── Receiving-coins indicator ──────────────────────────────────────────
 
+        ''' <summary>Builds a rounded-rectangle Region for clipping buttons/panels.</summary>
+        Private Shared Function RoundedRegion(w As Integer, h As Integer, radius As Integer) As Region
+            Using path = New Drawing2D.GraphicsPath()
+                Dim d = radius * 2
+                path.AddArc(0, 0, d, d, 180, 90)
+                path.AddArc(w - d, 0, d, d, 270, 90)
+                path.AddArc(w - d, h - d, d, d, 0, 90)
+                path.AddArc(0, h - d, d, d, 90, 90)
+                path.CloseFigure()
+                Return New Region(path)
+            End Using
+        End Function
+
+        ''' <summary>
+        ''' Centers the (pulsing dot + "Receiving Coins…") title row as a single
+        ''' unit within the panel, so the title is always visually aligned to its
+        ''' container regardless of text length. The progress line below is a
+        ''' full-width centered label and needs no per-text layout.
+        ''' </summary>
+        Private Sub LayoutReceivingPanel()
+            Dim iconW = _lblCoinIcon.PreferredWidth
+            Dim iconH = _lblCoinIcon.PreferredHeight
+            Dim textW = _lblCoinText.PreferredWidth
+            Dim textH = _lblCoinText.PreferredHeight
+            Const gap As Integer = 12
+            Dim totalW = iconW + gap + textW
+            Dim startX = Math.Max(0, (_pnlReceivingCoins.Width - totalW) \ 2)
+            Const rowY As Integer = 26
+            _lblCoinText.Location = New Point(startX + iconW + gap, rowY)
+            ' Vertically center the dot against the taller title text
+            _lblCoinIcon.Location = New Point(startX, rowY + (textH - iconH) \ 2 + 1)
+        End Sub
+
         Private Sub OnReceivingCoinsPaint(sender As Object, e As PaintEventArgs)
             Dim pnl = CType(sender, Panel)
             Dim g = e.Graphics
             g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
             Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
-            Dim r = pnl.Height \ 2
+            Const r As Integer = 22
             Using path = New Drawing2D.GraphicsPath()
                 Dim d = r * 2
                 path.AddArc(rect.X, rect.Y, d, d, 180, 90)
@@ -1649,11 +1698,16 @@ Namespace Forms
                 path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
                 path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
                 path.CloseFigure()
-                ' Semi-transparent dark bg with gold tint
-                Using br = New SolidBrush(Color.FromArgb(200, 20, 18, 8))
+                ' Soft vertical gradient — warm dark, gold-tinted top
+                Using br As New Drawing2D.LinearGradientBrush(
+                        New Rectangle(0, 0, pnl.Width, pnl.Height),
+                        Color.FromArgb(220, 34, 28, 10),
+                        Color.FromArgb(225, 16, 14, 6),
+                        Drawing2D.LinearGradientMode.Vertical)
                     g.FillPath(br, path)
                 End Using
-                Using pen = New Pen(Color.FromArgb(100, 250, 204, 21), 1.5F)
+                ' Gold border that gently tracks the icon pulse for a live feel
+                Using pen As New Pen(Color.FromArgb(Math.Min(255, _coinPulseAlpha), 250, 204, 21), 2.0F)
                     g.DrawPath(pen, path)
                 End Using
             End Using
@@ -1672,6 +1726,8 @@ Namespace Forms
                 End If
             End If
             _lblCoinIcon.ForeColor = Color.FromArgb(_coinPulseAlpha, 250, 204, 21)
+            ' Repaint the panel so the gold border breathes with the dot.
+            If _pnlReceivingCoins.Visible Then _pnlReceivingCoins.Invalidate()
         End Sub
 
         ' ── Idle shutdown countdown ───────────────────────────────────────────
@@ -1768,6 +1824,7 @@ Namespace Forms
         End Sub
 
         Public Sub ShowReceivingCoins(isReceiving As Boolean)
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() ShowReceivingCoins(isReceiving)) : Return
 
             _pnlReceivingCoins.Visible = isReceiving
@@ -1778,8 +1835,15 @@ Namespace Forms
                 _coinPulseAlpha = 255
                 _coinPulseUp = False
                 _coinPulseTimer.Start()
+                LayoutReceivingPanel()
                 _lblSub.Text = "Coins are being loaded to this PC…"
                 _lblSub.ForeColor = Color.FromArgb(250, 204, 21)
+                ' Seed the running-total line with a placeholder until the first coin
+                ' drops; UpdateCoinProgress replaces it on the next heartbeat.
+                If String.IsNullOrEmpty(_lblCoinProgress.Text) Then
+                    _lblCoinProgress.Text = "Waiting for coins…"
+                    _lblCoinProgress.ForeColor = Color.FromArgb(170, 176, 190)
+                End If
                 ' Show the Done button so the user can finish at any time
                 _btnDoneCoins.Visible = True
                 _btnDoneCoins.Enabled = True
@@ -1804,11 +1868,14 @@ Namespace Forms
         ''' <summary>Updates the live "₱X inserted · +Hh Mm" line while coins are
         ''' being inserted. Cleared (empty) when pesos &lt;= 0.</summary>
         Public Sub UpdateCoinProgress(pesos As Integer, seconds As Integer)
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() UpdateCoinProgress(pesos, seconds)) : Return
             If pesos <= 0 Then
-                _lblCoinProgress.Text = ""
+                _lblCoinProgress.Text = "Waiting for coins…"
+                _lblCoinProgress.ForeColor = Color.FromArgb(170, 176, 190)
             Else
-                _lblCoinProgress.Text = $"₱{pesos} inserted · +{FormatHm(seconds)}"
+                _lblCoinProgress.Text = $"₱{pesos} inserted  ·  +{FormatHm(seconds)}"
+                _lblCoinProgress.ForeColor = Color.FromArgb(236, 238, 244)
             End If
         End Sub
 
@@ -1853,6 +1920,7 @@ Namespace Forms
         End Sub
 
         Public Sub UpdateCoinSlot(enabled As Boolean)
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() UpdateCoinSlot(enabled)) : Return
             _coinSlotEnabled = enabled
             UpdateInsertCoinVisibility()
@@ -1864,6 +1932,7 @@ Namespace Forms
         End Sub
 
         Public Sub SetInsertCoinResult(success As Boolean)
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() SetInsertCoinResult(success)) : Return
             If Not success Then
                 ' Request failed — restore button so user can try again
