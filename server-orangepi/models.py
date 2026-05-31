@@ -166,6 +166,11 @@ class ServerConfig(Base):
     coin_debounce_ms   = Column(Integer, nullable=True)   # software debounce window (ms)
     coin_pulse_timeout = Column(String(16), nullable=True)  # seconds of silence to finalize (stored as text to allow decimals)
 
+    # ── Monitoring ────────────────────────────────────────────────────────────
+    # When True (default), the server requests FFmpeg live-streaming when admin
+    # opens fullscreen.  Set False to fall back to 1-second JPEG snapshots.
+    ffmpeg_streaming_enabled = Column(Boolean, default=True, nullable=False)
+
 
 class CoinSchedule(Base):
     """Time ranges when the coin slot is automatically blocked."""

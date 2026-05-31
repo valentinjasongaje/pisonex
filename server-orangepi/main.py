@@ -260,6 +260,7 @@ def _migrate_schema():
             ("coin_edge", "VARCHAR(10)"),
             ("coin_debounce_ms", "INTEGER"),
             ("coin_pulse_timeout", "VARCHAR(16)"),
+            ("ffmpeg_streaming_enabled", "BOOLEAN DEFAULT 1"),
         ]
         for col_name, col_type in new_server_columns:
             if not has_column("server_config", col_name):

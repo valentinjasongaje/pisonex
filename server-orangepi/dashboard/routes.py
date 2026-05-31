@@ -1598,6 +1598,7 @@ def settings_page(
         "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
         "branch_name": settings.BRANCH_NAME,
         "idle_timeout": settings.PC_IDLE_TIMEOUT,
+        "ffmpeg_streaming_enabled": getattr(srv_cfg, "ffmpeg_streaming_enabled", True) if srv_cfg else True,
         "coin": {
             "coin_pin": _cfg("coin_pin", settings.COIN_PIN),
             "relay_pin": _cfg("relay_pin", settings.RELAY_PIN),
@@ -1610,6 +1611,28 @@ def settings_page(
 
 class BranchNameBody(BaseModel):
     branch_name: str
+
+
+class FfmpegToggleBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/api/settings/ffmpeg-streaming")
+def save_ffmpeg_streaming(
+    body: FfmpegToggleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Enable or disable FFmpeg live streaming for the fullscreen monitor view."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1, client_api_key="")
+        db.add(srv_cfg)
+    srv_cfg.ffmpeg_streaming_enabled = body.enabled
+    db.commit()
+    return {"status": "ok", "ffmpeg_streaming_enabled": body.enabled}
 
 
 @router.post("/api/settings/branch-name")

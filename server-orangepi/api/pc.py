@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import PC, Session as SessionModel, User, MembershipConfig
+from models import PC, Session as SessionModel, User, MembershipConfig, ServerConfig
 from schemas import PCHeartbeatResponse, PCStatusResponse
 from services.session_service import SessionService
 from config import settings
@@ -120,7 +120,8 @@ def heartbeat(
     zero_time_logout_seconds = 0
     idle_shutdown_seconds = 0
 
-    cfg = db.query(MembershipConfig).first()
+    cfg     = db.query(MembershipConfig).first()
+    srv_cfg = db.query(ServerConfig).first()
     if cfg:
         membership_enabled = cfg.membership_enabled
         absorption_enabled = cfg.absorption_enabled
@@ -207,9 +208,14 @@ def heartbeat(
         today_pesos=today_earnings["total_pesos"],
         today_sessions=today_earnings["total_sessions"],
         today_minutes=today_earnings["total_minutes"],
-        # When an admin is watching this PC's MJPEG stream, tell the client
-        # to ramp up to ~30 fps; 0 means "use your own config".
-        capture_interval_ms=33 if command_store.is_watched(pc_number) else 0,
+        # When an admin is watching this PC AND FFmpeg streaming is enabled,
+        # tell the client to ramp up; 0 = use own config (1 s JPEG snapshots).
+        capture_interval_ms=(
+            33
+            if command_store.is_watched(pc_number)
+            and getattr(srv_cfg, "ffmpeg_streaming_enabled", True)
+            else 0
+        ),
     )
 
 
