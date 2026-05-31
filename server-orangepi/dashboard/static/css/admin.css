@@ -582,8 +582,9 @@ html[data-theme="light"] .metrics-proc-row {
   font-size: 13px; padding: 4px 10px;
 }
 .fullscreen-stats-btn:hover { background: var(--border); }
-.fullscreen-content { display: flex; flex-direction: row; flex: 1; overflow: hidden; min-height: 0; }
-#fullscreen-img { flex: 1; max-height: calc(92vh - 44px); object-fit: contain; display: block; min-width: 0; }
+.fullscreen-content { display: flex; flex-direction: row; flex: 1; overflow: hidden; min-height: 0; align-items: center; justify-content: center; }
+#fullscreen-img    { flex: 1; max-height: calc(92vh - 44px); object-fit: contain; display: block; min-width: 0; }
+#fullscreen-canvas { max-width: 100%; max-height: calc(92vh - 44px); aspect-ratio: 16/9; display: block; margin: auto; }
 .fullscreen-stats-panel {
   width: 280px; flex-shrink: 0; overflow-y: auto;
   background: var(--surface); border-left: 1px solid var(--border);
@@ -633,13 +634,38 @@ html[data-theme="light"] .metrics-proc-row {
   .pc-actions { flex-direction: column; gap: 4px; }
   .pc-actions .btn { width: 100%; }
   .fullscreen-box { width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; border-radius: 0; }
-  #fullscreen-img { max-height: calc(100dvh - 44px); }
+  #fullscreen-img    { max-height: calc(100dvh - 44px); }
+  #fullscreen-canvas { max-height: calc(100dvh - 44px); }
   .fullscreen-stats-panel {
     position: absolute; inset: 44px 0 0 0; width: 100%; height: calc(100% - 44px);
     background: rgba(7, 8, 15, 0.93); backdrop-filter: blur(8px);
     border-left: none; border-top: 1px solid var(--border); z-index: 10; overflow-y: auto;
   }
   .fullscreen-content { position: relative; }
+}
+
+/* ── Mobile landscape (short viewport — all phones rotated) ── */
+@media (max-height: 500px) {
+  /* Fullscreen modal: truly cover the screen regardless of width breakpoint */
+  .fullscreen-box { width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; border-radius: 0; }
+  #fullscreen-img    { max-height: calc(100dvh - 44px); }
+  #fullscreen-canvas { max-height: calc(100dvh - 44px); }
+
+  /* Monitor grid: 2 compact columns so cards aren't taller than the screen */
+  .monitor-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+  /* Card body stays as row (screenshot left, metrics right) */
+  .monitor-card-body { flex-direction: row !important; }
+
+  /* Screenshot: fixed 42 % of card width, aspect-ratio dropped so it doesn't blow up */
+  .monitor-screen { flex: 0 0 42%; aspect-ratio: unset; max-height: 44vw; }
+
+  /* Compact footer */
+  .monitor-card-footer { padding: 6px 10px; }
+  .monitor-card-header { padding: 6px 10px; }
+
+  /* Hide metrics toggle button — no room */
+  .metrics-toggle-btn { display: none !important; }
 }
 
 /* ── Reports ───────────────────────────────────────────────── */
