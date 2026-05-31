@@ -918,7 +918,7 @@ Namespace Forms
 
             capCard.Controls.Add(SmallLabel("Interval (sec)", New Point(14, cy)))
             capCard.Controls.Add(SmallLabel("JPEG Quality", New Point(160, cy))) : cy += 18
-            _nudInterval = DarkNud(New Point(14,  cy), 80, AppConfig.ScreenCaptureIntervalSec, 3,  60)
+            _nudInterval = DarkNud(New Point(14,  cy), 80, AppConfig.ScreenCaptureIntervalSec, 1,  60)
             _nudQuality  = DarkNud(New Point(160, cy), 80, AppConfig.ScreenCaptureQuality,     30, 100)
             capCard.Controls.Add(_nudInterval)
             capCard.Controls.Add(_nudQuality)

@@ -152,13 +152,13 @@ Namespace Config
             End Get
         End Property
 
-        ''' <summary>How often to capture a screenshot, in seconds (3–60).</summary>
+        ''' <summary>How often to capture a screenshot, in seconds (1–60).</summary>
         Public ReadOnly Property ScreenCaptureIntervalSec As Integer
             Get
                 Dim val = ReadReg("ScreenCaptureIntervalSec")
                 Dim n As Integer
-                If Integer.TryParse(val, n) AndAlso n >= 3 AndAlso n <= 60 Then Return n
-                Return 3
+                If Integer.TryParse(val, n) AndAlso n >= 1 AndAlso n <= 60 Then Return n
+                Return 1
             End Get
         End Property
 

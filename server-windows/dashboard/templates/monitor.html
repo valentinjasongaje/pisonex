@@ -5,7 +5,7 @@
   <h1>PC Monitor</h1>
   <div class="header-stats">
     <span class="stat-pill" id="refresh-indicator">● Live</span>
-    <span class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">Updates every 3s</span>
+    <span class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">Updates every 1s</span>
   </div>
 </div>
 
@@ -365,8 +365,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFullscr
 document.getElementById('fullscreen-modal').addEventListener('click', closeFullscreen);
 
 // ── Intervals ────────────────────────────────────────────────────────────────
-setInterval(refreshStatus, 3000);
-setTimeout(() => setInterval(refreshScreenshots, 3000), 2500);
+setInterval(refreshStatus, 1000);
+setTimeout(() => setInterval(refreshScreenshots, 1000), 500);
 </script>
 
 {% endblock %}
