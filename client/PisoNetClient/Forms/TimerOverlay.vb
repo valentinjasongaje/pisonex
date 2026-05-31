@@ -626,25 +626,31 @@ Namespace Forms
                 Color.FromArgb(AppConfig.TimerLowTimeArgb),
                 Color.FromArgb(AppConfig.TimerTimeArgb))
 
+            ' Snapshot the timer-only height before any row expansion.
+            ' Used below to compute Add Time Y explicitly, so the button never
+            ' lands on top of the member row regardless of call order.
+            Dim baseFormH = Me.Height
+
             ' Expand height for member row if visible
             If _lblMember.Visible Then
-                Dim baseH = Me.Height
-                Dim newH  = baseH + memberRowH + Sv(10)
+                Dim newH = baseFormH + memberRowH + Sv(10)
                 Me.Size   = New Size(formW, newH)
                 Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, newH), cornerR))
-                LayoutMemberControls(baseH, memberRowH, padX, Sv(46))
+                LayoutMemberControls(baseFormH, memberRowH, padX, Sv(46))
             End If
 
-            ' Add Time / Receiving-coins row
-            _addTimeSepY = -1   ' reset; will be set below if row is shown
-            Dim addRowH = GetAddTimeRowH(Sv)
+            ' Add Time / Receiving-coins row.
+            ' addTimeBaseY is computed from baseFormH + member expansion (if visible),
+            ' NOT from Me.Height, so it is immune to any accumulated-height drift.
+            _addTimeSepY = -1
+            Dim addRowH    = GetAddTimeRowH(Sv)
+            Dim addTimeBaseY = baseFormH + If(_lblMember.Visible, memberRowH + Sv(10), 0)
             If addRowH > 0 Then
-                Dim baseH2 = Me.Height
-                _addTimeSepY = baseH2   ' draw separator at this Y in OnPaint
-                Dim newH2 = baseH2 + addRowH
-                Me.Size   = New Size(formW, newH2)
-                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, newH2), cornerR))
-                LayoutAddTimeRow(baseH2, formW, padX, Sv)
+                _addTimeSepY = addTimeBaseY
+                Dim totalH = addTimeBaseY + addRowH
+                Me.Size   = New Size(formW, totalH)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, totalH), cornerR))
+                LayoutAddTimeRow(addTimeBaseY, formW, padX, Sv)
             Else
                 ' Hide all Add Time controls when row is not shown
                 _btnAddTime.Visible       = False

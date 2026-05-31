@@ -68,7 +68,13 @@ Namespace Forms
         ' The panel is only hidden when this reaches MEMBERSHIP_HIDE_THRESHOLD, preventing
         ' a single transient False from the server causing a visible blink.
         Private _membershipFalseCount As Integer = 0
-        Private Const MEMBERSHIP_HIDE_THRESHOLD As Integer = 3
+        Private _membershipShownAt    As DateTime = DateTime.MinValue  ' when panel last became visible
+        ' Only hide panel after this many consecutive False heartbeats AND after the panel
+        ' has been shown for at least MEMBERSHIP_MIN_VISIBLE_MS milliseconds.
+        ' This prevents overlapping async heartbeats (AutoReset timer) from racing the
+        ' count to the threshold in under a second.
+        Private Const MEMBERSHIP_HIDE_THRESHOLD     As Integer = 20   ' ~20 s of consecutive False
+        Private Const MEMBERSHIP_MIN_VISIBLE_MS     As Integer = 15000 ' panel must show ≥ 15 s first
         Private _lblModeToggle        As Label       ' "Register" / "Back to Login" link
         Private _lblUsernameHint      As Label
         Private _txtMemberUser        As TextBox
@@ -77,6 +83,14 @@ Namespace Forms
         Private _lblConfirmHint       As Label
         Private _txtMemberConf        As TextBox
         Private _lblInlineError       As Label       ' red inline error text
+
+        ' Membership modal trigger (upper-right composite: badge + pill) + overlay
+        Private _btnMemberBadge   As Button         ' circular person-icon button
+        Private _pnlMemberTrigger As Panel          ' pill label beside the badge
+        Private _memberModalOpen  As Boolean = False
+        Private _memberUsername   As String = ""    ' shown in trigger when logged in
+        Private _pnlModalBackdrop As Panel          ' full-screen dim overlay
+        Private _btnModalClose    As Button         ' × close inside the card
 
         ' Receiving-coins indicator
         Private _pnlReceivingCoins As Panel
@@ -555,10 +569,26 @@ Namespace Forms
             }
             AddHandler _lblModeToggle.Click, AddressOf OnModeToggleClick
 
+            ' Close button — top-right corner of the card (440px card width → x = 404)
+            _btnModalClose = New Button() With {
+                .Text       = "×",
+                .Size       = New Size(32, 32),
+                .Font       = New Font("Segoe UI", 14, FontStyle.Bold),
+                .ForeColor  = Color.FromArgb(200, 255, 255, 255),
+                .BackColor  = Color.Transparent,
+                .FlatStyle  = FlatStyle.Flat,
+                .Cursor     = Cursors.Hand,
+                .Location   = New Point(400, 6)
+            }
+            _btnModalClose.FlatAppearance.BorderSize = 0
+            _btnModalClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 255, 255, 255)
+            AddHandler _btnModalClose.Click, Sub(s, e) HideMemberModal()
+
             _pnlMember.Controls.AddRange({_lblUsernameHint, _txtMemberUser,
                                            _lblPasswordHint, _txtMemberPass,
                                            _lblConfirmHint, _txtMemberConf,
-                                           _lblInlineError, _lblModeToggle})
+                                           _lblInlineError, _lblModeToggle,
+                                           _btnModalClose})
 
             ' ── Receiving-coins indicator (shown when hardware controller is accepting coins for this PC) ──
             ' Wider, taller card so the title row and the live running-total line both
@@ -604,8 +634,11 @@ Namespace Forms
 
             _pnlReceivingCoins.Controls.AddRange({_lblCoinIcon, _lblCoinText, _lblCoinProgress})
 
-            ' Pulse animation timer — coin icon gently fades in/out
-            _coinPulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
+            ' Pulse animation timer — coin icon gently fades in/out.
+            ' 150 ms keeps the breathe effect visible while cutting transparent-panel
+            ' Invalidate propagations from 16/s down to ~7/s, which eliminates the
+            ' background-image repaint flicker that caused the receiving-coins UI to fluctuate.
+            _coinPulseTimer = New System.Windows.Forms.Timer() With {.Interval = 150}
             AddHandler _coinPulseTimer.Tick, AddressOf OnCoinPulseTick
 
             ' ── Done inserting coins button (shown only while receiving coins) ──
@@ -708,9 +741,41 @@ Namespace Forms
             _idlePulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
             AddHandler _idlePulseTimer.Tick, AddressOf OnIdlePulseTick
 
-            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlCoinCountdown, _btnDoneCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
+            ' ── Membership modal backdrop + badge button ──────────────────────
+            _pnlModalBackdrop = New Panel() With {
+                .BackColor = Color.FromArgb(160, 0, 0, 0),
+                .Visible   = False
+            }
+            AddHandler _pnlModalBackdrop.Click, Sub(s, e) HideMemberModal()
+
+            ' Pill trigger (sits to the right of the badge, overlapping its left edge)
+            _pnlMemberTrigger = New Panel() With {
+                .Size      = New Size(176, 40),
+                .BackColor = Color.Transparent,
+                .Visible   = False,
+                .Cursor    = Cursors.Hand
+            }
+            AddHandler _pnlMemberTrigger.Paint, AddressOf OnMemberTriggerPaint
+            AddHandler _pnlMemberTrigger.Click, Sub(s, e) ShowMemberModal()
+
+            _btnMemberBadge = New Button() With {
+                .Size      = New Size(52, 52),
+                .BackColor = Color.Transparent,
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor    = Cursors.Hand,
+                .Visible   = False,
+                .Text      = ""
+            }
+            _btnMemberBadge.FlatAppearance.BorderSize         = 0
+            _btnMemberBadge.FlatAppearance.MouseOverBackColor = Color.Transparent
+            AddHandler _btnMemberBadge.Paint, AddressOf OnBadgeButtonPaint
+            AddHandler _btnMemberBadge.Click, Sub(s, e) ShowMemberModal()
+
+            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlReceivingCoins, _pnlCoinCountdown, _btnDoneCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn, _pnlMemberTrigger, _btnMemberBadge, _pnlModalBackdrop, _pnlMember})
             _btnInsertCoin.BringToFront()
             _btnDoneCoins.BringToFront()
+            ' Badge must sit above the pill trigger (so the circle overlaps the pill's left edge)
+            _btnMemberBadge.BringToFront()
         End Sub
 
         Private Sub OnStatusPillPaint(sender As Object, e As PaintEventArgs)
@@ -792,6 +857,14 @@ Namespace Forms
         Protected Overrides Sub OnVisibleChanged(e As EventArgs)
             MyBase.OnVisibleChanged(e)
             If Me.Visible Then
+                ' Reset membership debounce each time the lock form becomes visible.
+                ' Without this, false-counts accumulated from the previous lock session
+                ' (or from multiple overlapping async heartbeats completing together)
+                ' can carry over and cause the panel to hide almost immediately.
+                _membershipFalseCount = 0
+                _lastMemberFormMode   = ""   ' force a clean layout pass for the new session
+                HideMemberModal()           ' close any modal left open from a previous lock session
+
                 MinimizeAllOtherWindows()     ' Minimize ALL apps so fullscreen games release the display
                 InstallHook()
                 StartFocusTimer()
@@ -1017,7 +1090,7 @@ Namespace Forms
         End Sub
 
         Private Function GetLayoutKey() As String
-            Return $"{_pnlMember.Visible}|{_pnlMember.Height}|{_pnlReceivingCoins.Visible}|{_pnlCoinCountdown.Visible}|{_lblLicenseWarn.Visible}|{_btnInsertCoin.Visible}|{_btnDoneCoins.Visible}"
+            Return $"{_btnMemberBadge.Visible}|{_pnlReceivingCoins.Visible}|{_pnlCoinCountdown.Visible}|{_lblLicenseWarn.Visible}|{_btnInsertCoin.Visible}|{_btnDoneCoins.Visible}"
         End Function
 
         Private Sub CenterLabels()
@@ -1086,35 +1159,39 @@ Namespace Forms
                     Me.ClientSize.Height - _pnlIdleShutdown.Height - 20)
             End If
 
-            ' Membership panel — centered, below Insert Coin / receiving-coins / sub-message
+            ' Member badge + pill trigger — upper-right, badge overlaps pill left edge
+            If _btnMemberBadge.Visible Then
+                Const Overlap As Integer = 26
+                Dim totalW = _btnMemberBadge.Width + _pnlMemberTrigger.Width - Overlap
+                Dim startX = Me.ClientSize.Width - totalW - 24
+                _btnMemberBadge.Location   = New Point(startX, 24)
+                _pnlMemberTrigger.Location = New Point(
+                    startX + Overlap,
+                    24 + (_btnMemberBadge.Height - _pnlMemberTrigger.Height) \ 2)
+            End If
+
+            ' Modal backdrop — always covers full client area
+            If _pnlModalBackdrop.Visible Then
+                _pnlModalBackdrop.Size = Me.ClientSize
+            End If
+
+            ' Modal card — always centered when open
             If _pnlMember.Visible Then
-                Dim memberBaseY = If(_pnlIdleShutdown.Visible,
-                                     _pnlIdleShutdown.Bottom + 16,
-                                     If(_btnDoneCoins.Visible,
-                                        _btnDoneCoins.Bottom + 16,
-                                        If(_pnlReceivingCoins.Visible,
-                                           _pnlReceivingCoins.Bottom + 16,
-                                           If(_btnInsertCoin.Visible,
-                                              _btnInsertCoin.Bottom + 16,
-                                              _lblSub.Bottom + 28))))
                 _pnlMember.Location = New Point(
                     (Me.ClientSize.Width - _pnlMember.Width) \ 2,
-                    memberBaseY)
-                ' In logged-in state keep the title centered within the panel.
-                ' In inline form state the title is positioned by LayoutMemberForm()
-                ' and must not be overridden here (it's left-aligned with a toggle).
+                    (Me.ClientSize.Height - _pnlMember.Height) \ 2)
                 If _memberLoggedIn Then
-                    _lblMemberTitle.Location = New Point(20, 14)
-                    _lblMemberTitle.Size     = New Size(_pnlMember.Width - 40, 20)
+                    Const LoggedInHeaderH As Integer = 88
+                    _lblMemberTitle.Location = New Point(20, (LoggedInHeaderH - 28) \ 2)
+                    _lblMemberTitle.Size     = New Size(_pnlMember.Width - 80, 28)
                 End If
             End If
 
-            ' License warning — centered, below sub-message (or below member panel)
+            ' License warning — centered, below sub-message
             If _lblLicenseWarn.Visible Then
-                Dim warnY = If(_pnlMember.Visible, _pnlMember.Bottom + 16, _lblSub.Bottom + 24)
                 _lblLicenseWarn.Location = New Point(
                     (Me.ClientSize.Width - _lblLicenseWarn.Width) \ 2,
-                    warnY)
+                    _lblSub.Bottom + 24)
             End If
         End Sub
 
@@ -1219,31 +1296,48 @@ Namespace Forms
         ' ── Membership panel paint ──────────────────────────────────────────
         Private Sub OnMemberPanelPaint(sender As Object, e As PaintEventArgs)
             Dim pnl = CType(sender, Panel)
-            Dim g = e.Graphics
+            Dim g   = e.Graphics
             g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+            Const R       As Integer = 20   ' corner radius
+            Const HeaderH As Integer = 88   ' gradient header height
             Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
-            Dim r = 14
+            Dim d    = R * 2
+
+            ' Build rounded-rect path for the whole card
             Using path = New Drawing2D.GraphicsPath()
-                Dim d = r * 2
                 path.AddArc(rect.X, rect.Y, d, d, 180, 90)
                 path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
                 path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
                 path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
                 path.CloseFigure()
-                ' Dark glass background
-                Using br = New SolidBrush(Color.FromArgb(210, 8, 12, 24))
+
+                ' Dark card body
+                Using br = New SolidBrush(Color.FromArgb(230, 8, 12, 26))
                     g.FillPath(br, path)
                 End Using
-                ' Subtle border
-                Using pen = New Pen(Color.FromArgb(45, 80, 120, 200), 1)
+
+                ' Clip to card shape, then paint gradient header
+                Dim savedState = g.Save()
+                g.SetClip(path, Drawing2D.CombineMode.Replace)
+                Dim hdrRect = New Rectangle(0, 0, pnl.Width, HeaderH)
+                Using br = New Drawing2D.LinearGradientBrush(hdrRect,
+                        Color.FromArgb(255, 29, 78, 216),
+                        Color.FromArgb(255, 109, 40, 217),
+                        Drawing2D.LinearGradientMode.Horizontal)
+                    g.FillRectangle(br, hdrRect)
+                End Using
+
+                ' Subtle separator line between header and content
+                Using pen = New Pen(Color.FromArgb(40, 255, 255, 255), 1)
+                    g.DrawLine(pen, 0, HeaderH, pnl.Width, HeaderH)
+                End Using
+                g.Restore(savedState)
+
+                ' Card border
+                Using pen = New Pen(Color.FromArgb(55, 100, 140, 255), 1)
                     g.DrawPath(pen, path)
                 End Using
-            End Using
-            ' Top accent line (matches timer overlay style)
-            Dim accentRect = New Rectangle(r, 0, pnl.Width - r * 2, 2)
-            Using br = New Drawing2D.LinearGradientBrush(accentRect, MemberAccent,
-                    Color.FromArgb(124, 58, 237), 0F)
-                g.FillRectangle(br, accentRect)
             End Using
         End Sub
 
@@ -1337,31 +1431,39 @@ Namespace Forms
         ' ── Inline form layout (positions all form controls in _pnlMember) ──────
 
         Private Sub LayoutMemberForm()
-            Const PW     As Integer = 360   ' panel width
-            Const PadX   As Integer = 24    ' horizontal padding
-            Const PadTop As Integer = 14    ' top padding
-            Const FldW   As Integer = PW - PadX * 2    ' = 312
-            Const InputH As Integer = 28
-            Const LabelH As Integer = 16
-            Const Gap    As Integer = 4     ' label → input gap
-            Const Block  As Integer = 10    ' between field groups
+            Const PW      As Integer = 440   ' panel width
+            Const HeaderH As Integer = 88    ' gradient header painted by OnMemberPanelPaint
+            Const PadX    As Integer = 32    ' horizontal content padding
+            Const FldW    As Integer = PW - PadX * 2   ' = 376
+            Const LabelH  As Integer = 18
+            Const Gap     As Integer = 6     ' label → input
+            Const Block   As Integer = 18    ' between field groups
 
-            Dim y = PadTop
-
-            ' Title (left-aligned, leaves room for toggle)
+            ' ── Header ─────────────────────────────────────────────────────────
             _lblMemberTitle.Text      = If(_isRegisterMode, "Create Account", "Member Login")
             _lblMemberTitle.AutoSize  = False
-            _lblMemberTitle.Size      = New Size(FldW - 90, 20)
-            _lblMemberTitle.TextAlign = ContentAlignment.MiddleLeft
-            _lblMemberTitle.Location  = New Point(PadX, y)
+            _lblMemberTitle.Size      = New Size(PW - 80, 28)
+            _lblMemberTitle.Font      = New Font("Segoe UI", 14, FontStyle.Bold)
+            _lblMemberTitle.ForeColor = Color.White
+            _lblMemberTitle.TextAlign = ContentAlignment.MiddleCenter
+            _lblMemberTitle.Location  = New Point(20, (HeaderH - 28) \ 2)
             _lblMemberTitle.Visible   = True
 
-            ' Mode toggle link (right side of title row)
-            _lblModeToggle.Text    = If(_isRegisterMode, "Back to Login", "Register")
-            _lblModeToggle.Visible = True
-            Dim toggleW = _lblModeToggle.PreferredWidth
-            _lblModeToggle.Location = New Point(PW - PadX - toggleW, y + 2)
-            y += 26 + 8
+            ' ── Content starts below header ────────────────────────────────────
+            Dim y = HeaderH + 22
+
+            ' Larger input fonts for the modern look
+            _txtMemberUser.Font = New Font("Segoe UI", 11)
+            _txtMemberPass.Font = New Font("Segoe UI", 11)
+            _txtMemberConf.Font = New Font("Segoe UI", 11)
+
+            ' Field labels — slightly larger and brighter than default
+            _lblUsernameHint.Font     = New Font("Segoe UI", 9, FontStyle.Regular)
+            _lblUsernameHint.ForeColor = Color.FromArgb(160, 180, 220)
+            _lblPasswordHint.Font     = New Font("Segoe UI", 9, FontStyle.Regular)
+            _lblPasswordHint.ForeColor = Color.FromArgb(160, 180, 220)
+            _lblConfirmHint.Font      = New Font("Segoe UI", 9, FontStyle.Regular)
+            _lblConfirmHint.ForeColor = Color.FromArgb(160, 180, 220)
 
             ' Username
             _lblUsernameHint.Location = New Point(PadX, y)
@@ -1370,7 +1472,7 @@ Namespace Forms
             _txtMemberUser.Location = New Point(PadX, y)
             _txtMemberUser.Width    = FldW
             _txtMemberUser.Visible  = True
-            y += InputH + Block
+            y += _txtMemberUser.Height + Block
 
             ' Password
             _lblPasswordHint.Location = New Point(PadX, y)
@@ -1379,7 +1481,7 @@ Namespace Forms
             _txtMemberPass.Location = New Point(PadX, y)
             _txtMemberPass.Width    = FldW
             _txtMemberPass.Visible  = True
-            y += InputH + Block
+            y += _txtMemberPass.Height + Block
 
             ' Confirm (register mode only)
             If _isRegisterMode Then
@@ -1389,25 +1491,38 @@ Namespace Forms
                 _txtMemberConf.Location = New Point(PadX, y)
                 _txtMemberConf.Width    = FldW
                 _txtMemberConf.Visible  = True
-                y += InputH + Block
+                y += _txtMemberConf.Height + Block
             Else
                 _lblConfirmHint.Visible = False
                 _txtMemberConf.Visible  = False
             End If
 
-            ' Inline error (space always reserved so layout doesn't jump)
+            ' Inline error
             _lblInlineError.Location = New Point(PadX, y)
-            _lblInlineError.Size     = New Size(FldW, 18)
-            y += 22
+            _lblInlineError.Size     = New Size(FldW, 20)
+            _lblInlineError.Font     = New Font("Segoe UI", 9.5F)
+            y += 24
 
-            ' Action button (full field width)
-            _btnLogin.Text     = If(_isRegisterMode, "Create Account", "Login")
-            _btnLogin.Size     = New Size(FldW, 40)
-            _btnLogin.Location = New Point(PadX, y)
-            _btnLogin.Visible  = True
-            y += 40 + PadTop
+            ' Action button — full width, rounded via Region
+            _btnLogin.Text      = If(_isRegisterMode, "Create Account", "Sign In")
+            _btnLogin.Size      = New Size(FldW, 46)
+            _btnLogin.Font      = New Font("Segoe UI", 11, FontStyle.Bold)
+            _btnLogin.BackColor = Color.FromArgb(37, 99, 235)
+            _btnLogin.FlatAppearance.MouseOverBackColor = Color.FromArgb(59, 130, 246)
+            _btnLogin.Location  = New Point(PadX, y)
+            _btnLogin.Visible   = True
+            _btnLogin.Region    = RoundedRegion(_btnLogin.Width, _btnLogin.Height, 10)
+            y += 46 + 14
 
-            ' Finalize panel height
+            ' Mode toggle link — centered below button
+            _lblModeToggle.Text    = If(_isRegisterMode, "Back to Login", "Don't have an account? Register")
+            _lblModeToggle.Font    = New Font("Segoe UI", 9, FontStyle.Underline)
+            _lblModeToggle.Visible = True
+            Dim toggleW = _lblModeToggle.PreferredWidth
+            _lblModeToggle.Location = New Point((PW - toggleW) \ 2, y)
+            y += _lblModeToggle.PreferredHeight + 20
+
+            ' Finalize panel size
             _pnlMember.Size = New Size(PW, y)
         End Sub
 
@@ -1560,30 +1675,42 @@ Namespace Forms
             _minimumLogoutMinutes = minimumLogoutMinutes
 
             ' ── Membership enabled/disabled with debounce ─────────────────────
-            ' A single False from the server (network hiccup, slow DB query, concurrent
-            ' heartbeat overlap) must not cause a visible blink.  We only hide the panel
-            ' after MEMBERSHIP_HIDE_THRESHOLD consecutive False readings (~3 seconds).
-            ' When True arrives, the counter resets immediately and the panel shows.
-            ' Note: serverLicensed is intentionally NOT used to gate panel visibility —
-            ' the ShowServerLicenseWarning banner handles that separately.
+            ' Debounce now gates the badge button visibility (not the card panel).
+            ' A single False from the server must not cause the button to vanish —
+            ' only hide it after MEMBERSHIP_HIDE_THRESHOLD consecutive False readings.
             If Not enabled Then
                 _membershipFalseCount += 1
+                ' Guard 1 — count threshold not yet reached
                 If _membershipFalseCount < MEMBERSHIP_HIDE_THRESHOLD Then
-                    Return   ' transient — keep panel in its current state
+                    Return   ' transient — keep button in its current state
                 End If
-                ' Sustained False — hide the panel
-                If _pnlMember.Visible Then
-                    _pnlMember.Visible  = False
-                    _lastMemberFormMode = "off"
+                ' Guard 2 — button must have been visible for at least MEMBERSHIP_MIN_VISIBLE_MS.
+                If _btnMemberBadge.Visible AndAlso
+                   (DateTime.Now - _membershipShownAt).TotalMilliseconds < MEMBERSHIP_MIN_VISIBLE_MS Then
+                    Return   ' threshold reached but button shown too recently — wait longer
+                End If
+                ' Sustained False for long enough — hide the composite trigger and close any open modal
+                If _btnMemberBadge.Visible Then
+                    _btnMemberBadge.Visible   = False
+                    _pnlMemberTrigger.Visible = False
+                    _lastMemberFormMode       = "off"
+                    HideMemberModal()
                 End If
                 Return
             End If
 
-            ' enabled = True: reset debounce and ensure panel is visible
+            ' enabled = True: reset debounce and ensure composite trigger is visible
             _membershipFalseCount = 0
-            If Not _pnlMember.Visible Then _pnlMember.Visible = True
+            If Not _btnMemberBadge.Visible Then
+                _btnMemberBadge.Visible   = True
+                _pnlMemberTrigger.Visible = True
+                _membershipShownAt        = DateTime.Now
+            End If
+            _btnMemberBadge.Invalidate()
+            _pnlMemberTrigger.Invalidate()   ' repaint pill text / border color
 
-            Const PW As Integer = 360
+            Const PW As Integer = 440
+            Const HeaderH As Integer = 88   ' gradient header height painted in OnMemberPanelPaint
             Dim cx = PW \ 2
             Dim panelNeedsRepaint As Boolean = False
 
@@ -1597,25 +1724,32 @@ Namespace Forms
                     _btnRegister.Visible = False
                     _btnLogin.Visible    = False
 
+                    ' Title in gradient header area
                     _lblMemberTitle.AutoSize  = False
-                    _lblMemberTitle.Size      = New Size(PW - 40, 20)
+                    _lblMemberTitle.Size      = New Size(PW - 80, 28)
+                    _lblMemberTitle.Font      = New Font("Segoe UI", 13, FontStyle.Bold)
+                    _lblMemberTitle.ForeColor = Color.White
                     _lblMemberTitle.TextAlign = ContentAlignment.MiddleCenter
-                    _lblMemberTitle.Location  = New Point(20, 14)
+                    _lblMemberTitle.Location  = New Point(20, (HeaderH - 28) \ 2)
                     _lblMemberTitle.Visible   = True
 
-                    _lblMemberInfo.Location = New Point(20, 38)
-                    _lblMemberInfo.Size     = New Size(PW - 40, 24)
+                    ' Content below header
+                    _lblMemberInfo.Location = New Point(32, HeaderH + 20)
+                    _lblMemberInfo.Size     = New Size(PW - 64, 26)
+                    _lblMemberInfo.Font     = New Font("Segoe UI", 13, FontStyle.Bold)
                     _lblMemberInfo.Visible  = True
 
-                    _lblMemberTime.Location = New Point(20, 64)
-                    _lblMemberTime.Size     = New Size(PW - 40, 22)
+                    _lblMemberTime.Location = New Point(32, HeaderH + 52)
+                    _lblMemberTime.Size     = New Size(PW - 64, 22)
+                    _lblMemberTime.Font     = New Font("Segoe UI", 10.5F)
                     _lblMemberTime.Visible  = True
 
-                    _btnLogout.Location = New Point(cx - _btnLogout.Width \ 2, 96)
+                    _btnLogout.Size     = New Size(140, 38)
+                    _btnLogout.Location = New Point(cx - 70, HeaderH + 88)
                     _btnLogout.Visible  = True
                     _btnLogout.Enabled  = True
 
-                    _pnlMember.Size = New Size(PW, 144)
+                    _pnlMember.Size = New Size(PW, HeaderH + 144)
                     _pnlMember.ResumeLayout(True)
                     _lastMemberFormMode = "member"
                     panelNeedsRepaint   = True
@@ -1631,6 +1765,8 @@ Namespace Forms
                 If _lblMemberInfo.Text <> username Then
                     _lblMemberInfo.Text      = username
                     _lblMemberInfo.ForeColor = Color.FromArgb(34, 197, 94)
+                    _memberUsername          = username
+                    _pnlMemberTrigger.Invalidate()
                     panelNeedsRepaint        = True
                 End If
 
@@ -1658,6 +1794,10 @@ Namespace Forms
 
             Else
                 ' ── Not logged in — inline login / register form ──────────────
+                If _memberUsername <> "" Then
+                    _memberUsername = ""
+                    _pnlMemberTrigger.Invalidate()
+                End If
                 ' Hide info controls (guard each to avoid redundant property sets)
                 If _lblMemberInfo.Visible  Then _lblMemberInfo.Visible  = False
                 If _lblMemberTime.Visible  Then _lblMemberTime.Visible  = False
@@ -1681,7 +1821,16 @@ Namespace Forms
             End If
 
             ' Repaint panel only when something visual actually changed
-            If panelNeedsRepaint Then _pnlMember.Invalidate()
+            If panelNeedsRepaint Then
+                _pnlMember.Invalidate()
+                ' If the modal is open and the card size changed (e.g. login → logged-in),
+                ' re-center it immediately so it doesn't drift off-center.
+                If _memberModalOpen Then
+                    _pnlMember.Location = New Point(
+                        (Me.ClientSize.Width - _pnlMember.Width) \ 2,
+                        (Me.ClientSize.Height - _pnlMember.Height) \ 2)
+                End If
+            End If
 
             ' Full layout pass only when structural dimensions changed;
             ' otherwise re-center just the sub-message (its AutoSize width may shift).
@@ -1693,6 +1842,149 @@ Namespace Forms
                 _lblSub.Location = New Point(
                     (Me.ClientSize.Width - _lblSub.Width) \ 2,
                     _lblSub.Location.Y)
+            End If
+        End Sub
+
+        ' ── Membership modal show / hide ──────────────────────────────────────
+
+        Private Sub OnMemberTriggerPaint(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g   = e.Graphics
+            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+            Dim r    = pnl.Height \ 2
+            Dim rect = New Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1)
+            Dim d    = r * 2
+
+            ' Pill background
+            Using path = New Drawing2D.GraphicsPath()
+                path.AddArc(rect.X, rect.Y, d, d, 180, 90)
+                path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90)
+                path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90)
+                path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+                Using br = New SolidBrush(Color.FromArgb(200, 6, 10, 22))
+                    g.FillPath(br, path)
+                End Using
+                Dim borderColor = If(_memberLoggedIn,
+                                     Color.FromArgb(110, 34, 197, 94),
+                                     Color.FromArgb(100, 79, 142, 247))
+                Using pen = New Pen(borderColor, 1.5F)
+                    g.DrawPath(pen, path)
+                End Using
+            End Using
+
+            ' Text — offset right of the overlap zone (26px) so the badge circle hides the left portion
+            Const OverlapZone As Integer = 26
+            Dim text As String
+            Dim fore As Color
+            If _memberLoggedIn AndAlso Not String.IsNullOrEmpty(_memberUsername) Then
+                text = _memberUsername
+                fore = Color.FromArgb(34, 197, 94)
+            Else
+                text = "Login / Register"
+                fore = Color.FromArgb(210, 190, 210, 240)
+            End If
+            Using fnt = New Font("Segoe UI", 9.5F, FontStyle.Bold)
+                Dim sf = New StringFormat() With {
+                    .Alignment     = StringAlignment.Near,
+                    .LineAlignment = StringAlignment.Center,
+                    .Trimming      = StringTrimming.EllipsisCharacter
+                }
+                Dim textRect = New RectangleF(OverlapZone + 6, 0, pnl.Width - OverlapZone - 14, pnl.Height)
+                Using br = New SolidBrush(fore)
+                    g.DrawString(text, fnt, br, textRect, sf)
+                End Using
+            End Using
+        End Sub
+
+        Private Sub ShowMemberModal()
+            If _memberModalOpen Then Return
+            ' Ensure content is laid out before showing (first open, mode may be "off")
+            If _lastMemberFormMode = "off" OrElse _lastMemberFormMode = "" Then
+                _pnlMember.SuspendLayout()
+                LayoutMemberForm()
+                _pnlMember.ResumeLayout(True)
+                _lastMemberFormMode = If(_isRegisterMode, "register", "login")
+            End If
+            _memberModalOpen = True
+            _pnlModalBackdrop.Size    = Me.ClientSize
+            _pnlModalBackdrop.Visible = True
+            _pnlModalBackdrop.BringToFront()
+            _pnlMember.Location = New Point(
+                (Me.ClientSize.Width - _pnlMember.Width) \ 2,
+                (Me.ClientSize.Height - _pnlMember.Height) \ 2)
+            _pnlMember.BringToFront()
+            _pnlMember.Visible = True
+            If Not _memberLoggedIn AndAlso _txtMemberUser.Visible Then
+                _txtMemberUser.Focus()
+            End If
+        End Sub
+
+        Private Sub HideMemberModal()
+            If Not _memberModalOpen Then Return
+            _memberModalOpen          = False
+            _pnlMember.Visible        = False
+            _pnlModalBackdrop.Visible = False
+            ' Clear any inline error when closing
+            _lblInlineError.Visible = False
+            _lblInlineError.Text    = ""
+        End Sub
+
+        ' ── Badge button custom paint (circular with person icon) ─────────────
+
+        Private Sub OnBadgeButtonPaint(sender As Object, e As PaintEventArgs)
+            Dim g   = e.Graphics
+            Dim btn = CType(sender, Button)
+            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+            Dim sz  = btn.ClientSize
+            Dim cx  = sz.Width \ 2
+            Dim cy  = sz.Height \ 2
+            Dim r   = Math.Min(cx, cy) - 2
+
+            ' Circle background
+            Dim fillAlpha = If(_memberLoggedIn, 180, 140)
+            Dim fillColor = If(_memberLoggedIn,
+                               Color.FromArgb(fillAlpha, 20, 60, 20),
+                               Color.FromArgb(fillAlpha, 8, 28, 60))
+            Using br = New SolidBrush(fillColor)
+                g.FillEllipse(br, cx - r, cy - r, r * 2, r * 2)
+            End Using
+
+            ' Circle border
+            Dim borderColor = If(_memberLoggedIn, MemberAccent, Color.FromArgb(180, 34, 197, 94))
+            If _memberLoggedIn Then borderColor = Color.FromArgb(200, 34, 197, 94)
+            Using pen = New Pen(borderColor, 2)
+                g.DrawEllipse(pen, cx - r + 1, cy - r + 1, (r - 1) * 2, (r - 1) * 2)
+            End Using
+
+            ' Person silhouette — head circle + body arc
+            Dim headR  = CInt(r * 0.28)
+            Dim headCy = cy - CInt(r * 0.18)
+            Using br = New SolidBrush(Color.FromArgb(220, 255, 255, 255))
+                g.FillEllipse(br, cx - headR, headCy - headR, headR * 2, headR * 2)
+                Dim bodyW = CInt(r * 0.72)
+                Dim bodyY = headCy + headR + 2
+                Dim bodyH = CInt(r * 0.48)
+                Using bp = New Drawing2D.GraphicsPath()
+                    bp.AddArc(cx - bodyW, bodyY, bodyW * 2, bodyH * 2, 180, 180)
+                    bp.CloseFigure()
+                    g.FillPath(br, bp)
+                End Using
+            End Using
+
+            ' Green status dot when logged in
+            If _memberLoggedIn Then
+                Dim dotR  = 5
+                Dim dotX  = cx + r - dotR - 1
+                Dim dotY  = cy + r - dotR - 1
+                Using br = New SolidBrush(Color.FromArgb(34, 197, 94))
+                    g.FillEllipse(br, dotX, dotY, dotR * 2, dotR * 2)
+                End Using
+                Using pen = New Pen(Color.FromArgb(8, 12, 24), 1.5F)
+                    g.DrawEllipse(pen, dotX, dotY, dotR * 2, dotR * 2)
+                End Using
             End If
         End Sub
 
@@ -1771,8 +2063,12 @@ Namespace Forms
                     _coinPulseAlpha = 80 : _coinPulseUp = True
                 End If
             End If
-            _lblCoinIcon.ForeColor = Color.FromArgb(_coinPulseAlpha, 250, 204, 21)
-            ' Repaint the panel so the gold border breathes with the dot.
+            ' Do NOT update _lblCoinIcon.ForeColor here — changing a property on a
+            ' Transparent-background label inside a Transparent-background panel
+            ' propagates Invalidate all the way up to LockForm, triggering a full
+            ' OnPaintBackground (background image + dark overlay) every tick.
+            ' The gold border in OnReceivingCoinsPaint already uses _coinPulseAlpha,
+            ' so one Invalidate on the panel is enough for the visual effect.
             If _pnlReceivingCoins.Visible Then _pnlReceivingCoins.Invalidate()
         End Sub
 
