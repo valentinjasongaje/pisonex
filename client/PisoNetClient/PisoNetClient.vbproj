@@ -27,4 +27,18 @@
     <EmbeddedResource Include="Resources\pisonet_wallpaper_1920x1080.png" />
   </ItemGroup>
 
+  <!--
+    FFmpeg binary — bundled alongside the client exe.
+    Copy ffmpeg.exe (essentials build, just the single binary) into
+    client/PisoNetClient/ next to this .vbproj file, then rebuild.
+    On every build/publish it will be copied to the output folder so
+    PisoNetClient.exe and ffmpeg.exe always travel together.
+  -->
+  <ItemGroup>
+    <Content Include="ffmpeg.exe" Condition="Exists('ffmpeg.exe')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
