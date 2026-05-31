@@ -99,12 +99,12 @@
         </div>
       </div>
 
-      <!-- Restart / Shutdown — side by side -->
+      <!-- Restart / Shutdown — icon-only square buttons -->
       <div style="display:flex;gap:.5rem;margin-top:.85rem;padding-top:.75rem;border-top:1px solid var(--border);">
-        <button class="btn btn-secondary btn-sm" style="flex:1;justify-content:center;"
-          onclick="ovSysControl('restart')" title="Restart Service">↻ Restart</button>
-        <button class="btn btn-danger btn-sm" style="flex:1;justify-content:center;"
-          onclick="ovSysControl('shutdown')" title="Shutdown OPi">⏻ Shutdown</button>
+        <button class="btn btn-secondary" style="flex:1;aspect-ratio:1;font-size:1.4rem;padding:0;display:flex;align-items:center;justify-content:center;"
+          onclick="ovSysControl('restart')" title="Restart Service">↻</button>
+        <button class="btn btn-danger" style="flex:1;aspect-ratio:1;font-size:1.4rem;padding:0;display:flex;align-items:center;justify-content:center;"
+          onclick="ovSysControl('shutdown')" title="Shutdown OPi">⏻</button>
       </div>
       <div id="ov-sys-status" style="font-size:.78rem;margin-top:.5rem;min-height:1.1em;"></div>
 
