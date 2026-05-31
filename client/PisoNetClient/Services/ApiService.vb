@@ -43,6 +43,9 @@ Namespace Services
         Public Property today_pesos As Integer = 0
         Public Property today_sessions As Integer = 0
         Public Property today_minutes As Integer = 0
+        ' Live-stream hint: >0 = server wants client to capture at this interval (ms);
+        ' 0 = use the client's own configured interval.
+        Public Property capture_interval_ms As Integer = 0
     End Class
 
     Public Class ApiService

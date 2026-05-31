@@ -926,6 +926,60 @@ def serve_screenshot(
     )
 
 
+@router.post("/monitor/watch/{pc_number}")
+async def watch_pc(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Called by dashboard when admin opens fullscreen view of a PC.
+    Sets a 12-second TTL that tells the PC client to ramp up to ~5 fps.
+    The dashboard renews it every 8 s while the view is open."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_watched(pc_number)
+    return {"status": "ok"}
+
+
+@router.get("/api/pc/{pc_number}/stream")
+async def stream_screenshot(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """MJPEG stream for a single PC — one frame per new screenshot upload.
+    The browser <img> keeps this connection open and renders each frame,
+    giving a near-live view at whatever rate the client is capturing."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    import asyncio
+    import screenshot_store
+
+    async def _mjpeg():
+        while True:
+            ev = screenshot_store.get_event(pc_number)
+            ev.clear()
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                # No new frame in 10 s — PC offline or stream abandoned; stop.
+                break
+            data = screenshot_store.get(pc_number)
+            if data:
+                header = (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Content-Length: " + str(len(data)).encode() + b"\r\n"
+                    b"\r\n"
+                )
+                yield header + data + b"\r\n"
+
+    return StreamingResponse(
+        _mjpeg(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 # ── Documentation pages ───────────────────────────────────────────────────────
 
 @router.get("/docs/api", response_class=HTMLResponse)

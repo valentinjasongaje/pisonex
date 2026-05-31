@@ -147,6 +147,7 @@ Module Program
         AddHandler _session.CoinProgressChanged, AddressOf OnCoinProgressChanged
         AddHandler _session.CoinSlotChanged, AddressOf OnCoinSlotChanged
         AddHandler _session.MembershipUpdated, AddressOf OnMembershipUpdated
+        AddHandler _session.CaptureIntervalChanged, AddressOf OnCaptureIntervalChanged
 
         ' Insert Coin event from lock form and overlay
         AddHandler _lockMgr.LockFormInsertCoinRequested, AddressOf OnInsertCoinRequested
@@ -321,6 +322,10 @@ Module Program
     Private Sub OnCoinSlotChanged(enabled As Boolean)
         _lockMgr.UpdateCoinSlot(enabled)
         _overlay.ShowAddTimeButton(enabled)
+    End Sub
+
+    Private Sub OnCaptureIntervalChanged(intervalMs As Integer)
+        _capture?.SetIntervalMs(intervalMs)
     End Sub
 
     Private Sub OnInsertCoinRequested()

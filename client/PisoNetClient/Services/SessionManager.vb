@@ -42,6 +42,9 @@ Namespace Services
         ' Coin-slot-enabled dedup — only fire event when state changes
         Private _lastCoinSlotEnabled As Boolean = True
 
+        ' Capture-interval dedup — only fire event when server-requested interval changes
+        Private _lastCaptureIntervalMs As Integer = 0
+
         ' Guards _remainingSeconds from concurrent access
         Private ReadOnly _stateLock As New Object()
 
@@ -74,6 +77,8 @@ Namespace Services
                                         balanceSeconds As Integer, canLogout As Boolean,
                                         zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
                                         minimumLogoutMinutes As Integer, serverLicensed As Boolean)
+        ''' <summary>Fired when the server requests a specific capture interval (ms). 0 means reset to configured.</summary>
+        Public Event CaptureIntervalChanged(intervalMs As Integer)
 
         ' ── Heartbeat interval ───────────────────────────────────────
         ' 1-second poll in all states.  On a local LAN with FastAPI +
@@ -288,6 +293,13 @@ Namespace Services
                 response.today_pesos,
                 response.today_sessions,
                 response.today_minutes)
+
+            ' Server-driven capture interval — ramp up when admin is watching this PC,
+            ' reset to configured when not watched (0 = use own config).
+            If response.capture_interval_ms <> _lastCaptureIntervalMs Then
+                _lastCaptureIntervalMs = response.capture_interval_ms
+                RaiseEvent CaptureIntervalChanged(response.capture_interval_ms)
+            End If
         End Function
 
         ' ── Public state ─────────────────────────────────────────────

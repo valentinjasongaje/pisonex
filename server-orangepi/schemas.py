@@ -42,6 +42,9 @@ class PCHeartbeatResponse(BaseModel):
     today_pesos: int = 0
     today_sessions: int = 0
     today_minutes: int = 0
+    # Live-stream hint: >0 means server wants client to capture at this rate (ms),
+    # 0 means client should use its own configured interval.
+    capture_interval_ms: int = 0
 
 class PCStatusResponse(BaseModel):
     pc_number: int

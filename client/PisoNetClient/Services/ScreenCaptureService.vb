@@ -83,6 +83,20 @@ Namespace Services
             Return Nothing
         End Function
 
+        ''' <summary>
+        ''' Reschedule the capture timer to a server-requested interval.
+        ''' Pass 0 to reset to the admin-configured ScreenCaptureIntervalSec.
+        ''' </summary>
+        Public Sub SetIntervalMs(ms As Integer)
+            If _timer Is Nothing OrElse _disposed Then Return
+            Dim target = If(ms > 0, ms, AppConfig.ScreenCaptureIntervalSec * 1_000)
+            If _timer.Interval <> target Then
+                _timer.Stop()
+                _timer.Interval = target
+                _timer.Start()
+            End If
+        End Sub
+
         Public Sub Dispose() Implements IDisposable.Dispose
             If Not _disposed Then
                 _disposed = True

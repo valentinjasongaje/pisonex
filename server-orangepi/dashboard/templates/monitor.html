@@ -177,7 +177,7 @@ const PC_NUMBERS = [{% for pc in pcs %}{{ pc.pc_number }}{% if not loop.last %},
 let _fullscreenPc = null;
 let _fullscreenStatsOpen = false;
 let _fullscreenStatsTimer = null;
-let _fullscreenImgTimer = null;
+let _watchKeepalive = null;
 
 function fmtHMS(sec) {
   const h = Math.floor(sec / 3600);
@@ -292,13 +292,16 @@ function toggleMetrics(pcNumber) {
 
 // ── Fullscreen modal ─────────────────────────────────────────────────────────
 
+function _markWatched(pcNumber) {
+  fetch(`/dashboard/monitor/watch/${pcNumber}`, {method: 'POST'}).catch(() => {});
+}
+
 function openFullscreen(pcNumber) {
   _fullscreenPc = pcNumber;
   const modal = document.getElementById('fullscreen-modal');
   const img   = document.getElementById('fullscreen-img');
   document.getElementById('fullscreen-label').textContent =
     `PC ${String(pcNumber).padStart(2, '0')}`;
-  img.src = `/dashboard/api/pc/${pcNumber}/screenshot?t=${Date.now()}`;
   modal.classList.remove('hidden');
 
   // Reset stats panel
@@ -314,21 +317,20 @@ function openFullscreen(pcNumber) {
     screen.orientation.lock('landscape').catch(() => {});
   }
 
-  // Refresh fullscreen screenshot every 1 second for near-live view
-  if (_fullscreenImgTimer) clearInterval(_fullscreenImgTimer);
-  _fullscreenImgTimer = setInterval(() => {
-    if (_fullscreenPc !== null) {
-      document.getElementById('fullscreen-img').src =
-        `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${Date.now()}`;
-    }
-  }, 1000);
+  // Tell server to ramp up capture for this PC, then open MJPEG stream.
+  // The stream keeps the connection open; the browser renders each frame as it arrives.
+  _markWatched(pcNumber);
+  if (_watchKeepalive) clearInterval(_watchKeepalive);
+  _watchKeepalive = setInterval(() => _markWatched(pcNumber), 8000);
+  img.src = `/dashboard/api/pc/${pcNumber}/stream`;
 }
 
 function closeFullscreen() {
   document.getElementById('fullscreen-modal').classList.add('hidden');
+  // Clearing src disconnects the MJPEG stream immediately
   document.getElementById('fullscreen-img').src = '';
-  clearInterval(_fullscreenImgTimer);
-  _fullscreenImgTimer = null;
+  clearInterval(_watchKeepalive);
+  _watchKeepalive = null;
   _fullscreenPc = null;
   _fullscreenStatsOpen = false;
   clearInterval(_fullscreenStatsTimer);
