@@ -196,10 +196,7 @@ function refreshScreenshots() {
       img.src = `/dashboard/api/pc/${n}/screenshot?t=${t}`;
     }
   });
-  if (_fullscreenPc !== null) {
-    document.getElementById('fullscreen-img').src =
-      `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${t}`;
-  }
+  // Fullscreen view uses a persistent MJPEG stream — do NOT overwrite its src here.
 }
 
 // ── Status refresh ──────────────────────────────────────────────────────────
