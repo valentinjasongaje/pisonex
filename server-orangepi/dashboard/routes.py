@@ -1030,6 +1030,21 @@ async def stream_screenshot(
     import screenshot_store
 
     async def _mjpeg():
+        def _frame(data: bytes) -> bytes:
+            return (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(data)).encode() + b"\r\n"
+                b"\r\n" + data + b"\r\n"
+            )
+
+        # Yield the last cached frame immediately (< 100 ms) so the browser
+        # shows something as soon as the modal opens, without waiting for the
+        # next scheduled upload.
+        cached = screenshot_store.get(pc_number)
+        if cached:
+            yield _frame(cached)
+
         while True:
             ev = screenshot_store.get_event(pc_number)
             ev.clear()
@@ -1040,13 +1055,7 @@ async def stream_screenshot(
                 break
             data = screenshot_store.get(pc_number)
             if data:
-                header = (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    b"Content-Length: " + str(len(data)).encode() + b"\r\n"
-                    b"\r\n"
-                )
-                yield header + data + b"\r\n"
+                yield _frame(data)
 
     return StreamingResponse(
         _mjpeg(),

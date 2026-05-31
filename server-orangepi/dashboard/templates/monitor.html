@@ -160,6 +160,7 @@
   <div class="fullscreen-box" onclick="event.stopPropagation()">
     <div class="fullscreen-header">
       <span id="fullscreen-label"></span>
+      <span id="fullscreen-live-badge" style="display:none;">● LIVE</span>
       <div class="fullscreen-actions">
         <button id="fs-stats-btn" class="fullscreen-stats-btn" onclick="toggleFullscreenStats()" title="Toggle stats">📊 Stats</button>
         <button class="fullscreen-close" onclick="closeFullscreen()">✕</button>
@@ -295,6 +296,11 @@ function toggleMetrics(pcNumber) {
 
 // ── Fullscreen modal ─────────────────────────────────────────────────────────
 
+function _setLiveBadge(on) {
+  const b = document.getElementById('fullscreen-live-badge');
+  if (b) b.style.display = on ? '' : 'none';
+}
+
 function _markWatched(pcNumber) {
   fetch(`/dashboard/monitor/watch/${pcNumber}`, {method: 'POST'}).catch(() => {});
 }
@@ -330,8 +336,10 @@ function openFullscreen(pcNumber) {
   _watchKeepalive = setInterval(() => _markWatched(pcNumber), 8000);
 
   // ── Show MJPEG immediately as fallback while FFmpeg stream warms up ──
+  _setLiveBadge(false);
   canvas.style.display = 'none';
   img.style.display = '';
+  img.onload = function() { _setLiveBadge(true); };   // badge on first frame
   img.src = `/dashboard/api/pc/${pcNumber}/stream`;
 
   // ── Start jsmpeg WebSocket stream in parallel ────────────────────────
@@ -356,6 +364,7 @@ function openFullscreen(pcNumber) {
       img.style.display  = 'none';
       canvas.style.display = '';
       _resizeStreamCanvas();
+      _setLiveBadge(true);
     },
     onStalled: function() {
       console.warn('[jsmpeg] Stream stalled');
@@ -412,10 +421,14 @@ function _fallbackToMjpeg() {
   const img    = document.getElementById('fullscreen-img');
   canvas.style.display = 'none';
   img.style.display    = '';
+  _setLiveBadge(false);                              // hide until first MJPEG frame
+  img.onload = function() { _setLiveBadge(true); };
   img.src = `/dashboard/api/pc/${_fullscreenPc}/stream`;
 }
 
 function closeFullscreen() {
+  _setLiveBadge(false);
+
   // Destroy jsmpeg player (closes WebSocket, frees decoder)
   if (_jsmpegPlayer) { _jsmpegPlayer.destroy(); _jsmpegPlayer = null; }
   _streamSwitched = false;
