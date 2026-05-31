@@ -8,9 +8,12 @@ Imports PisoNetClient.Config
 Namespace Services
 
     ''' <summary>
-    ''' Captures the primary screen every 5 seconds and uploads a JPEG
-    ''' thumbnail to the server so admins can monitor PCs remotely.
-    ''' Captures continuously while enabled — including the lock screen.
+    ''' Captures the primary screen on a configurable interval and uploads a JPEG
+    ''' to the server so admins can monitor PCs remotely.
+    ''' When the server requests a fast interval (stream mode), resolution and
+    ''' quality are reduced automatically so captures stay within the frame budget.
+    ''' Timer is sequential (AutoReset=False, restarted after each upload) so
+    ''' frames never pile up regardless of how fast the interval is.
     ''' </summary>
     Public Class ScreenCaptureService
         Implements IDisposable
@@ -19,6 +22,14 @@ Namespace Services
         Private ReadOnly _session As SessionManager
         Private _timer            As System.Timers.Timer
         Private _disposed         As Boolean = False
+
+        ' True while a capture+upload is in progress — guards re-entrancy.
+        Private _capturing As Boolean = False
+
+        ' Stream mode: interval requested by server is < 500 ms.
+        ' Lower width + quality so each frame is captured and uploaded in < 33 ms.
+        Private Const STREAM_WIDTH   As Integer = 640
+        Private Const STREAM_QUALITY As Integer = 50
 
         Public Sub New(api As ApiService, session As SessionManager)
             _api     = api
@@ -29,45 +40,68 @@ Namespace Services
             Dim intervalMs = AppConfig.ScreenCaptureIntervalSec * 1_000
             _timer = New System.Timers.Timer(intervalMs)
             AddHandler _timer.Elapsed, AddressOf OnCaptureTick
-            _timer.AutoReset = True
+            _timer.AutoReset = False   ' sequential — restarted after each upload
             _timer.Start()
         End Sub
 
         Private Async Sub OnCaptureTick(sender As Object, e As ElapsedEventArgs)
-            If Not AppConfig.ScreenCaptureEnabled Then Return
+            If _disposed Then Return
+            If Not AppConfig.ScreenCaptureEnabled Then
+                _timer?.Start()   ' keep ticking even when disabled
+                Return
+            End If
+
+            ' Guard against re-entrancy (should not happen with AutoReset=False,
+            ' but SetIntervalMs can restart the timer while a capture is running).
+            If _capturing Then Return
+            _capturing = True
+
             Try
-                Dim jpeg = CaptureScreen()
+                Dim streamMode = _timer.Interval < 500
+                Dim jpeg = CaptureScreen(streamMode)
                 Await _api.UploadScreenshotAsync(jpeg)
             Catch
                 ' Silently skip — network may be temporarily down
+            Finally
+                _capturing = False
+                If Not _disposed Then _timer?.Start()   ' schedule next frame
             End Try
         End Sub
 
-        ''' <summary>Captures primary screen, scales to 960 px wide, returns JPEG bytes.</summary>
-        Private Function CaptureScreen() As Byte()
+        ''' <summary>
+        ''' Captures the primary screen and returns JPEG bytes.
+        ''' Stream mode: 640 px wide, quality 50 (fast, small).
+        ''' Normal mode: 1280 px wide, quality from AppConfig.
+        ''' </summary>
+        Private Function CaptureScreen(streamMode As Boolean) As Byte()
             Dim bounds = Screen.PrimaryScreen.Bounds
+
+            Dim targetW = If(streamMode, STREAM_WIDTH, 1280)
+            Dim targetH = CInt(bounds.Height * (CDbl(targetW) / bounds.Width))
+            Dim quality = If(streamMode, STREAM_QUALITY, AppConfig.ScreenCaptureQuality)
+
+            ' For stream mode use a faster interpolation — the lower resolution
+            ' already provides enough sharpness at 640px.
+            Dim interpolation = If(streamMode,
+                Drawing2D.InterpolationMode.Bilinear,
+                Drawing2D.InterpolationMode.HighQualityBicubic)
 
             Using bmp = New Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb)
                 Using g = Graphics.FromImage(bmp)
                     g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size)
                 End Using
 
-                ' Scale to 1280 wide, maintain aspect ratio
-                ' Use HighQualityBicubic so the resize is sharp regardless of quality setting
-                Dim targetW = 1280
-                Dim targetH = CInt(bounds.Height * (1280.0 / bounds.Width))
-
                 Using scaled = New Bitmap(targetW, targetH, PixelFormat.Format32bppArgb)
                     Using g2 = Graphics.FromImage(scaled)
-                        g2.InterpolationMode  = Drawing2D.InterpolationMode.HighQualityBicubic
-                        g2.CompositingQuality = Drawing2D.CompositingQuality.HighQuality
-                        g2.SmoothingMode      = Drawing2D.SmoothingMode.HighQuality
+                        g2.InterpolationMode  = interpolation
+                        g2.CompositingQuality = Drawing2D.CompositingQuality.HighSpeed
+                        g2.SmoothingMode      = Drawing2D.SmoothingMode.None
                         g2.DrawImage(bmp, New Rectangle(0, 0, targetW, targetH))
                     End Using
                     Using ms = New MemoryStream()
                         Dim codec = GetJpegCodec()
                         Using ep = New EncoderParameters(1)
-                            ep.Param(0) = New EncoderParameter(Encoder.Quality, CLng(AppConfig.ScreenCaptureQuality))
+                            ep.Param(0) = New EncoderParameter(Encoder.Quality, CLng(quality))
                             scaled.Save(ms, codec, ep)
                         End Using
                         Return ms.ToArray()
@@ -86,6 +120,7 @@ Namespace Services
         ''' <summary>
         ''' Reschedule the capture timer to a server-requested interval.
         ''' Pass 0 to reset to the admin-configured ScreenCaptureIntervalSec.
+        ''' Stream mode (interval &lt; 500 ms) automatically uses lower resolution/quality.
         ''' </summary>
         Public Sub SetIntervalMs(ms As Integer)
             If _timer Is Nothing OrElse _disposed Then Return

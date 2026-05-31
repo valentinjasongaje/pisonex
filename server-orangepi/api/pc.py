@@ -208,8 +208,8 @@ def heartbeat(
         today_sessions=today_earnings["total_sessions"],
         today_minutes=today_earnings["total_minutes"],
         # When an admin is watching this PC's MJPEG stream, tell the client
-        # to ramp up capture to ~5 fps; 0 means "use your own config".
-        capture_interval_ms=200 if command_store.is_watched(pc_number) else 0,
+        # to ramp up to ~30 fps; 0 means "use your own config".
+        capture_interval_ms=33 if command_store.is_watched(pc_number) else 0,
     )
 
 
