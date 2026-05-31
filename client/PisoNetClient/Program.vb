@@ -17,6 +17,7 @@ Module Program
     Private _overlay As TimerOverlay
     Private _tray As SystemTray
     Private _capture As ScreenCaptureService
+    Private _streamCapture As StreamCaptureService
     Private _metrics As MetricsService
     Private _notifs As NotificationService
     Private _guardTimer As System.Timers.Timer   ' mutual watchdog keeper
@@ -189,9 +190,12 @@ Module Program
             ' Start heartbeat + local countdown
             _session.Start()
 
-            ' Start screen capture for remote monitoring
+            ' Start screen capture for remote monitoring (grid thumbnails)
             _capture = New ScreenCaptureService(_api, _session)
             _capture.Start()
+
+            ' FFmpeg live stream — started/stopped by server-driven CaptureIntervalChanged
+            _streamCapture = New StreamCaptureService(_api.BaseWsUrl, AppConfig.PCNumber)
 
             ' Start performance metrics reporting
             _metrics = New MetricsService(_api)
@@ -325,7 +329,14 @@ Module Program
     End Sub
 
     Private Sub OnCaptureIntervalChanged(intervalMs As Integer)
-        _capture?.SetIntervalMs(intervalMs)
+        If intervalMs > 0 Then
+            ' Admin opened fullscreen — start FFmpeg WebSocket stream
+            _streamCapture?.StartStream()
+        Else
+            ' Admin closed fullscreen — stop FFmpeg, release resources
+            _streamCapture?.StopStream()
+        End If
+        ' JPEG thumbnail capture continues at its normal rate for the grid view
     End Sub
 
     Private Sub OnInsertCoinRequested()

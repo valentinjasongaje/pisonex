@@ -166,18 +166,25 @@
       </div>
     </div>
     <div class="fullscreen-content">
+      {# jsmpeg canvas — shown when FFmpeg stream is active #}
+      <canvas id="fullscreen-canvas" style="display:none;width:100%;height:100%;background:#000;object-fit:contain"></canvas>
+      {# MJPEG img — shown while waiting for FFmpeg stream or as fallback #}
       <img id="fullscreen-img" src="" alt="Full screen view" />
+      <div id="fullscreen-overlay-msg" style="display:none;position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#fff;font-size:14px;background:rgba(0,0,0,.55);">Connecting stream…</div>
       <div id="fullscreen-stats-panel" class="fullscreen-stats-panel hidden"></div>
     </div>
   </div>
 </div>
 
+<script src="/dashboard/static/js/jsmpeg.min.js"></script>
 <script>
 const PC_NUMBERS = [{% for pc in pcs %}{{ pc.pc_number }}{% if not loop.last %},{% endif %}{% endfor %}];
 let _fullscreenPc = null;
 let _fullscreenStatsOpen = false;
 let _fullscreenStatsTimer = null;
 let _watchKeepalive = null;
+let _jsmpegPlayer = null;
+let _streamSwitched = false;
 
 function fmtHMS(sec) {
   const h = Math.floor(sec / 3600);
@@ -295,8 +302,13 @@ function _markWatched(pcNumber) {
 
 function openFullscreen(pcNumber) {
   _fullscreenPc = pcNumber;
-  const modal = document.getElementById('fullscreen-modal');
-  const img   = document.getElementById('fullscreen-img');
+  _streamSwitched = false;
+
+  const modal   = document.getElementById('fullscreen-modal');
+  const canvas  = document.getElementById('fullscreen-canvas');
+  const img     = document.getElementById('fullscreen-img');
+  const connMsg = document.getElementById('fullscreen-overlay-msg');
+
   document.getElementById('fullscreen-label').textContent =
     `PC ${String(pcNumber).padStart(2, '0')}`;
   modal.classList.remove('hidden');
@@ -314,18 +326,54 @@ function openFullscreen(pcNumber) {
     screen.orientation.lock('landscape').catch(() => {});
   }
 
-  // Tell server to ramp up capture for this PC, then open MJPEG stream.
-  // The stream keeps the connection open; the browser renders each frame as it arrives.
+  // Tell server to ramp up capture rate; renew every 8 s while open
   _markWatched(pcNumber);
   if (_watchKeepalive) clearInterval(_watchKeepalive);
   _watchKeepalive = setInterval(() => _markWatched(pcNumber), 8000);
+
+  // ── Show MJPEG immediately as fallback while FFmpeg stream warms up ──
+  canvas.style.display = 'none';
+  connMsg.style.display = 'flex';
+  img.style.display = '';
   img.src = `/dashboard/api/pc/${pcNumber}/stream`;
+
+  // ── Start jsmpeg WebSocket stream in parallel ────────────────────────
+  // When the first video frame decodes, swap from MJPEG → canvas.
+  if (_jsmpegPlayer) { _jsmpegPlayer.destroy(); _jsmpegPlayer = null; }
+
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl   = `${wsProto}//${location.host}/dashboard/ws/stream/${pcNumber}/watch`;
+
+  _jsmpegPlayer = new JSMpeg.Player(wsUrl, {
+    canvas:   canvas,
+    autoplay: true,
+    audio:    false,
+    onVideoDecode: function() {
+      if (_streamSwitched) return;
+      _streamSwitched = true;
+      // FFmpeg stream active — switch display to canvas
+      img.src = '';
+      img.style.display  = 'none';
+      connMsg.style.display = 'none';
+      canvas.style.display = '';
+    },
+  });
 }
 
 function closeFullscreen() {
+  // Destroy jsmpeg player (closes WebSocket, frees decoder)
+  if (_jsmpegPlayer) { _jsmpegPlayer.destroy(); _jsmpegPlayer = null; }
+  _streamSwitched = false;
+
+  // Stop MJPEG fallback
+  const img = document.getElementById('fullscreen-img');
+  img.src = '';
+  img.style.display = '';
+
+  document.getElementById('fullscreen-canvas').style.display = 'none';
+  document.getElementById('fullscreen-overlay-msg').style.display = 'none';
   document.getElementById('fullscreen-modal').classList.add('hidden');
-  // Clearing src disconnects the MJPEG stream immediately
-  document.getElementById('fullscreen-img').src = '';
+
   clearInterval(_watchKeepalive);
   _watchKeepalive = null;
   _fullscreenPc = null;
@@ -333,7 +381,6 @@ function closeFullscreen() {
   clearInterval(_fullscreenStatsTimer);
   document.getElementById('fullscreen-stats-panel').classList.add('hidden');
 
-  // Unlock orientation
   if (screen.orientation?.unlock) {
     try { screen.orientation.unlock(); } catch(e) {}
   }

@@ -56,6 +56,13 @@ Namespace Services
         Private ReadOnly _pcNumber As Integer
         Private _disposed As Boolean = False
 
+        ''' <summary>HTTP base URL converted to WebSocket scheme (ws:// or wss://).</summary>
+        Public ReadOnly Property BaseWsUrl As String
+            Get
+                Return _baseUrl.Replace("https://", "wss://").Replace("http://", "ws://")
+            End Get
+        End Property
+
         Public Sub New(baseUrl As String, pcNumber As Integer)
             _baseUrl = baseUrl.TrimEnd("/"c)
             _pcNumber = pcNumber

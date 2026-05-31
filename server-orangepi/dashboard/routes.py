@@ -11,7 +11,9 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File
+import asyncio
+
+from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -938,6 +940,61 @@ async def watch_pc(
         raise HTTPException(status_code=401, detail="Not authenticated")
     command_store.set_watched(pc_number)
     return {"status": "ok"}
+
+
+@router.websocket("/ws/stream/{pc_number}/publish")
+async def ws_stream_publish(websocket: WebSocket, pc_number: int):
+    """PC client connects here and pushes raw MPEG-TS/MPEG1 bytes from FFmpeg.
+    The server broadcasts every chunk to all watching browser connections."""
+    # Authenticate via API key (header or query param for WebSocket compat)
+    api_key = (
+        websocket.headers.get("x-api-key", "")
+        or websocket.query_params.get("api_key", "")
+    )
+    if settings.CLIENT_API_KEY and api_key != settings.CLIENT_API_KEY:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    import stream_store
+    stream_store.set_publisher(pc_number, websocket)
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            await stream_store.broadcast(pc_number, data)
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        stream_store.clear_publisher(pc_number)
+        await stream_store.close_all_watchers(pc_number)
+
+
+@router.websocket("/ws/stream/{pc_number}/watch")
+async def ws_stream_watch(websocket: WebSocket, pc_number: int):
+    """Admin browser connects here to receive the live MPEG1 video stream.
+    Authentication uses the pisonet_session JWT cookie (sent automatically)."""
+    token = websocket.cookies.get("pisonet_session")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        from jose import jwt as _jwt
+        _jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    import stream_store
+    stream_store.add_watcher(pc_number, websocket)
+    try:
+        # Stay alive — data flows publisher → broadcast → us; we send nothing back.
+        while True:
+            await asyncio.sleep(20)
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        stream_store.remove_watcher(pc_number, websocket)
 
 
 @router.get("/api/pc/{pc_number}/stream")
