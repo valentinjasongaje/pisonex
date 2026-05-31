@@ -946,24 +946,36 @@ async def watch_pc(
 async def ws_stream_publish(websocket: WebSocket, pc_number: int):
     """PC client connects here and pushes raw MPEG-TS/MPEG1 bytes from FFmpeg.
     The server broadcasts every chunk to all watching browser connections."""
-    # Authenticate via API key (header or query param for WebSocket compat)
+    import logging, stream_store
+    _log = logging.getLogger("stream.publish")
+
     api_key = (
         websocket.headers.get("x-api-key", "")
         or websocket.query_params.get("api_key", "")
     )
     if settings.CLIENT_API_KEY and api_key != settings.CLIENT_API_KEY:
+        _log.warning("PC %d publish rejected — bad API key", pc_number)
         await websocket.close(code=1008)
         return
 
     await websocket.accept()
-    import stream_store
     stream_store.set_publisher(pc_number, websocket)
+    _log.info("PC %d publish connected (watchers: %d)",
+              pc_number, len(stream_store._watchers.get(pc_number, [])))
+    chunks = 0
     try:
         while True:
             data = await websocket.receive_bytes()
+            chunks += 1
+            if chunks <= 3 or chunks % 30 == 0:
+                _log.info("PC %d chunk #%d  %d bytes  watchers: %d",
+                          pc_number, chunks, len(data),
+                          len(stream_store._watchers.get(pc_number, [])))
             await stream_store.broadcast(pc_number, data)
-    except (WebSocketDisconnect, Exception):
-        pass
+    except WebSocketDisconnect:
+        _log.info("PC %d publish disconnected after %d chunks", pc_number, chunks)
+    except Exception as exc:
+        _log.warning("PC %d publish error after %d chunks: %s", pc_number, chunks, exc)
     finally:
         stream_store.clear_publisher(pc_number)
         await stream_store.close_all_watchers(pc_number)
@@ -973,28 +985,34 @@ async def ws_stream_publish(websocket: WebSocket, pc_number: int):
 async def ws_stream_watch(websocket: WebSocket, pc_number: int):
     """Admin browser connects here to receive the live MPEG1 video stream.
     Authentication uses the pisonet_session JWT cookie (sent automatically)."""
+    import logging, stream_store
+    _log = logging.getLogger("stream.watch")
+
     token = websocket.cookies.get("pisonet_session")
     if not token:
+        _log.warning("PC %d watch rejected — no session cookie", pc_number)
         await websocket.close(code=1008)
         return
     try:
         from jose import jwt as _jwt
         _jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-    except Exception:
+    except Exception as exc:
+        _log.warning("PC %d watch rejected — bad JWT: %s", pc_number, exc)
         await websocket.close(code=1008)
         return
 
     await websocket.accept()
-    import stream_store
     stream_store.add_watcher(pc_number, websocket)
+    _log.info("PC %d watch connected (total watchers: %d)",
+              pc_number, len(stream_store._watchers.get(pc_number, [])))
     try:
-        # Stay alive — data flows publisher → broadcast → us; we send nothing back.
         while True:
             await asyncio.sleep(20)
     except (WebSocketDisconnect, Exception):
         pass
     finally:
         stream_store.remove_watcher(pc_number, websocket)
+        _log.info("PC %d watch disconnected", pc_number)
 
 
 @router.get("/api/pc/{pc_number}/stream")

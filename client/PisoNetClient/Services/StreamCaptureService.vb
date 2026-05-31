@@ -29,10 +29,12 @@ Namespace Services
         ' -bf 0 disables B-frames for minimum latency.
         ' -muxdelay 0 / -muxpreload 0 eliminates muxer buffering.
         Private Const FFMPEG_ARGS As String =
+            "-fflags nobuffer " &
             "-f gdigrab -framerate 30 -i desktop " &
             "-f mpegts -codec:v mpeg1video " &
             "-s 1280x720 -b:v 2000k -bf 0 " &
             "-muxdelay 0 -muxpreload 0 " &
+            "-flush_packets 1 " &
             "pipe:1"
 
         Private ReadOnly _baseWsUrl As String   ' e.g. ws://192.168.1.21

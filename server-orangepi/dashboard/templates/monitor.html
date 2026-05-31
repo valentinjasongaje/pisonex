@@ -345,16 +345,39 @@ function openFullscreen(pcNumber) {
     canvas:   canvas,
     autoplay: true,
     audio:    false,
+    onSourceEstablished: function() {
+      console.log('[jsmpeg] WebSocket connected — waiting for first frame');
+    },
     onVideoDecode: function() {
       if (_streamSwitched) return;
       _streamSwitched = true;
-      // FFmpeg stream active — switch display to canvas
+      console.log('[jsmpeg] First frame decoded — switching to canvas');
       img.src = '';
       img.style.display  = 'none';
-      connMsg.style.display = 'none';
       canvas.style.display = '';
     },
+    onStalled: function() {
+      console.warn('[jsmpeg] Stream stalled');
+    },
+    onEnded: function() {
+      console.warn('[jsmpeg] Stream ended — restoring MJPEG fallback');
+      _fallbackToMjpeg();
+    },
+    onSourceCompleted: function() {
+      console.warn('[jsmpeg] Source completed — restoring MJPEG fallback');
+      _fallbackToMjpeg();
+    },
   });
+}
+
+function _fallbackToMjpeg() {
+  if (_fullscreenPc === null) return;
+  _streamSwitched = false;
+  const canvas = document.getElementById('fullscreen-canvas');
+  const img    = document.getElementById('fullscreen-img');
+  canvas.style.display = 'none';
+  img.style.display    = '';
+  img.src = `/dashboard/api/pc/${_fullscreenPc}/stream`;
 }
 
 function closeFullscreen() {
