@@ -15,6 +15,9 @@ Namespace Forms
     ''' • Connection indicator: small filled circle (green = connected, amber = offline).
     ''' • PC label: "PC 01" shown above or beside the time, configurable.
     ''' • Call ApplyConfig() after changing AppConfig timer settings to re-layout.
+    ''' • Add Time CTA row: shows "Add Time" button when coin slot is enabled
+    '''   (but not currently receiving), and a receiving-coins mini card while
+    '''   the slot is open. Height grows/shrinks dynamically.
     ''' </summary>
     Public Class TimerOverlay
         Inherits Form
@@ -27,6 +30,7 @@ Namespace Forms
         Private Shared ReadOnly AccentBlue   As Color = Color.FromArgb(14, 165, 233)
         Private Shared ReadOnly AccentPurple As Color = Color.FromArgb(124, 58, 237)
         Private Shared ReadOnly GreenColor   As Color = Color.FromArgb(34, 197, 94)
+        Private Shared ReadOnly GoldColor    As Color = Color.FromArgb(250, 204, 21)
 
         ' ── Dimensions ───────────────────────────────────────────────
         Private Const FORM_W        As Integer = 240
@@ -40,12 +44,45 @@ Namespace Forms
         Private Const DOT_MARGIN    As Integer = 10
         Private Const MEMBER_ROW_H  As Integer = 24
 
+        ' Add Time / Receiving-coins row heights
+        Private Const ADD_TIME_ROW_H  As Integer = 36
+        Private Const COIN_RECV_ROW_H As Integer = 126  ' content is 116px tall + 10px bottom clearance for rounded corners
+
+        ' Countdown max (must match server's PC_IDLE_TIMEOUT = 30 s)
+        Private Const OVERLAY_COIN_MAX As Integer = 30
+
         ' ── Controls ─────────────────────────────────────────────────
         Private _lblTime  As Label
         Private _lblPC    As Label
         Private _pbLogo   As PictureBox
         Private _lblMember As Label
         Private _btnLogout As Button
+
+        ' Add Time row — idle state
+        Private _btnAddTime As Button
+
+        ' Receiving-coins mini card controls
+        Private _lblRecvDot       As Label
+        Private _lblRecvTitle     As Label
+        Private _lblRecvProgress  As Label
+        Private _pnlRecvBar       As Panel   ' custom-painted countdown bar
+        Private _lblRecvCountdown As Label
+        Private _btnDoneCoins     As Button
+
+        ' ── Add Time state ────────────────────────────────────────────
+        Private _coinSlotEnabled    As Boolean = False
+        Private _isReceivingCoins   As Boolean = False
+        Private _isRequestingCoin   As Boolean = False
+        Private _addTimeSepY        As Integer = -1   ' separator Y painted in OnPaint
+
+        ' ── Receiving-coins countdown ─────────────────────────────────
+        Private _coinCountdownTimer  As System.Windows.Forms.Timer
+        Private _coinCountdownSecs   As Integer = OVERLAY_COIN_MAX
+
+        ' ── Pulse animation ───────────────────────────────────────────
+        Private _pulseTimer      As System.Windows.Forms.Timer
+        Private _recvPulseAlpha  As Integer = 255
+        Private _recvPulseUp     As Boolean = False
 
         Private _isConnected    As Boolean = True
         Private _memberName     As String = Nothing
@@ -54,6 +91,8 @@ Namespace Forms
 
         Public Event MemberLogoutRequested()
         Public Event TimerHiddenByUser()
+        Public Event InsertCoinRequested()
+        Public Event DoneInsertingCoinsRequested()
 
         ' ── Native drag ──────────────────────────────────────────────
         <DllImport("user32.dll", CharSet:=CharSet.Auto)>
@@ -151,15 +190,112 @@ Namespace Forms
             _btnLogout.FlatAppearance.MouseOverBackColor = Color.FromArgb(80, 239, 68, 68)
             AddHandler _btnLogout.Click, AddressOf OnLogoutClick
 
-            Me.Controls.AddRange({_lblTime, _lblPC, _lblMember, _btnLogout, _pbLogo})
+            ' ── Add Time button (shown when slot enabled, not receiving) ──────
+            _btnAddTime = New Button() With {
+                .Text      = ChrW(&HFF0B) & "  Add Time",
+                .Font      = New Font("Segoe UI", 8.5F, FontStyle.Bold),
+                .ForeColor = GoldColor,
+                .BackColor = Color.Transparent,
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor    = Cursors.Hand,
+                .Visible   = False
+            }
+            _btnAddTime.FlatAppearance.BorderSize  = 1
+            _btnAddTime.FlatAppearance.BorderColor = GoldColor
+            _btnAddTime.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 34, 12)
+            AddHandler _btnAddTime.Click, AddressOf OnAddTimeClick
+
+            ' ── Receiving-coins card: dot + title ────────────────────
+            _lblRecvDot = New Label() With {
+                .Text      = ChrW(&H25CF),   ' "●"
+                .Font      = New Font("Segoe UI", 10.0F, FontStyle.Bold),
+                .ForeColor = GoldColor,
+                .BackColor = Color.Transparent,
+                .AutoSize  = True,
+                .Visible   = False
+            }
+
+            _lblRecvTitle = New Label() With {
+                .Text      = "Receiving Coins" & ChrW(&H2026),
+                .Font      = New Font("Segoe UI", 10.0F, FontStyle.Bold),
+                .ForeColor = GoldColor,
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .TextAlign = ContentAlignment.MiddleLeft,
+                .Visible   = False
+            }
+
+            ' ── Progress text ("₱10 inserted · +1h 30m") ─────────────
+            _lblRecvProgress = New Label() With {
+                .Text      = "Waiting for coins" & ChrW(&H2026),
+                .Font      = New Font("Segoe UI", 11.0F, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(220, 228, 240),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Visible   = False
+            }
+
+            ' ── Countdown progress bar panel ──────────────────────────
+            _pnlRecvBar = New Panel() With {
+                .BackColor = Color.Transparent,
+                .Visible   = False
+            }
+            AddHandler _pnlRecvBar.Paint, AddressOf OnRecvBarPaint
+
+            ' ── Countdown seconds label ───────────────────────────────
+            _lblRecvCountdown = New Label() With {
+                .Text      = $"{OVERLAY_COIN_MAX}s",
+                .Font      = New Font("Segoe UI", 8.0F),
+                .ForeColor = Color.FromArgb(100, 120, 150),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .TextAlign = ContentAlignment.MiddleRight,
+                .Visible   = False
+            }
+
+            ' ── Done inserting Coins button ───────────────────────────
+            _btnDoneCoins = New Button() With {
+                .Text      = "Done inserting Coins",
+                .Font      = New Font("Segoe UI", 9.0F, FontStyle.Bold),
+                .ForeColor = GoldColor,
+                .BackColor = Color.Transparent,
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor    = Cursors.Hand,
+                .Visible   = False
+            }
+            _btnDoneCoins.FlatAppearance.BorderSize  = 1
+            _btnDoneCoins.FlatAppearance.BorderColor = Color.FromArgb(180, 250, 204, 21)
+            _btnDoneCoins.FlatAppearance.MouseOverBackColor = Color.FromArgb(30, 250, 204, 21)
+            AddHandler _btnDoneCoins.Click, AddressOf OnDoneCoinsClick
+
+            ' ── Timers ────────────────────────────────────────────────
+            _coinCountdownTimer = New System.Windows.Forms.Timer() With {.Interval = 1000}
+            AddHandler _coinCountdownTimer.Tick, AddressOf OnCoinCountdownTick
+
+            _pulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
+            AddHandler _pulseTimer.Tick, AddressOf OnPulseTick
+
+            Me.Controls.AddRange({
+                _lblTime, _lblPC, _lblMember, _btnLogout, _pbLogo,
+                _btnAddTime,
+                _lblRecvDot, _lblRecvTitle, _lblRecvProgress,
+                _pnlRecvBar, _lblRecvCountdown, _btnDoneCoins
+            })
 
             ' Left-click drag on every visible surface
             Dim drag = New MouseEventHandler(AddressOf HandleMouseDown)
-            AddHandler Me.MouseDown,        drag
-            AddHandler _lblTime.MouseDown,  drag
-            AddHandler _lblPC.MouseDown,    drag
-            AddHandler _lblMember.MouseDown, drag
-            AddHandler _pbLogo.MouseDown,   drag
+            AddHandler Me.MouseDown,              drag
+            AddHandler _lblTime.MouseDown,        drag
+            AddHandler _lblPC.MouseDown,          drag
+            AddHandler _lblMember.MouseDown,      drag
+            AddHandler _pbLogo.MouseDown,         drag
+            ' _btnAddTime intentionally excluded — drag on a button steals its Click event
+            AddHandler _lblRecvDot.MouseDown,     drag
+            AddHandler _lblRecvTitle.MouseDown,   drag
+            AddHandler _lblRecvProgress.MouseDown, drag
+            AddHandler _pnlRecvBar.MouseDown,     drag
+            AddHandler _lblRecvCountdown.MouseDown, drag
         End Sub
 
         ' ── Custom paint: rounded rect + gradient accent + border + dot ──
@@ -192,8 +328,18 @@ Namespace Forms
 
             If _lblMember.Visible Then
                 Dim sepY = Me.Height - memberRowH - 4
+                ' If the Add Time row is also visible, member separator is above it
+                If _addTimeSepY > 0 Then
+                    sepY = _addTimeSepY - memberRowH - 4
+                End If
                 Using pen = New Pen(Color.FromArgb(40, 100, 120, 180), 1)
                     g.DrawLine(pen, padX, sepY, Me.Width - padX, sepY)
+                End Using
+            End If
+
+            If _addTimeSepY > 0 Then
+                Using pen = New Pen(Color.FromArgb(40, 100, 120, 180), 1)
+                    g.DrawLine(pen, padX, _addTimeSepY, Me.Width - padX, _addTimeSepY)
                 End Using
             End If
 
@@ -210,6 +356,55 @@ Namespace Forms
             End If
 
             MyBase.OnPaint(e)
+        End Sub
+
+        ' ── Countdown bar paint (backward: 100% → 0%, gold → red below 30%) ──
+        Private Sub OnRecvBarPaint(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g   = e.Graphics
+            g.SmoothingMode = SmoothingMode.AntiAlias
+
+            Const BarRadius As Integer = 5
+            Dim barW = pnl.Width - 1
+            Dim barH = pnl.Height - 1
+
+            ' Track background
+            Dim trackRect = New Rectangle(0, 0, barW, barH)
+            Using path = New GraphicsPath()
+                Dim d = BarRadius * 2
+                path.AddArc(trackRect.X, trackRect.Y, d, d, 180, 90)
+                path.AddArc(trackRect.Right - d, trackRect.Y, d, d, 270, 90)
+                path.AddArc(trackRect.Right - d, trackRect.Bottom - d, d, d, 0, 90)
+                path.AddArc(trackRect.X, trackRect.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+                Using br = New SolidBrush(Color.FromArgb(35, 255, 255, 255))
+                    g.FillPath(br, path)
+                End Using
+            End Using
+
+            ' Fill portion (remaining time)
+            Dim ratio = Math.Max(0.0F, Math.Min(1.0F, _coinCountdownSecs / CSng(OVERLAY_COIN_MAX)))
+            If ratio > 0 Then
+                Dim fillW = Math.Max(BarRadius * 2, CInt(barW * ratio))
+                Dim fillRect = New Rectangle(0, 0, fillW, barH)
+                ' Gold (250,204,21) when full → red (239,68,68) below 30%
+                Dim t     = Math.Max(0.0F, (ratio - 0.3F) / 0.7F)
+                Dim fillR = CInt(250 * t + 239 * (1.0F - t))
+                Dim fillG = CInt(204 * t + 68  * (1.0F - t))
+                Dim fillB = CInt(21  * t + 68  * (1.0F - t))
+                Using path = New GraphicsPath()
+                    Dim d  = BarRadius * 2
+                    Dim fr = fillRect
+                    path.AddArc(fr.X, fr.Y, d, d, 180, 90)
+                    path.AddArc(fr.Right - d, fr.Y, d, d, 270, 90)
+                    path.AddArc(fr.Right - d, fr.Bottom - d, d, d, 0, 90)
+                    path.AddArc(fr.X, fr.Bottom - d, d, d, 90, 90)
+                    path.CloseFigure()
+                    Using br = New SolidBrush(Color.FromArgb(fillR, fillG, fillB))
+                        g.FillPath(br, path)
+                    End Using
+                End Using
+            End If
         End Sub
 
         ' ── Rounded rectangle helper ─────────────────────────────────
@@ -254,6 +449,82 @@ Namespace Forms
             ' Combine DPI + screen scale, then clamp to a sane range.
             Return Math.Max(0.65F, Math.Min(1.40F, dpiScale * screenScale))
         End Function
+
+        ''' <summary>
+        ''' Returns the Add Time row height to append: 0 if not shown,
+        ''' COIN_RECV_ROW_H if receiving, ADD_TIME_ROW_H if slot enabled but idle.
+        ''' </summary>
+        Private Function GetAddTimeRowH(Sv As Func(Of Integer, Integer)) As Integer
+            If _isReceivingCoins Then
+                Return Sv(COIN_RECV_ROW_H)
+            End If
+            If _coinSlotEnabled Then
+                Return Sv(ADD_TIME_ROW_H)
+            End If
+            Return 0
+        End Function
+
+        ''' <summary>
+        ''' Positions all Add Time / receiving-coins card controls at the given base Y.
+        ''' </summary>
+        Private Sub LayoutAddTimeRow(baseH As Integer, formW As Integer, padX As Integer,
+                                     Sv As Func(Of Integer, Integer))
+            If _isReceivingCoins Then
+                ' Hide the idle button
+                _btnAddTime.Visible = False
+
+                ' Row 1 — dot + title (y = baseH + 6), height 22px
+                Dim y1 = baseH + Sv(6)
+                _lblRecvDot.Location   = New Point(padX, y1)
+                _lblRecvTitle.Location = New Point(padX + _lblRecvDot.Width + Sv(4), y1)
+                _lblRecvTitle.Size     = New Size(formW - padX - _lblRecvDot.Width - Sv(4) - padX, Sv(22))
+                _lblRecvDot.Visible    = True
+                _lblRecvTitle.Visible  = True
+
+                ' Row 2 — "₱X inserted · +Xh Xm" (y + 26), height 24px — biggest text
+                Dim y2 = y1 + Sv(26)
+                _lblRecvProgress.Location = New Point(padX, y2)
+                _lblRecvProgress.Size     = New Size(formW - padX * 2, Sv(24))
+                _lblRecvProgress.Visible  = True
+
+                ' Row 3 — countdown bar (y + 54), height 10px
+                Dim y3 = y1 + Sv(54)
+                Dim barW = formW - padX * 2
+                _pnlRecvBar.Location = New Point(padX, y3)
+                _pnlRecvBar.Size     = New Size(barW, Sv(10))
+                _pnlRecvBar.Visible  = True
+                _pnlRecvBar.Invalidate()
+
+                ' Row 4 — countdown seconds label (y + 68), height 16px, right-aligned
+                Dim y4 = y1 + Sv(68)
+                _lblRecvCountdown.Location = New Point(padX, y4)
+                _lblRecvCountdown.Size     = New Size(barW, Sv(16))
+                _lblRecvCountdown.Visible  = True
+
+                ' Row 5 — Done button (y + 88), height 28px
+                Dim y5 = y1 + Sv(88)
+                _btnDoneCoins.Location = New Point(padX, y5)
+                _btnDoneCoins.Size     = New Size(formW - padX * 2, Sv(28))
+                _btnDoneCoins.Visible  = True
+
+            Else
+                ' Hide receiving card
+                _lblRecvDot.Visible       = False
+                _lblRecvTitle.Visible     = False
+                _lblRecvProgress.Visible  = False
+                _pnlRecvBar.Visible       = False
+                _lblRecvCountdown.Visible = False
+                _btnDoneCoins.Visible     = False
+
+                ' Show Add Time button centered vertically in the row
+                Dim btnH = Sv(28)
+                Dim rowPadY = (Sv(ADD_TIME_ROW_H) - btnH) \ 2
+                _btnAddTime.Location = New Point(padX, baseH + rowPadY)
+                _btnAddTime.Size     = New Size(formW - padX * 2, btnH)
+                _btnAddTime.Font     = New Font("Segoe UI", Math.Max(7.0F, 8.5F * GetLayoutScale()), FontStyle.Bold)
+                _btnAddTime.Visible  = True
+            End If
+        End Sub
 
         ''' <summary>
         ''' Re-layouts the overlay according to current AppConfig timer settings.
@@ -364,6 +635,27 @@ Namespace Forms
                 LayoutMemberControls(baseH, memberRowH, padX, Sv(46))
             End If
 
+            ' Add Time / Receiving-coins row
+            _addTimeSepY = -1   ' reset; will be set below if row is shown
+            Dim addRowH = GetAddTimeRowH(Sv)
+            If addRowH > 0 Then
+                Dim baseH2 = Me.Height
+                _addTimeSepY = baseH2   ' draw separator at this Y in OnPaint
+                Dim newH2 = baseH2 + addRowH
+                Me.Size   = New Size(formW, newH2)
+                Me.Region = New Region(RoundedRect(New Rectangle(0, 0, formW, newH2), cornerR))
+                LayoutAddTimeRow(baseH2, formW, padX, Sv)
+            Else
+                ' Hide all Add Time controls when row is not shown
+                _btnAddTime.Visible       = False
+                _lblRecvDot.Visible       = False
+                _lblRecvTitle.Visible     = False
+                _lblRecvProgress.Visible  = False
+                _pnlRecvBar.Visible       = False
+                _lblRecvCountdown.Visible = False
+                _btnDoneCoins.Visible     = False
+            End If
+
             Me.Invalidate()
             If Not _userMoved Then PositionToCorner()
         End Sub
@@ -423,19 +715,214 @@ Namespace Forms
                 Me.Invoke(Sub() SetMemberInfo(username, canLogout))
                 Return
             End If
-            Dim changed = (_memberName IsNot Nothing) <> (username IsNot Nothing)
+            ' Track whether the member row is actually appearing or disappearing.
+            ' SetMemberInfo is called on every heartbeat (MembershipUpdated has no
+            ' dedup), so we must not call ApplyConfig() unconditionally — it resizes
+            ' Me.Size and Me.Region every second, which is the main source of flicker.
+            Dim wasVisible = _lblMember.Visible
+            Dim nowVisible = Not String.IsNullOrEmpty(username)
             _memberName = username
-            If Not String.IsNullOrEmpty(username) Then
-                _lblMember.Text = $"  {username}"  ' small indent after separator
+            If nowVisible Then
+                If _lblMember.Text <> $"  {username}" Then _lblMember.Text = $"  {username}"
                 _lblMember.Visible = True
                 _btnLogout.Visible = True
-                _btnLogout.Enabled = canLogout
+                _btnLogout.Enabled = canLogout   ' update enable without resize
             Else
                 _lblMember.Visible = False
                 _btnLogout.Visible = False
             End If
-            ' Full re-layout so the form resizes/shrinks correctly
+            ' Only do full re-layout when the row appears or disappears.
+            ' Changing text / enabled state alone does not need a form resize.
+            If wasVisible <> nowVisible Then ApplyConfig()
+        End Sub
+
+        ''' <summary>
+        ''' Called when the heartbeat reports a coin_slot_enabled change.
+        ''' Shows or hides the "Add Time" button accordingly.
+        ''' Safe to call from any thread.
+        ''' </summary>
+        Public Sub ShowAddTimeButton(enabled As Boolean)
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() ShowAddTimeButton(enabled))
+                Return
+            End If
+            _coinSlotEnabled = enabled
+            ' If slot disabled, reset request state so the button is ready on re-enable
+            If Not enabled Then
+                _isRequestingCoin = False
+                _btnAddTime.Text      = ChrW(&HFF0B) & "  Add Time"
+                _btnAddTime.ForeColor = GoldColor
+                _btnAddTime.Enabled   = True
+            End If
+            UpdateAddTimeState()
             ApplyConfig()
+        End Sub
+
+        ''' <summary>
+        ''' Transitions the overlay between the idle Add Time button state and
+        ''' the receiving-coins mini card state.
+        ''' Safe to call from any thread.
+        ''' </summary>
+        Public Sub SetReceivingCoins(isReceiving As Boolean)
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() SetReceivingCoins(isReceiving))
+                Return
+            End If
+
+            _isReceivingCoins = isReceiving
+
+            If isReceiving Then
+                ' Reset requesting flag — slot is now open
+                _isRequestingCoin = False
+                ' Reset Done button — it may have been left as "Closing…"/disabled
+                ' from the previous insertion cycle.  LayoutAddTimeRow sets Visible,
+                ' but not Text or Enabled, so a stale state carries over to the next open.
+                _btnDoneCoins.Text    = "Done inserting Coins"
+                _btnDoneCoins.Enabled = True
+                ' Seed progress text
+                _lblRecvProgress.Text     = "Waiting for coins" & ChrW(&H2026)
+                _lblRecvProgress.ForeColor = Color.FromArgb(140, 160, 200)
+                ' Reset and start countdown
+                _coinCountdownSecs = OVERLAY_COIN_MAX
+                UpdateCountdownLabel()
+                _coinCountdownTimer.Stop()
+                _coinCountdownTimer.Start()
+                ' Start pulse
+                _recvPulseAlpha = 255
+                _recvPulseUp    = False
+                _pulseTimer.Start()
+            Else
+                ' Stop timers
+                _coinCountdownTimer.Stop()
+                _pulseTimer.Stop()
+                ' Restore Add Time button state
+                _btnAddTime.Text      = ChrW(&HFF0B) & "  Add Time"
+                _btnAddTime.ForeColor = GoldColor
+                _btnAddTime.Enabled   = True
+                _isRequestingCoin     = False
+            End If
+
+            ApplyConfig()
+        End Sub
+
+        ''' <summary>
+        ''' Updates the in-progress coin insertion display.
+        ''' Resets the countdown to 30 s when pesos > 0 (a coin just landed).
+        ''' Safe to call from any thread.
+        ''' </summary>
+        Public Sub UpdateCoinProgress(pesos As Integer, seconds As Integer)
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() UpdateCoinProgress(pesos, seconds))
+                Return
+            End If
+
+            If Not _isReceivingCoins Then Return
+
+            If pesos > 0 Then
+                Dim hrs  = seconds \ 3600
+                Dim mins = (seconds Mod 3600) \ 60
+                Dim timeStr = If(hrs > 0, $"+{hrs}h {mins}m", $"+{mins}m")
+                _lblRecvProgress.Text = $"₱{pesos} inserted · {timeStr}"
+                ' Reset countdown on each coin
+                _coinCountdownSecs = OVERLAY_COIN_MAX
+                UpdateCountdownLabel()
+                _pnlRecvBar.Invalidate()
+            Else
+                If String.IsNullOrEmpty(_lblRecvProgress.Text) Then
+                    _lblRecvProgress.Text = "Waiting for coins" & ChrW(&H2026)
+                End If
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Called when a request-coins API call fails. Restores the Add Time button.
+        ''' Safe to call from any thread.
+        ''' </summary>
+        Public Sub SetInsertCoinResult(success As Boolean)
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() SetInsertCoinResult(success))
+                Return
+            End If
+
+            If Not success Then
+                _isRequestingCoin     = False
+                _btnAddTime.Text      = ChrW(&HFF0B) & "  Add Time"
+                _btnAddTime.ForeColor = GoldColor
+                _btnAddTime.Enabled   = True
+            End If
+        End Sub
+
+        ' ── Internal helpers ──────────────────────────────────────────
+
+        ''' <summary>
+        ''' Keeps Add Time visibility flags consistent without triggering a full layout.
+        ''' Called before ApplyConfig() whenever _coinSlotEnabled changes.
+        ''' </summary>
+        Private Sub UpdateAddTimeState()
+            ' Nothing extra needed — ApplyConfig drives visibility via GetAddTimeRowH
+        End Sub
+
+        Private Sub UpdateCountdownLabel()
+            _lblRecvCountdown.Text = $"{_coinCountdownSecs}s"
+            _lblRecvCountdown.ForeColor = If(
+                _coinCountdownSecs <= 10,
+                Color.FromArgb(239, 100, 68),
+                Color.FromArgb(100, 120, 150))
+        End Sub
+
+        ' ── Timer handlers ────────────────────────────────────────────
+
+        Private Sub OnCoinCountdownTick(sender As Object, e As EventArgs)
+            _coinCountdownSecs -= 1
+
+            If _coinCountdownSecs <= 0 Then
+                _coinCountdownSecs = 0
+                _coinCountdownTimer.Stop()
+                _lblRecvCountdown.Text      = "0s"
+                _lblRecvCountdown.ForeColor = Color.FromArgb(239, 100, 68)
+                _pnlRecvBar.Invalidate()
+                _btnDoneCoins.Text    = "Closing" & ChrW(&H2026)
+                _btnDoneCoins.Enabled = False
+                RaiseEvent DoneInsertingCoinsRequested()
+                Return
+            End If
+
+            UpdateCountdownLabel()
+            _pnlRecvBar.Invalidate()
+        End Sub
+
+        Private Sub OnPulseTick(sender As Object, e As EventArgs)
+            If _recvPulseUp Then
+                _recvPulseAlpha += 12
+                If _recvPulseAlpha >= 255 Then
+                    _recvPulseAlpha = 255
+                    _recvPulseUp    = False
+                End If
+            Else
+                _recvPulseAlpha -= 12
+                If _recvPulseAlpha <= 80 Then
+                    _recvPulseAlpha = 80
+                    _recvPulseUp    = True
+                End If
+            End If
+            _lblRecvDot.ForeColor = Color.FromArgb(_recvPulseAlpha, 250, 204, 21)
+        End Sub
+
+        ' ── Button click handlers ─────────────────────────────────────
+
+        Private Sub OnAddTimeClick(sender As Object, e As EventArgs)
+            If _isRequestingCoin Then Return
+            _isRequestingCoin     = True
+            _btnAddTime.Enabled   = False
+            _btnAddTime.Text      = "Connecting" & ChrW(&H2026)
+            _btnAddTime.ForeColor = Color.FromArgb(100, 120, 150)
+            RaiseEvent InsertCoinRequested()
+        End Sub
+
+        Private Sub OnDoneCoinsClick(sender As Object, e As EventArgs)
+            _btnDoneCoins.Enabled = False
+            _btnDoneCoins.Text    = "Closing" & ChrW(&H2026)
+            RaiseEvent DoneInsertingCoinsRequested()
         End Sub
 
         Private Sub LayoutMemberControls(baseH As Integer, memberRowH As Integer, padX As Integer, btnW As Integer)

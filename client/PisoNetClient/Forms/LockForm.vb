@@ -90,6 +90,15 @@ Namespace Forms
         ' Done-inserting-coins button (shown only while receiving coins)
         Private _btnDoneCoins     As Button
 
+        ' Coin insertion countdown progress bar (shown while receiving coins)
+        Private _pnlCoinCountdown   As Panel
+        Private _lblCountdownRemain As Label
+        Private _coinCountdownTimer As System.Windows.Forms.Timer
+        Private _coinCountdownSecs  As Integer = COIN_COUNTDOWN_MAX
+        ' Must match server's PC_IDLE_TIMEOUT so the bar drains in sync with when
+        ' the server would auto-close the slot.  Each new coin resets to this value.
+        Private Const COIN_COUNTDOWN_MAX As Integer = 30
+
         ' Insert Coin button
         Private _btnInsertCoin    As Button
         Private _coinSlotEnabled  As Boolean = True   ' tracked from heartbeat
@@ -618,6 +627,33 @@ Namespace Forms
             _btnDoneCoins.Region = RoundedRegion(_btnDoneCoins.Width, _btnDoneCoins.Height, 14)
             AddHandler _btnDoneCoins.Click, AddressOf OnDoneCoinsClick
 
+            ' ── Coin insertion countdown bar ───────────────────────────────────────
+            ' Replaces the "Closing in X seconds" concept: a backward progress bar
+            ' (100% → 0%) is shown while the slot is open.  Reaching 0% auto-fires
+            ' DoneInsertingCoinsRequested.  Each coin resets the bar to 100%.
+            ' The manual Done button stays below for early close.
+            _pnlCoinCountdown = New Panel() With {
+                .Size      = New Size(420, 52),
+                .BackColor = Color.Transparent,
+                .Visible   = False
+            }
+            AddHandler _pnlCoinCountdown.Paint, AddressOf OnCoinCountdownPaint
+
+            _lblCountdownRemain = New Label() With {
+                .Text      = $"{COIN_COUNTDOWN_MAX}s · insert more coins",
+                .Font      = New Font("Segoe UI", 9),
+                .ForeColor = Color.FromArgb(150, 165, 190),
+                .BackColor = Color.Transparent,
+                .AutoSize  = False,
+                .Size      = New Size(420, 18),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .Location  = New Point(0, 32)
+            }
+            _pnlCoinCountdown.Controls.Add(_lblCountdownRemain)
+
+            _coinCountdownTimer = New System.Windows.Forms.Timer() With {.Interval = 1000}
+            AddHandler _coinCountdownTimer.Tick, AddressOf OnCoinCountdownTick
+
             ' ── Insert Coin button (shown when coin slot enabled and not yet receiving) ──
             ' Primary CTA — big, gold, rounded.
             _btnInsertCoin = New Button() With {
@@ -672,7 +708,7 @@ Namespace Forms
             _idlePulseTimer = New System.Windows.Forms.Timer() With {.Interval = 60}
             AddHandler _idlePulseTimer.Tick, AddressOf OnIdlePulseTick
 
-            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _btnDoneCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
+            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlMember, _pnlReceivingCoins, _pnlCoinCountdown, _btnDoneCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn})
             _btnInsertCoin.BringToFront()
             _btnDoneCoins.BringToFront()
         End Sub
@@ -981,7 +1017,7 @@ Namespace Forms
         End Sub
 
         Private Function GetLayoutKey() As String
-            Return $"{_pnlMember.Visible}|{_pnlMember.Height}|{_pnlReceivingCoins.Visible}|{_lblLicenseWarn.Visible}|{_btnInsertCoin.Visible}|{_btnDoneCoins.Visible}"
+            Return $"{_pnlMember.Visible}|{_pnlMember.Height}|{_pnlReceivingCoins.Visible}|{_pnlCoinCountdown.Visible}|{_lblLicenseWarn.Visible}|{_btnInsertCoin.Visible}|{_btnDoneCoins.Visible}"
         End Function
 
         Private Sub CenterLabels()
@@ -1026,11 +1062,21 @@ Namespace Forms
                     _lblSub.Bottom + 20)
             End If
 
-            ' Done inserting coins button — centered, just below the receiving panel
+            ' Countdown bar — centered, just below the receiving panel
+            If _pnlCoinCountdown.Visible Then
+                _pnlCoinCountdown.Location = New Point(
+                    (Me.ClientSize.Width - _pnlCoinCountdown.Width) \ 2,
+                    _pnlReceivingCoins.Bottom + 10)
+            End If
+
+            ' Done inserting coins button — centered, below countdown bar (or receiving panel)
             If _btnDoneCoins.Visible Then
+                Dim doneBaseY = If(_pnlCoinCountdown.Visible,
+                                   _pnlCoinCountdown.Bottom + 10,
+                                   _pnlReceivingCoins.Bottom + 14)
                 _btnDoneCoins.Location = New Point(
                     (Me.ClientSize.Width - _btnDoneCoins.Width) \ 2,
-                    _pnlReceivingCoins.Bottom + 14)
+                    doneBaseY)
             End If
 
             ' Idle shutdown panel — bottom-left corner, minimal
@@ -1829,8 +1875,13 @@ Namespace Forms
 
             _pnlReceivingCoins.Visible = isReceiving
             If isReceiving Then
-                ' Hide the Insert Coin button — the receiving-coins panel takes over
+                ' Hide the Insert Coin button — the receiving-coins panel takes over.
+                ' Reset its text/enabled state too: without this, a later transition
+                ' back to the unlocked → relocked state would leave the button stuck
+                ' on "Connecting…" / disabled when UpdateInsertCoinVisibility re-shows it.
                 _btnInsertCoin.Visible = False
+                _btnInsertCoin.Text = "Insert Coin"
+                _btnInsertCoin.Enabled = True
                 _isRequestingCoin = False
                 _coinPulseAlpha = 255
                 _coinPulseUp = False
@@ -1844,13 +1895,21 @@ Namespace Forms
                     _lblCoinProgress.Text = "Waiting for coins…"
                     _lblCoinProgress.ForeColor = Color.FromArgb(170, 176, 190)
                 End If
-                ' Show the Done button so the user can finish at any time
+                ' Show Done button (manual early close) + start the countdown bar
                 _btnDoneCoins.Visible = True
                 _btnDoneCoins.Enabled = True
                 _btnDoneCoins.Text = "Done inserting Coins"
+                ' Start countdown — resets to full on each new coin (UpdateCoinProgress)
+                _coinCountdownSecs = COIN_COUNTDOWN_MAX
+                _lblCountdownRemain.Text = $"{_coinCountdownSecs}s · insert more coins"
+                _pnlCoinCountdown.Visible = True
+                _pnlCoinCountdown.Invalidate()
+                _coinCountdownTimer.Start()
             Else
                 _coinPulseTimer.Stop()
-                ' Hide the Done button and clear the running-total line
+                ' Stop countdown bar and hide Done button; clear the running-total line
+                _coinCountdownTimer.Stop()
+                _pnlCoinCountdown.Visible = False
                 _btnDoneCoins.Visible = False
                 _btnDoneCoins.Enabled = True
                 _btnDoneCoins.Text = "Done inserting Coins"
@@ -1876,6 +1935,13 @@ Namespace Forms
             Else
                 _lblCoinProgress.Text = $"₱{pesos} inserted  ·  +{FormatHm(seconds)}"
                 _lblCoinProgress.ForeColor = Color.FromArgb(236, 238, 244)
+                ' Each confirmed coin resets the countdown so the user has a full
+                ' window to insert the next coin without being auto-closed.
+                If _pnlCoinCountdown.Visible Then
+                    _coinCountdownSecs = COIN_COUNTDOWN_MAX
+                    _lblCountdownRemain.Text = $"{_coinCountdownSecs}s · insert more coins"
+                    _pnlCoinCountdown.Invalidate()
+                End If
             End If
         End Sub
 
@@ -1893,7 +1959,7 @@ Namespace Forms
             If Me.InvokeRequired Then Me.Invoke(Sub() ShowMemberError(message)) : Return
             If Not _memberLoggedIn Then
                 ' Show inline in the membership form panel
-                _lblInlineError.Text    = message
+                _lblInlineError.Text = message
                 _lblInlineError.Visible = True
                 _pnlMember.Invalidate()
             Else
@@ -1906,6 +1972,91 @@ Namespace Forms
             MessageBox.Show(message, "Membership", MessageBoxButtons.OK, MessageBoxIcon.Information)
         End Sub
 
+        ' ── Coin countdown bar ────────────────────────────────────────────────
+
+        ''' <summary>
+        ''' Paints the backward progress bar: full gold at 100%, drains right-to-left,
+        ''' shifts from gold → red as time runs low (&lt;30 %).
+        ''' </summary>
+        Private Sub OnCoinCountdownPaint(sender As Object, e As PaintEventArgs)
+            Dim pnl = CType(sender, Panel)
+            Dim g   = e.Graphics
+            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+            Const BarTop    As Integer = 6
+            Const BarHeight As Integer = 20
+            Const BarRadius As Integer = 10
+            Dim barW = pnl.Width
+
+            ' ── Track (background) ──────────────────────────────────────────────
+            Dim trackRect = New Rectangle(0, BarTop, barW - 1, BarHeight)
+            Using path = New Drawing2D.GraphicsPath()
+                Dim d = BarRadius * 2
+                path.AddArc(trackRect.X, trackRect.Y, d, d, 180, 90)
+                path.AddArc(trackRect.Right - d, trackRect.Y, d, d, 270, 90)
+                path.AddArc(trackRect.Right - d, trackRect.Bottom - d, d, d, 0, 90)
+                path.AddArc(trackRect.X, trackRect.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+                Using br = New SolidBrush(Color.FromArgb(35, 255, 255, 255))
+                    g.FillPath(br, path)
+                End Using
+            End Using
+
+            ' ── Fill (remaining time — gold fading to red) ───────────────────────
+            Dim ratio = Math.Max(0.0F, Math.Min(1.0F, _coinCountdownSecs / CSng(COIN_COUNTDOWN_MAX)))
+            If ratio > 0 Then
+                Dim fillW = Math.Max(BarRadius * 2, CInt((barW - 1) * ratio))
+                Dim fillRect = New Rectangle(0, BarTop, fillW, BarHeight)
+                ' Gold (250,204,21) when full, shifts to red (239,68,68) below 30 %
+                Dim t     = Math.Max(0.0F, (ratio - 0.3F) / 0.7F)   ' 1→0 over top 70 %
+                Dim fillR = CInt(250 * t + 239 * (1.0F - t))
+                Dim fillG = CInt(204 * t + 68  * (1.0F - t))
+                Dim fillB = CInt(21  * t + 68  * (1.0F - t))
+                Using path = New Drawing2D.GraphicsPath()
+                    Dim d  = BarRadius * 2
+                    Dim fr = fillRect
+                    path.AddArc(fr.X, fr.Y, d, d, 180, 90)
+                    path.AddArc(fr.Right - d, fr.Y, d, d, 270, 90)
+                    path.AddArc(fr.Right - d, fr.Bottom - d, d, d, 0, 90)
+                    path.AddArc(fr.X, fr.Bottom - d, d, d, 90, 90)
+                    path.CloseFigure()
+                    Using br = New SolidBrush(Color.FromArgb(fillR, fillG, fillB))
+                        g.FillPath(br, path)
+                    End Using
+                End Using
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Fires every second while the coin slot is open. Decrements the countdown;
+        ''' at zero auto-triggers "Done inserting Coins" exactly as if the user had
+        ''' clicked the button.
+        ''' </summary>
+        Private Sub OnCoinCountdownTick(sender As Object, e As EventArgs)
+            _coinCountdownSecs -= 1
+
+            If _coinCountdownSecs <= 0 Then
+                _coinCountdownSecs = 0
+                _coinCountdownTimer.Stop()
+                _lblCountdownRemain.Text = "Closing…"
+                _pnlCoinCountdown.Invalidate()
+                ' Disable the Done button so double-fire can't happen
+                _btnDoneCoins.Enabled = False
+                _btnDoneCoins.Text    = "Closing…"
+                RaiseEvent DoneInsertingCoinsRequested()
+                Return
+            End If
+
+            ' Urgency label: plain past 10 s, "!" prefix under 10 s
+            _lblCountdownRemain.Text = If(_coinCountdownSecs <= 10,
+                                          $"! {_coinCountdownSecs}s · insert more coins",
+                                          $"{_coinCountdownSecs}s · insert more coins")
+            _lblCountdownRemain.ForeColor = If(_coinCountdownSecs <= 10,
+                                               Color.FromArgb(239, 100, 68),
+                                               Color.FromArgb(150, 165, 190))
+            _pnlCoinCountdown.Invalidate()
+        End Sub
+
         ' ── Insert Coin button ────────────────────────────────────────────────
 
         Private Sub UpdateInsertCoinVisibility()
@@ -1914,6 +2065,13 @@ Namespace Forms
                                      Not _isRequestingCoin AndAlso
                                      _isConnected AndAlso
                                      Not _pnlReceivingCoins.Visible
+            ' Whenever the button becomes visible we are by definition ready for a
+            ' fresh request — guarantee a clean "Insert Coin" / enabled state in
+            ' case any previous path left it on "Connecting…" / disabled.
+            If _btnInsertCoin.Visible Then
+                _btnInsertCoin.Text = "Insert Coin"
+                _btnInsertCoin.Enabled = True
+            End If
             ' Reposition so the button lands centered below the sub-message rather
             ' than at its default (0,0) the first time it becomes visible.
             CenterLabels()

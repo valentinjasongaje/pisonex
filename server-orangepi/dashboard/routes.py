@@ -2,7 +2,11 @@ import csv
 import hashlib
 import io
 import os
+import re
+import socket as _socket
+import subprocess
 import sys
+import time
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
@@ -1231,6 +1235,7 @@ def settings_page(
         "api_key_enabled": bool(api_key),
         "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
         "branch_name": settings.BRANCH_NAME,
+        "idle_timeout": settings.PC_IDLE_TIMEOUT,
         "coin": {
             "coin_pin": _cfg("coin_pin", settings.COIN_PIN),
             "relay_pin": _cfg("relay_pin", settings.RELAY_PIN),
@@ -1657,3 +1662,373 @@ def delete_staff_user(
     db.delete(target)
     db.commit()
     return {"status": "deleted", "user_id": user_id}
+
+
+# ── System health ─────────────────────────────────────────────────────────────
+
+@router.get("/api/system/health")
+def system_health(
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Live Orange Pi hardware metrics — CPU, RAM, disk, temperature, uptime."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        import psutil
+    except ImportError:
+        raise HTTPException(status_code=503, detail="psutil not installed — run: pip install psutil")
+
+    cpu_percent = psutil.cpu_percent(interval=0.3)
+    mem  = psutil.virtual_memory()
+    try:
+        disk = psutil.disk_usage("/")
+        disk_pct   = round(disk.percent, 1)
+        disk_used  = round(disk.used  / (1024 ** 3), 1)
+        disk_total = round(disk.total / (1024 ** 3), 1)
+    except Exception:
+        disk_pct = disk_used = disk_total = None
+
+    # Temperature — try sysfs thermal zones first (works on OPi / RPi)
+    temp_c = None
+    for zone in range(6):
+        try:
+            raw = int(Path(f"/sys/class/thermal/thermal_zone{zone}/temp").read_text().strip())
+            val = raw / 1000.0 if raw > 1000 else float(raw)
+            if val > 0:
+                temp_c = val
+                break
+        except Exception:
+            continue
+    # Fallback: psutil sensors (Linux only)
+    if temp_c is None:
+        try:
+            for key in ("cpu_thermal", "cpu-thermal", "soc_thermal", "coretemp", "acpitz"):
+                sensors = psutil.sensors_temperatures()
+                if key in sensors and sensors[key]:
+                    temp_c = sensors[key][0].current
+                    break
+        except Exception:
+            pass
+
+    uptime_sec = int(time.time() - psutil.boot_time())
+
+    return {
+        "cpu_percent":     round(cpu_percent, 1),
+        "memory_percent":  round(mem.percent, 1),
+        "memory_used_mb":  mem.used  // (1024 * 1024),
+        "memory_total_mb": mem.total // (1024 * 1024),
+        "disk_percent":    disk_pct,
+        "disk_used_gb":    disk_used,
+        "disk_total_gb":   disk_total,
+        "temperature_c":   round(temp_c, 1) if temp_c is not None else None,
+        "uptime_seconds":  uptime_sec,
+    }
+
+
+# ── Network configuration ─────────────────────────────────────────────────────
+
+def _default_interface() -> str:
+    """Return the name of the primary network interface (e.g. 'eth0')."""
+    try:
+        out = subprocess.check_output(["ip", "route", "show", "default"], text=True)
+        parts = out.split()
+        if "dev" in parts:
+            return parts[parts.index("dev") + 1]
+    except Exception:
+        pass
+    return "eth0"
+
+
+def _default_gateway() -> str:
+    try:
+        out = subprocess.check_output(["ip", "route", "show", "default"], text=True)
+        parts = out.split()
+        if "via" in parts:
+            return parts[parts.index("via") + 1]
+    except Exception:
+        pass
+    return ""
+
+
+def _current_dns() -> str:
+    try:
+        for line in Path("/etc/resolv.conf").read_text().splitlines():
+            line = line.strip()
+            if line.startswith("nameserver"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    return parts[1]
+    except Exception:
+        pass
+    return "8.8.8.8"
+
+
+def _is_dhcp(iface: str) -> bool:
+    # nmcli (NetworkManager — most modern Armbian builds)
+    try:
+        out = subprocess.check_output(
+            ["nmcli", "-t", "-f", "ipv4.method", "connection", "show", iface],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+        return "auto" in out
+    except Exception:
+        pass
+    # /etc/network/interfaces (legacy Armbian / Debian)
+    try:
+        content = Path("/etc/network/interfaces").read_text()
+        m = re.search(rf"iface\s+{re.escape(iface)}\s+inet\s+(\w+)", content)
+        if m:
+            return m.group(1) == "dhcp"
+    except Exception:
+        pass
+    return True
+
+
+@router.get("/api/network/config")
+def get_network_config(
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Return the current network configuration of the Orange Pi."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        import psutil
+    except ImportError:
+        raise HTTPException(status_code=503, detail="psutil not installed")
+
+    iface   = _default_interface()
+    gateway = _default_gateway()
+    dns     = _current_dns()
+    is_dhcp = _is_dhcp(iface)
+
+    ip = netmask = None
+    for name, addrs in psutil.net_if_addrs().items():
+        if name == iface:
+            for addr in addrs:
+                if addr.family == _socket.AF_INET:
+                    ip      = addr.address
+                    netmask = addr.netmask
+            break
+
+    return {
+        "interface": iface,
+        "mode":      "dhcp" if is_dhcp else "static",
+        "ip_address": ip      or "",
+        "netmask":    netmask or "255.255.255.0",
+        "gateway":    gateway,
+        "dns":        dns,
+    }
+
+
+class NetworkConfigBody(BaseModel):
+    interface:  str
+    mode:       str          # "dhcp" | "static"
+    ip_address: str = ""
+    netmask:    str = "255.255.255.0"
+    gateway:    str = ""
+    dns:        str = "8.8.8.8"
+
+
+def _mask_to_prefix(mask: str) -> int:
+    try:
+        return sum(bin(int(x)).count("1") for x in mask.split("."))
+    except Exception:
+        return 24
+
+
+@router.post("/api/network/config")
+def set_network_config(
+    body: NetworkConfigBody,
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Apply a new static IP or switch back to DHCP. Changes take effect immediately."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    mode  = body.mode.lower()
+    iface = body.interface.strip()
+    if mode not in ("dhcp", "static"):
+        raise HTTPException(status_code=400, detail="mode must be 'dhcp' or 'static'")
+    if mode == "static" and not body.ip_address:
+        raise HTTPException(status_code=400, detail="ip_address is required for static mode")
+    if mode == "static" and not body.gateway:
+        raise HTTPException(status_code=400, detail="gateway is required for static mode")
+
+    method_used = None
+
+    # ── Try nmcli (NetworkManager) ───────────────────────────────────────
+    try:
+        subprocess.check_call(["which", "nmcli"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        out = subprocess.check_output(
+            ["nmcli", "-t", "-f", "NAME,DEVICE", "connection", "show"],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+        con_name = next(
+            (line.split(":")[0] for line in out.strip().splitlines()
+             if len(line.split(":")) >= 2 and line.split(":")[1] == iface),
+            iface,
+        )
+        if mode == "dhcp":
+            subprocess.check_call([
+                "nmcli", "con", "mod", con_name,
+                "ipv4.method", "auto",
+                "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", "",
+            ])
+        else:
+            prefix = _mask_to_prefix(body.netmask)
+            subprocess.check_call([
+                "nmcli", "con", "mod", con_name,
+                "ipv4.method", "manual",
+                "ipv4.addresses", f"{body.ip_address}/{prefix}",
+                "ipv4.gateway", body.gateway,
+                "ipv4.dns", body.dns or "8.8.8.8",
+            ])
+        subprocess.Popen(["nmcli", "con", "up", con_name])
+        method_used = "nmcli"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+
+    # ── Fallback: /etc/network/interfaces + ifup/ifdown ─────────────────
+    if not method_used:
+        try:
+            ifaces_path = Path("/etc/network/interfaces")
+            existing = ifaces_path.read_text().splitlines(keepends=True) if ifaces_path.exists() else [
+                "auto lo\n", "iface lo inet loopback\n", "\n",
+            ]
+            # Strip old block for this interface
+            cleaned, skip = [], False
+            for line in existing:
+                stripped = line.strip()
+                if stripped.startswith(f"auto {iface}") or stripped.startswith(f"iface {iface}"):
+                    skip = True
+                elif skip and (stripped.startswith("auto ") or stripped.startswith("iface ")):
+                    skip = False
+                elif skip and not stripped:
+                    skip = False
+                if not skip:
+                    cleaned.append(line)
+            if mode == "dhcp":
+                block = [f"\nauto {iface}\n", f"iface {iface} inet dhcp\n"]
+            else:
+                block = [
+                    f"\nauto {iface}\n",
+                    f"iface {iface} inet static\n",
+                    f"    address {body.ip_address}\n",
+                    f"    netmask {body.netmask}\n",
+                    f"    gateway {body.gateway}\n",
+                ]
+                if body.dns:
+                    block.append(f"    dns-nameservers {body.dns}\n")
+            ifaces_path.write_text("".join(cleaned + block))
+            subprocess.Popen(["bash", "-c", f"ifdown {iface} && ifup {iface}"])
+            method_used = "interfaces"
+        except PermissionError:
+            raise HTTPException(
+                status_code=500,
+                detail="Permission denied — the server must run as root to change network config.",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "status":  "applying",
+        "method":  method_used,
+        "mode":    mode,
+        "note":    "Network change is being applied. Reconnect to the new IP if you set a static address.",
+    }
+
+
+# ── Coin-slot idle timeout ────────────────────────────────────────────────────
+
+class IdleTimeoutBody(BaseModel):
+    seconds: int
+
+
+@router.post("/api/settings/idle-timeout")
+def save_idle_timeout(
+    body: IdleTimeoutBody,
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Persist PC_IDLE_TIMEOUT to .env and apply immediately."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if not (0 <= body.seconds <= 3600):
+        raise HTTPException(status_code=400, detail="seconds must be 0–3600")
+
+    env_path = Path(__file__).parent.parent / ".env"
+    lines: list[str] = env_path.read_text(encoding="utf-8").splitlines(keepends=True) if env_path.exists() else []
+    found = False
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("PC_IDLE_TIMEOUT="):
+            lines[i] = f"PC_IDLE_TIMEOUT={body.seconds}\n"
+            found = True
+            break
+    if not found:
+        lines.append(f"PC_IDLE_TIMEOUT={body.seconds}\n")
+    env_path.write_text("".join(lines), encoding="utf-8")
+    settings.PC_IDLE_TIMEOUT = body.seconds
+
+    return {"status": "ok", "seconds": body.seconds}
+
+
+# ── System control ────────────────────────────────────────────────────────────
+
+@router.post("/api/system/restart")
+def system_restart(
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Restart the pisonet systemd service."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    try:
+        subprocess.Popen(["systemctl", "restart", "pisonet"])
+        return {"status": "restarting"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/system/reboot")
+def system_reboot(
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Reboot the Orange Pi hardware."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if not confirm_sys_action():
+        raise HTTPException(status_code=400, detail="Reboot not confirmed")
+    try:
+        subprocess.Popen(["shutdown", "-r", "now"])
+        return {"status": "rebooting"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/system/shutdown")
+def system_shutdown(
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Shut down the Orange Pi hardware."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    try:
+        subprocess.Popen(["shutdown", "-h", "now"])
+        return {"status": "shutting_down"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def confirm_sys_action() -> bool:
+    """Stub — confirmation is done client-side via JS confirm()."""
+    return True

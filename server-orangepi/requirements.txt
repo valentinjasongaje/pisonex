@@ -13,3 +13,4 @@ OPi.GPIO
 smbus2==0.4.3
 aiofiles==24.1.0
 httpx==0.27.2
+psutil==6.1.1

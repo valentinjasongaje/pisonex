@@ -20,6 +20,10 @@ Module Program
     Private _metrics As MetricsService
     Private _notifs As NotificationService
     Private _guardTimer As System.Timers.Timer   ' mutual watchdog keeper
+    ' Accumulates time_added_seconds while the coin slot is open so the
+    ' voice/toast notification is not fired until the user clicks Done
+    ' and the lock form actually hides.
+    Private _pendingTimeAddedSeconds As Integer = 0
 
     <STAThread>
     Sub Main()
@@ -55,9 +59,16 @@ Module Program
             End If
         End If
 
+        ' ── Startup registration + watchdog (production only) ────────────────
+        ' In DEBUG builds we skip these entirely and actively remove any stale
+        ' startup registry entry left by a previous run, so the app never
+        ' auto-launches on boot during development.
+#If DEBUG Then
+        UnregisterStartup()
+#Else
         RegisterStartup()
 
-        ' ── Register exe path + spawn the watchdog guardian ───────────────
+        ' Register exe path + spawn the watchdog guardian
         AppConfig.SaveClientExePath(Application.ExecutablePath)
         SpawnGuard()
 
@@ -66,6 +77,7 @@ Module Program
         AddHandler _guardTimer.Elapsed, Sub(s, e) EnsureGuardRunning()
         _guardTimer.AutoReset = True
         _guardTimer.Start()
+#End If
 
         ' ── License initialization ────────────────────────────────────────
         ' SyncStartupStatusAsync runs first: it restores LicenseFirstRunDate from
@@ -136,9 +148,11 @@ Module Program
         AddHandler _session.CoinSlotChanged, AddressOf OnCoinSlotChanged
         AddHandler _session.MembershipUpdated, AddressOf OnMembershipUpdated
 
-        ' Insert Coin event from lock form
+        ' Insert Coin event from lock form and overlay
         AddHandler _lockMgr.LockFormInsertCoinRequested, AddressOf OnInsertCoinRequested
         AddHandler _lockMgr.LockFormDoneInsertingCoinsRequested, AddressOf OnDoneInsertingCoinsRequested
+        AddHandler _overlay.InsertCoinRequested, AddressOf OnInsertCoinRequested
+        AddHandler _overlay.DoneInsertingCoinsRequested, AddressOf OnDoneInsertingCoinsRequested
 
         ' Membership events from lock form and overlay
         AddHandler _lockMgr.LockFormLoginRequested, AddressOf OnMemberLogin
@@ -208,6 +222,13 @@ Module Program
         End If
 
         If Not _overlay.Visible Then _overlay.Show()
+        ' Show "Add Time" CTA immediately on session start.
+        ' CoinSlotChanged only fires when the value changes, but _lastCoinSlotEnabled
+        ' starts True in SessionManager so the event never fires on the first heartbeat
+        ' if the slot is enabled (the common case).  We seed it here so the button
+        ' appears as soon as the session begins; subsequent CoinSlotChanged events
+        ' will still override it if the slot is actually disabled.
+        _overlay.ShowAddTimeButton(True)
         _tray.SetTimerVisible(True)
         _tray.UpdateStatus("Pisonex — Session active")
     End Sub
@@ -217,6 +238,7 @@ Module Program
             _overlay.Invoke(Sub() OnSessionEnded())
             Return
         End If
+        _overlay.ShowAddTimeButton(False)   ' reset CTA state before hiding
         _overlay.Hide()
         _tray.SetTimerVisible(False)
         _tray.UpdateStatus("Pisonex — Waiting for coins")
@@ -257,6 +279,18 @@ Module Program
     End Sub
 
     Private Sub OnTimeAdded(seconds As Integer)
+        ' While the coin slot is still open the lock form is still showing —
+        ' the user may be about to insert more coins.  Firing the toast + voice
+        ' now would be premature and confusing.  Accumulate the total and fire
+        ' once the slot closes (see OnReceivingCoinsChanged below).
+        If _lockMgr.IsReceivingCoins Then
+            _pendingTimeAddedSeconds += seconds
+            Return
+        End If
+        FireTimeAddedNotification(seconds)
+    End Sub
+
+    Private Sub FireTimeAddedNotification(seconds As Integer)
         Dim mins = seconds \ 60
         Dim secs = seconds Mod 60
         Dim timeStr = If(mins > 0, $"{mins}m {secs}s", $"{secs}s")
@@ -267,15 +301,26 @@ Module Program
     End Sub
 
     Private Sub OnReceivingCoinsChanged(isReceiving As Boolean)
-        _lockMgr.ShowReceivingCoins(If(LicenseService.IsActive(), isReceiving, False))
+        Dim active = If(LicenseService.IsActive(), isReceiving, False)
+        _lockMgr.ShowReceivingCoins(active)
+        _overlay.SetReceivingCoins(active)
+        ' Slot just closed — fire any time-added notification that was held back
+        ' while the lock form was still showing (could be multiple coins summed).
+        If Not isReceiving AndAlso _pendingTimeAddedSeconds > 0 Then
+            Dim total = _pendingTimeAddedSeconds
+            _pendingTimeAddedSeconds = 0
+            FireTimeAddedNotification(total)
+        End If
     End Sub
 
     Private Sub OnCoinProgressChanged(pesos As Integer, seconds As Integer)
         _lockMgr.UpdateCoinProgress(pesos, seconds)
+        _overlay.UpdateCoinProgress(pesos, seconds)
     End Sub
 
     Private Sub OnCoinSlotChanged(enabled As Boolean)
         _lockMgr.UpdateCoinSlot(enabled)
+        _overlay.ShowAddTimeButton(enabled)
     End Sub
 
     Private Sub OnInsertCoinRequested()
@@ -283,6 +328,7 @@ Module Program
             Dim result = Await _api.RequestCoinsAsync()
             If Not result.Ok Then
                 _lockMgr.SetInsertCoinResult(False)
+                _overlay.SetInsertCoinResult(False)
                 Dim msg As String
                 Dim detail = result.Detail.ToLowerInvariant()
                 If detail.Contains("busy") Then
@@ -635,11 +681,28 @@ Module Program
 
     ' ── Windows startup registration ──────────────────────────────────────
 
+    ''' <summary>
+    ''' Registers the current exe in HKCU Run so Windows launches it on boot.
+    ''' Called only in Release builds.
+    ''' </summary>
     Private Sub RegisterStartup()
         Try
             Dim key = Registry.CurrentUser.OpenSubKey(
                 "SOFTWARE\Microsoft\Windows\CurrentVersion\Run", True)
             key?.SetValue("PisoNetClient", $"""{Application.ExecutablePath}""")
+        Catch
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' Removes the startup registry entry entirely.
+    ''' Called in Debug builds so development runs never pollute Windows startup.
+    ''' </summary>
+    Private Sub UnregisterStartup()
+        Try
+            Dim key = Registry.CurrentUser.OpenSubKey(
+                "SOFTWARE\Microsoft\Windows\CurrentVersion\Run", True)
+            key?.DeleteValue("PisoNetClient", throwOnMissingValue:=False)
         Catch
         End Try
     End Sub
