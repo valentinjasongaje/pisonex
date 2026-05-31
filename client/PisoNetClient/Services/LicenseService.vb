@@ -136,6 +136,7 @@ Namespace Services
         ''' </summary>
         Private Function BuildTelemetry() As Dictionary(Of String, String)
             Dim d = New Dictionary(Of String, String) From {
+                {"device_type", "pc"},
                 {"app_version", GetAppVersion()},
                 {"license_status", GetStatus().ToString().ToLower()},
                 {"trial_days_remaining", TrialDaysRemaining().ToString()},

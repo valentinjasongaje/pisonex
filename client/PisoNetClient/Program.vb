@@ -200,6 +200,17 @@ Module Program
             ' Start performance metrics reporting
             _metrics = New MetricsService(_api)
             _metrics.Start()
+
+            ' The startup SyncStartupStatusAsync() ran before heartbeats started,
+            ' so it sent today_pesos=0 and overwrote any previous value in devicePings.
+            ' Re-sync after 30 s once heartbeats have populated the earnings cache.
+            Dim earlyEarningsSync = New Timer() With {.Interval = 30_000}
+            AddHandler earlyEarningsSync.Tick, Async Sub(ss, ee)
+                earlyEarningsSync.Stop()
+                earlyEarningsSync.Dispose()
+                Await LicenseService.SyncStartupStatusAsync()
+            End Sub
+            earlyEarningsSync.Start()
         End Sub
         startTimer.Start()
 

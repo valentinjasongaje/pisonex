@@ -147,10 +147,21 @@ class LicenseService:
         """
         try:
             device_id = self.get_device_id()
+            status_info = self.get_status()
+            payload = {
+                "device_id": device_id,
+                "device_type": "server",
+                "license_status": status_info["status"],
+                "app_version": "1.0.0",
+                "machine_name": platform.node(),
+                "trial_days_remaining": status_info["trial_days_remaining"],
+            }
+            if self._data.get("license_key"):
+                payload["license_key"] = self._data["license_key"]
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/status",
-                    json={"device_id": device_id},
+                    json=payload,
                 )
             if resp.status_code == 200:
                 data = resp.json()
@@ -270,12 +281,21 @@ class LicenseService:
             return {"valid": False, "error": "No license key"}
 
         device_id = self.get_device_id()
+        status_info = self.get_status()
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/license/verify",
-                    json={"license_key": key, "device_id": device_id},
+                    json={
+                        "license_key": key,
+                        "device_id": device_id,
+                        "device_type": "server",
+                        "license_status": status_info["status"],
+                        "app_version": "1.0.0",
+                        "machine_name": platform.node(),
+                        "trial_days_remaining": status_info["trial_days_remaining"],
+                    },
                 )
 
             try:

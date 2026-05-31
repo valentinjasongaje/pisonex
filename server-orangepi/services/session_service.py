@@ -249,24 +249,33 @@ class SessionService:
         """
         Returns yesterday's (UTC) earnings for every PC — used by the nightly
         archive task to sync to pisonex.com.
-
-        Returns a list of dicts:
-          {"pc_number": int, "total_pesos": int, "total_sessions": int, "total_minutes": int}
         """
         from datetime import timedelta
         today_midnight = datetime.utcnow().replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        yesterday_start = today_midnight - timedelta(days=1)
-        yesterday_end = today_midnight
+        return self.get_earnings_for_utc_date(today_midnight - timedelta(days=1))
+
+    def get_earnings_for_utc_date(self, utc_date: datetime) -> list[dict]:
+        """
+        Returns per-PC earnings for a specific UTC calendar day.
+        utc_date can be any datetime — the time component is ignored; the
+        query covers the full UTC day containing that datetime.
+
+        Returns a list of dicts:
+          {"pc_number": int, "total_pesos": int, "total_sessions": int, "total_minutes": int}
+        """
+        from datetime import timedelta
+        day_start = utc_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
 
         pcs = self.get_all_pcs()
         result = []
         for pc in pcs:
             tx_rows = self._db.query(CoinTransaction).filter(
                 CoinTransaction.pc_id == pc.id,
-                CoinTransaction.created_at >= yesterday_start,
-                CoinTransaction.created_at < yesterday_end,
+                CoinTransaction.created_at >= day_start,
+                CoinTransaction.created_at < day_end,
             ).all()
 
             total_pesos = sum(r.amount_php for r in tx_rows)
@@ -274,8 +283,8 @@ class SessionService:
 
             total_sessions = self._db.query(func.count(Session.id)).filter(
                 Session.pc_id == pc.id,
-                Session.started_at >= yesterday_start,
-                Session.started_at < yesterday_end,
+                Session.started_at >= day_start,
+                Session.started_at < day_end,
             ).scalar() or 0
 
             result.append({

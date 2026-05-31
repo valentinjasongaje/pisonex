@@ -593,90 +593,100 @@ async def _schedule_loop():
 
 async def _nightly_earnings_sync_loop():
     """
-    Once per day, near midnight UTC, POST yesterday's per-PC earnings to
-    pisonex.com /api/sync/earnings.  Authenticated with the server's pisonex.com
-    license key (from data/license.json via LicenseService._data).
-    Skipped if BRANCH_NAME is empty or no license key is found.
+    Once per day at UTC midnight, POST the previous day's per-PC earnings to
+    pisonex.com /api/sync/earnings.
+
+    On startup, also syncs any recent days the server missed while it was off
+    (e.g. shop closed at 10pm before UTC midnight ran).  The pisonex.com endpoint
+    uses onConflictDoUpdate so re-syncing the same date is always safe.
     """
     import httpx
     from datetime import datetime as _dt, timedelta
 
     def _seconds_until_next_midnight() -> float:
-        """Returns seconds remaining until the next UTC midnight."""
         now = _dt.utcnow()
         tomorrow = (now + timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         return (tomorrow - now).total_seconds()
 
-    # Sleep until next midnight before entering the daily loop
+    async def _sync_date(target_date: "_dt") -> bool:
+        """Sync earnings for one specific UTC calendar date. Returns True on success."""
+        branch_name = settings.BRANCH_NAME
+        if not branch_name:
+            return False
+        license_key = ""
+        if license_service and hasattr(license_service, "_data"):
+            license_key = license_service._data.get("license_key", "") or ""
+        if not license_key:
+            return False
+
+        db = SessionLocal()
+        try:
+            svc = SessionService(db)
+            pc_earnings = svc.get_earnings_for_utc_date(target_date)
+            date_str = target_date.strftime("%Y-%m-%d")
+
+            from services.license_service import _signed_payload
+            raw_payload = {
+                "license_key": license_key,
+                "branch_name": branch_name,
+                "date": date_str,
+                "pcs": [
+                    {
+                        "pc_number": e["pc_number"],
+                        "total_pesos": e["total_pesos"],
+                        "total_sessions": e["total_sessions"],
+                        "total_minutes": e["total_minutes"],
+                    }
+                    for e in pc_earnings
+                ],
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "https://www.pisonex.com/api/sync/earnings",
+                    json=_signed_payload(raw_payload),
+                )
+            if resp.status_code in (200, 201):
+                logger.info("Earnings synced: %s, %d PCs", date_str, len(pc_earnings))
+                return True
+            else:
+                logger.warning("Earnings sync HTTP %d for %s: %s",
+                               resp.status_code, date_str, resp.text[:200])
+                return False
+        finally:
+            db.close()
+
+    # ── Startup catch-up ──────────────────────────────────────────────────────
+    # If the server was off at UTC midnight (e.g. shop closed at 10pm), those
+    # days were never archived. On startup, sync the past 7 UTC days so any
+    # missed nights are recovered. onConflictDoUpdate makes this idempotent.
+    now = _dt.utcnow()
+    for days_back in range(1, 8):
+        missed_day = now - timedelta(days=days_back)
+        try:
+            await _sync_date(missed_day)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("Startup catch-up sync failed for %s: %s",
+                           missed_day.strftime("%Y-%m-%d"), e)
+
+    # ── Nightly loop ──────────────────────────────────────────────────────────
     initial_sleep = _seconds_until_next_midnight()
-    logger.info("Nightly earnings sync: first run in %.0f seconds (at next UTC midnight)", initial_sleep)
+    logger.info("Nightly earnings sync: next run in %.0f seconds (at next UTC midnight)", initial_sleep)
     await asyncio.sleep(initial_sleep)
 
     while True:
         try:
-            branch_name = settings.BRANCH_NAME
-            if not branch_name:
-                logger.debug("Nightly earnings sync skipped — BRANCH_NAME not set")
-            else:
-                db = SessionLocal()
-                try:
-                    # The license key for pisonex.com is held by the server-side LicenseService
-                    # (stored in data/license.json, _data["license_key"]).
-                    license_key = ""
-                    if license_service and hasattr(license_service, "_data"):
-                        license_key = license_service._data.get("license_key", "") or ""
-
-                    if not license_key:
-                        logger.debug("Nightly earnings sync skipped — no pisonex.com license key available")
-                    else:
-                        svc = SessionService(db)
-                        pc_earnings = svc.get_all_pcs_today_earnings()
-
-                        yesterday = (_dt.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
-
-                        from services.license_service import _signed_payload
-                        raw_payload = {
-                            "license_key": license_key,
-                            "branch_name": branch_name,
-                            "date": yesterday,
-                            "pcs": [
-                                {
-                                    "pc_number": e["pc_number"],
-                                    "total_pesos": e["total_pesos"],
-                                    "total_sessions": e["total_sessions"],
-                                    "total_minutes": e["total_minutes"],
-                                }
-                                for e in pc_earnings
-                            ],
-                        }
-
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.post(
-                                "https://www.pisonex.com/api/sync/earnings",
-                                json=_signed_payload(raw_payload),
-                            )
-                            if resp.status_code in (200, 201):
-                                logger.info(
-                                    "Nightly earnings synced to pisonex.com: %s, %d PCs",
-                                    yesterday,
-                                    len(pc_earnings),
-                                )
-                            else:
-                                logger.warning(
-                                    "Nightly earnings sync returned HTTP %d: %s",
-                                    resp.status_code,
-                                    resp.text[:200],
-                                )
-                finally:
-                    db.close()
+            yesterday = _dt.utcnow() - timedelta(days=1)
+            await _sync_date(yesterday)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.error("Nightly earnings sync error: %s", e)
 
-        # Sleep 24 hours until the next midnight cycle
         await asyncio.sleep(24 * 60 * 60)
 
 
