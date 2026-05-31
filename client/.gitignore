@@ -1,1 +1,6 @@
 /tools
+
+# FFmpeg binary — too large to commit (~100 MB), distributed via installer.
+# Place ffmpeg.exe beside PisoNetClient.vbproj and it will be auto-copied
+# to the publish output by MSBuild.
+**/ffmpeg.exe
