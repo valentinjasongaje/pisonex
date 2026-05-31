@@ -355,6 +355,7 @@ function openFullscreen(pcNumber) {
       img.src = '';
       img.style.display  = 'none';
       canvas.style.display = '';
+      _resizeStreamCanvas();
     },
     onStalled: function() {
       console.warn('[jsmpeg] Stream stalled');
@@ -369,6 +370,40 @@ function openFullscreen(pcNumber) {
     },
   });
 }
+
+// ── Canvas aspect-ratio fit ──────────────────────────────────────────────────
+// CSS aspect-ratio/max-width/max-height conflict on <canvas> so we size it
+// via JS: largest rect that fits the content area at the video's actual ratio.
+function _resizeStreamCanvas() {
+  const canvas  = document.getElementById('fullscreen-canvas');
+  const content = document.querySelector('.fullscreen-content');
+  if (!canvas || !content || canvas.style.display === 'none') return;
+
+  const cw = content.clientWidth;
+  const ch = content.clientHeight;
+  if (!cw || !ch) return;
+
+  // Use the video's real pixel ratio (set by jsmpeg on canvas attributes)
+  const vidW = canvas.width  || 1280;
+  const vidH = canvas.height || 720;
+  const ratio = vidW / vidH;
+
+  let w, h;
+  if (cw / ch > ratio) {
+    // Container wider than video — height is the constraint
+    h = ch; w = Math.round(h * ratio);
+  } else {
+    // Container taller than video — width is the constraint
+    w = cw; h = Math.round(w / ratio);
+  }
+
+  canvas.style.width  = w + 'px';
+  canvas.style.height = h + 'px';
+}
+
+window.addEventListener('resize', function() {
+  if (_streamSwitched) _resizeStreamCanvas();
+});
 
 function _fallbackToMjpeg() {
   if (_fullscreenPc === null) return;
@@ -390,7 +425,9 @@ function closeFullscreen() {
   img.src = '';
   img.style.display = '';
 
-  document.getElementById('fullscreen-canvas').style.display = 'none';
+  const _fc = document.getElementById('fullscreen-canvas');
+  _fc.style.display = 'none';
+  _fc.style.width = ''; _fc.style.height = '';   // reset JS sizing
   document.getElementById('fullscreen-modal').classList.add('hidden');
 
   clearInterval(_watchKeepalive);
