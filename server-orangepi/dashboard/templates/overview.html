@@ -7,6 +7,10 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
     <button class="btn btn-sm btn-default" onclick="openAnnouncementModal()">📢 Announce</button>
     <button id="global-coin-btn" class="btn btn-sm coin-toggle-btn coin-enabled" onclick="toggleGlobalCoinSlot()">🪙 Coins: ON</button>
+    <button class="btn btn-sm btn-secondary" style="width:32px;height:32px;padding:0;font-size:1rem;display:flex;align-items:center;justify-content:center;"
+      onclick="ovSysControl('restart')" title="Restart Service">↻</button>
+    <button class="btn btn-sm btn-danger" style="width:32px;height:32px;padding:0;font-size:1rem;display:flex;align-items:center;justify-content:center;"
+      onclick="ovSysControl('shutdown')" title="Shutdown OPi">⏻</button>
   </div>
 </div>
 
@@ -99,13 +103,6 @@
         </div>
       </div>
 
-      <!-- Restart / Shutdown — icon-only square buttons -->
-      <div style="display:flex;gap:.5rem;margin-top:.85rem;padding-top:.75rem;border-top:1px solid var(--border);">
-        <button class="btn btn-secondary" style="width:40px;height:40px;padding:0;font-size:1.1rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
-          onclick="ovSysControl('restart')" title="Restart Service">↻</button>
-        <button class="btn btn-danger" style="width:40px;height:40px;padding:0;font-size:1.1rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
-          onclick="ovSysControl('shutdown')" title="Shutdown OPi">⏻</button>
-      </div>
       <div id="ov-sys-status" style="font-size:.78rem;margin-top:.5rem;min-height:1.1em;"></div>
 
     </div><!-- /card -->
