@@ -104,7 +104,7 @@ Namespace Services
                     Await _ws.SendAsync(
                         New ArraySegment(Of Byte)(buf, 0, n),
                         WebSocketMessageType.Binary,
-                        endOfMessage:=False,   ' continuous stream, not discrete messages
+                        endOfMessage:=True,    ' each chunk is a complete message for the relay
                         cancellationToken:=_cts.Token)
                 End While
 
