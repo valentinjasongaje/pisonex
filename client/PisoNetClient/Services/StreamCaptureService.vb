@@ -97,6 +97,21 @@ Namespace Services
                 _ffmpeg = Process.Start(psi)
                 _ffmpeg.BeginErrorReadLine()   ' drain stderr so it never blocks
 
+                ' Drain incoming WebSocket frames (pings, close) concurrently so the
+                ' server's ping/pong keepalive doesn't time out the publish connection.
+                Dim drainTask = Task.Run(Async Function()
+                    Dim recvBuf = New Byte(1023) {}
+                    Try
+                        While Not _cts.Token.IsCancellationRequested
+                            Dim result = Await _ws.ReceiveAsync(
+                                New ArraySegment(Of Byte)(recvBuf), _cts.Token)
+                            If result.MessageType = WebSocketMessageType.Close Then Exit While
+                        End While
+                    Catch
+                        ' Connection closed — exit silently
+                    End Try
+                End Function)
+
                 ' Pipe FFmpeg stdout → WebSocket in 64 KB chunks
                 Dim buf       = New Byte(65535) {}
                 Dim outStream = _ffmpeg.StandardOutput.BaseStream

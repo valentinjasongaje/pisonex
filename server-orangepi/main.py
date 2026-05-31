@@ -797,4 +797,6 @@ if __name__ == "__main__":
         port=settings.SERVER_PORT,
         reload=False,
         workers=1,
+        ws_ping_interval=None,   # disable server-initiated pings — the VB.NET
+        ws_ping_timeout=None,    # ClientWebSocket only handles pings during ReceiveAsync
     )
