@@ -22,7 +22,7 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, RateProfile, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from config import settings
@@ -349,6 +349,7 @@ def license_page(
 @router.get("/rates", response_class=HTMLResponse)
 def rates_page(
     request: Request,
+    profile: int = 1,
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(_validate_session),
 ):
@@ -356,15 +357,54 @@ def rates_page(
         return RedirectResponse("/dashboard/login", status_code=302)
     if current_user["role"] != "admin":
         return RedirectResponse("/dashboard", status_code=302)
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+
+    # Resolve the selected profile — fall back to the default if the id is unknown
+    selected_profile = db.query(RateProfile).filter(RateProfile.id == profile).first()
+    if not selected_profile and profiles:
+        selected_profile = next((p for p in profiles if p.is_default), profiles[0])
+
+    selected_id = selected_profile.id if selected_profile else 1
+
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == selected_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("rates.html", {
         "request": request,
         "rates": rates,
+        "profiles": profiles,
+        "selected_profile": selected_profile,
+        "selected_id": selected_id,
+    })
+
+
+@router.get("/partials/rates-table", response_class=HTMLResponse)
+def rates_table_partial(
+    request: Request,
+    profile_id: int = 1,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """HTMX partial — returns just the rates table for the selected profile."""
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+    rates = (
+        db.query(CoinRate)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
+        .order_by(CoinRate.pesos.asc())
+        .all()
+    )
+    return templates.TemplateResponse("partials/rates_table.html", {
+        "request": request,
+        "rates": rates,
+        "selected_id": profile_id,
     })
 
 
@@ -373,6 +413,7 @@ def save_rate(
     request: Request,
     pesos: int = Form(...),
     minutes: int = Form(...),
+    profile_id: int = Form(1),
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(_validate_session),
 ):
@@ -380,8 +421,16 @@ def save_rate(
         return HTMLResponse(status_code=401, content="")
     if current_user["role"] != "admin":
         return HTMLResponse(status_code=403, content="")
+
+    # Ensure the profile exists
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+
     existing = db.query(CoinRate).filter(
-        CoinRate.pesos == pesos, CoinRate.is_active == True
+        CoinRate.pesos == pesos,
+        CoinRate.is_active == True,
+        CoinRate.profile_id == profile_id,
     ).first()
     if existing:
         existing.is_active = False
@@ -391,19 +440,21 @@ def save_rate(
         pesos=pesos,
         seconds=seconds,
         label=f"₱{pesos} = {minutes} minutes",
+        profile_id=profile_id,
     )
     db.add(rate)
     db.commit()
 
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("partials/rates_table.html", {
         "request": request,
         "rates": rates,
+        "selected_id": profile_id,
     })
 
 
@@ -419,18 +470,191 @@ def delete_rate(
     if current_user["role"] != "admin":
         return HTMLResponse(status_code=403, content="")
     rate = db.query(CoinRate).filter(CoinRate.id == rate_id).first()
+    profile_id = rate.profile_id if rate else 1
     if rate:
         rate.is_active = False
         db.commit()
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("partials/rates_table.html", {
         "request": request,
         "rates": rates,
+        "selected_id": profile_id,
+    })
+
+
+# ── Rate Profile CRUD ────────────────────────────────────────────────────────
+
+class ProfileCreateBody(BaseModel):
+    name: str
+    color: str = "#4f8ef7"
+
+
+@router.post("/rates/profiles", response_class=HTMLResponse)
+def create_profile(
+    request: Request,
+    name: str = Form(...),
+    color: str = Form("#4f8ef7"),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    name = name.strip()
+    if not name:
+        return HTMLResponse(status_code=422, content="Name cannot be empty")
+
+    existing = db.query(RateProfile).filter(RateProfile.name == name).first()
+    if existing:
+        return HTMLResponse(status_code=409, content="A profile with that name already exists")
+
+    profile = RateProfile(name=name, color=color, is_default=False)
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": profile.id,
+    })
+
+
+@router.delete("/rates/profiles/{profile_id}", response_class=HTMLResponse)
+def delete_profile(
+    profile_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+    if profile.is_default:
+        return HTMLResponse(status_code=400, content="Cannot delete the Default profile")
+
+    # Reassign PCs to Default profile
+    default_profile = db.query(RateProfile).filter(RateProfile.is_default == True).first()
+    default_id = default_profile.id if default_profile else 1
+    db.query(PC).filter(PC.rate_profile_id == profile_id).update(
+        {"rate_profile_id": None}, synchronize_session=False
+    )
+
+    # Soft-delete this profile's rates (mark inactive)
+    db.query(CoinRate).filter(CoinRate.profile_id == profile_id).update(
+        {"is_active": False}, synchronize_session=False
+    )
+
+    db.delete(profile)
+    db.commit()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": default_id,
+    })
+
+
+@router.post("/rates/profiles/{profile_id}/name", response_class=HTMLResponse)
+def rename_profile(
+    profile_id: int,
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+    if profile.is_default:
+        return HTMLResponse(status_code=400, content="Cannot rename the Default profile")
+
+    name = name.strip()
+    if not name:
+        return HTMLResponse(status_code=422, content="Name cannot be empty")
+
+    conflict = db.query(RateProfile).filter(
+        RateProfile.name == name, RateProfile.id != profile_id
+    ).first()
+    if conflict:
+        return HTMLResponse(status_code=409, content="A profile with that name already exists")
+
+    profile.name = name
+    db.commit()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": profile_id,
+    })
+
+
+# ── PC profile assignment ────────────────────────────────────────────────────
+
+@router.post("/pcs/{pc_number}/profile", response_class=HTMLResponse)
+def set_pc_profile(
+    pc_number: int,
+    request: Request,
+    profile_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Assign a rate profile to a PC.  Returns an updated profile-badge partial."""
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    pc = db.query(PC).filter(PC.pc_number == pc_number).first()
+    if not pc:
+        return HTMLResponse(status_code=404, content=f"PC {pc_number} not found")
+
+    # profile_id=0 means "clear assignment → Default"
+    if profile_id == 0:
+        pc.rate_profile_id = None
+    else:
+        profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+        if not profile:
+            return HTMLResponse(status_code=404, content="Profile not found")
+        pc.rate_profile_id = profile_id
+
+    db.commit()
+    db.refresh(pc)
+
+    # Determine the effective profile for display
+    effective_profile = None
+    if pc.rate_profile_id:
+        effective_profile = db.query(RateProfile).filter(RateProfile.id == pc.rate_profile_id).first()
+    if not effective_profile:
+        effective_profile = db.query(RateProfile).filter(RateProfile.is_default == True).first()
+
+    return templates.TemplateResponse("partials/pc_profile_badge.html", {
+        "request": request,
+        "pc_number": pc_number,
+        "profile": effective_profile,
     })
 
 
@@ -764,11 +988,15 @@ def pcs_page(
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
 
+    from services.rate_service import get_all_profiles
     svc = SessionService(db)
     pcs = svc.get_all_pcs()
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
     membership_enabled, pc_members = _get_membership_info(db)
     cfg = db.query(MembershipConfig).first()
+    profiles = get_all_profiles(db)
+    default_profile = next((p for p in profiles if p.is_default), None)
+    profile_map = {p.id: p for p in profiles}
 
     pc_data = []
     for pc in pcs:
@@ -776,6 +1004,8 @@ def pcs_page(
             pc.is_online = False
         session = svc.get_active_session(pc.pc_number)
         remaining_sec = svc.remaining_seconds(session)
+        # Effective profile: the one assigned, else the Default
+        eff_profile = profile_map.get(pc.rate_profile_id) if pc.rate_profile_id else default_profile
         pc_data.append({
             "pc_number": pc.pc_number,
             "name": pc.name,
@@ -787,6 +1017,8 @@ def pcs_page(
             "remaining_minutes": remaining_sec // 60,
             "remaining_seconds": remaining_sec % 60,
             "member_username": pc_members.get(pc.pc_number),
+            "rate_profile": eff_profile,
+            "rate_profile_id": pc.rate_profile_id,
         })
     db.commit()
 
@@ -796,6 +1028,7 @@ def pcs_page(
         "total": len(pc_data),
         "membership_enabled": membership_enabled,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "profiles": profiles,
     })
 
 

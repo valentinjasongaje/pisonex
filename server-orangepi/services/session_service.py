@@ -95,7 +95,9 @@ class SessionService:
         if not pc:
             raise ValueError(f"PC {pc_number} not found")
 
-        seconds = pesos_to_seconds(pesos, self._db)
+        # Use the PC's assigned rate profile (falls back to Default if None)
+        profile_id = pc.rate_profile_id or 1
+        seconds = pesos_to_seconds(pesos, self._db, profile_id=profile_id)
         if seconds == 0:
             raise ValueError(f"₱{pesos} does not convert to any time")
 

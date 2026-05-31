@@ -85,12 +85,29 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+# ── Rate Profile ──────────────────────────────────────────────────
+
+class RateProfileCreate(BaseModel):
+    name: str
+    color: str = "#4f8ef7"
+
+class RateProfileOut(BaseModel):
+    id: int
+    name: str
+    color: str
+    is_default: bool
+
+    class Config:
+        from_attributes = True
+
+
 # ── Coin Rate ─────────────────────────────────────────────────────
 
 class CoinRateCreate(BaseModel):
     pesos: int
     seconds: int
     label: Optional[str] = None
+    profile_id: int = 1
 
 class CoinRateResponse(BaseModel):
     id: int
@@ -98,6 +115,7 @@ class CoinRateResponse(BaseModel):
     seconds: int
     label: Optional[str]
     is_active: bool
+    profile_id: Optional[int] = None
 
     class Config:
         from_attributes = True

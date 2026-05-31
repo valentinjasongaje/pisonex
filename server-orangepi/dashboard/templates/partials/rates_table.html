@@ -1,5 +1,6 @@
 <div id="rates-table" class="card">
   <h2>Active Rates</h2>
+  {% if rates %}
   <table class="data-table">
     <thead>
       <tr><th>Pesos</th><th>Time</th><th>Rate/hr</th><th>Action</th></tr>
@@ -23,4 +24,12 @@
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p style="color:var(--text-dim);text-align:center;padding:20px 0;">
+    No active rates for this profile.
+    {% if selected_id and selected_id != 1 %}
+    PCs on this profile will fall back to the <strong>Default</strong> profile rates.
+    {% endif %}
+  </p>
+  {% endif %}
 </div>

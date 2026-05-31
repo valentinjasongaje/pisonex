@@ -28,6 +28,7 @@
         <th class="col-hide-sm">MAC Address</th>
         <th>Remaining</th>
         {% if membership_enabled %}<th class="col-hide-sm">Member</th>{% endif %}
+        <th>Rate Profile</th>
         <th class="col-hide-sm">Last Seen</th>
         <th>Coins</th>
         <th>Actions</th>
@@ -68,6 +69,31 @@
           {% endif %}
         </td>
         {% endif %}
+        <td>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <!-- Live badge — swapped by HTMX on profile change -->
+            <span
+              id="pc-profile-badge-{{ pc.pc_number }}"
+              class="profile-badge-pill"
+              style="--badge-color: {{ pc.rate_profile.color if pc.rate_profile else '#6b7280' }};"
+            >
+              <span class="profile-dot" style="background:{{ pc.rate_profile.color if pc.rate_profile else '#6b7280' }};"></span>
+              {{ pc.rate_profile.name if pc.rate_profile else "Default" }}
+            </span>
+            <!-- Profile picker -->
+            <select
+              class="profile-select"
+              onchange="assignProfile({{ pc.pc_number }}, this.value)"
+              title="Change rate profile"
+            >
+              {% for p in profiles %}
+              <option value="{{ p.id }}" {% if pc.rate_profile_id == p.id or (not pc.rate_profile_id and p.is_default) %}selected{% endif %}>
+                {{ p.name }}{% if p.is_default %} (default){% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+        </td>
         <td class="col-hide-sm" style="color: var(--text-dim); font-size: 12px;">
           {{ pc.last_seen.strftime('%b %d %H:%M') if pc.last_seen else "Never" }}
         </td>
@@ -135,6 +161,29 @@
         {% else %}
         <span style="color:var(--gray)">—</span>
         {% endif %}
+      </div>
+      <div class="pc-mgmt-row">
+        <span class="pc-mgmt-label">Rate Profile</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span
+            id="pc-profile-badge-{{ pc.pc_number }}"
+            class="profile-badge-pill"
+            style="--badge-color: {{ pc.rate_profile.color if pc.rate_profile else '#6b7280' }};"
+          >
+            <span class="profile-dot" style="background:{{ pc.rate_profile.color if pc.rate_profile else '#6b7280' }};"></span>
+            {{ pc.rate_profile.name if pc.rate_profile else "Default" }}
+          </span>
+          <select
+            class="profile-select"
+            onchange="assignProfile({{ pc.pc_number }}, this.value)"
+          >
+            {% for p in profiles %}
+            <option value="{{ p.id }}" {% if pc.rate_profile_id == p.id or (not pc.rate_profile_id and p.is_default) %}selected{% endif %}>
+              {{ p.name }}{% if p.is_default %} (default){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
       <div class="pc-mgmt-row">
         <span class="pc-mgmt-label">IP Address</span>
@@ -334,6 +383,74 @@
     justify-content: center;
   }
 }
+
+/* ── Profile badge pill ──────────────────────────────────── */
+.profile-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid color-mix(in srgb, var(--badge-color, #6b7280) 40%, transparent);
+  background: color-mix(in srgb, var(--badge-color, #6b7280) 12%, transparent);
+  color: var(--text);
+  white-space: nowrap;
+}
+.profile-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Profile select ────────────────────────────────────────── */
+.profile-select {
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+  max-width: 120px;
+}
+.profile-select:focus {
+  outline: none;
+  border-color: var(--accent, #4f8ef7);
+  color: var(--text);
+}
 </style>
+
+<script>
+function assignProfile(pcNumber, profileId) {
+  var fd = new FormData();
+  fd.append('profile_id', profileId);
+  fetch('/dashboard/pcs/' + pcNumber + '/profile', {
+    method: 'POST',
+    body: fd,
+  })
+  .then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { console.error('Profile assign failed:', t); });
+    return r.text();
+  })
+  .then(function(html) {
+    if (!html) return;
+    var badge = document.getElementById('pc-profile-badge-' + pcNumber);
+    if (badge) {
+      // Replace all badges with that pc_number (desktop + mobile both carry the same id)
+      document.querySelectorAll('#pc-profile-badge-' + pcNumber).forEach(function(el) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html.trim();
+        var newBadge = tmp.firstElementChild;
+        if (newBadge) el.replaceWith(newBadge);
+      });
+    }
+  })
+  .catch(function(e) { console.error('assignProfile error:', e); });
+}
+</script>
 
 {% endblock %}
