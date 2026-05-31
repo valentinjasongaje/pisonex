@@ -1,76 +1,117 @@
 {% extends "layout.html" %}
 {% block content %}
 
+<!-- ── Header: title + action buttons only ─────────────────────── -->
 <div class="page-header">
   <h1>Overview</h1>
-  <div class="header-stats">
-    <div class="stat-pill online">🟢 <span id="online-count">{{ online_count }}</span> Online</div>
-    <div class="stat-pill active">⚡ <span id="active-count">{{ active_count }}</span> Active</div>
-    <div class="stat-pill earnings">₱ <span id="today-earnings">{{ today_pesos }}</span> Today</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
     <button class="btn btn-sm btn-default" onclick="openAnnouncementModal()">📢 Announce</button>
     <button id="global-coin-btn" class="btn btn-sm coin-toggle-btn coin-enabled" onclick="toggleGlobalCoinSlot()">🪙 Coins: ON</button>
   </div>
 </div>
 
-<!-- Active announcement banner (hidden until JS populates it) -->
+<!-- ── Stat bar: read-only info strip ──────────────────────────── -->
+<div class="stat-bar">
+  <div class="stat-bar-pill online">
+    <span class="pill-label">Online</span>
+    <span class="pill-val" id="online-count">{{ online_count }}</span>
+  </div>
+  <div class="stat-bar-pill active">
+    <span class="pill-label">Active</span>
+    <span class="pill-val" id="active-count">{{ active_count }}</span>
+  </div>
+  <div class="stat-bar-pill earnings">
+    <span class="pill-label">Today</span>
+    <span class="pill-val">₱ <span id="today-earnings">{{ today_pesos }}</span></span>
+  </div>
+</div>
+
+<!-- ── Active announcement banner ──────────────────────────────── -->
 <div id="announcement-banner" class="announcement-banner" style="display:none">
   <span></span>
   <button class="btn btn-sm btn-danger" onclick="clearAnnouncement()" style="flex-shrink:0">✕ Clear</button>
 </div>
 
-<!-- Server Health widget -->
-<div class="card" id="overview-health-card" style="margin-bottom:1.25rem;padding:.85rem 1rem;">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem 1.5rem;">
-    <!-- CPU -->
-    <div style="display:grid;grid-template-columns:44px 1fr 56px;align-items:center;gap:.5rem;">
-      <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">CPU</span>
-      <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
-        <div id="ov-bar-cpu" style="height:100%;width:0%;background:#3b82f6;border-radius:4px;transition:width .4s;"></div>
-      </div>
-      <span id="ov-val-cpu" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;">—</span>
-    </div>
-    <!-- Disk -->
-    <div style="display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:.5rem;">
-      <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">Disk</span>
-      <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
-        <div id="ov-bar-disk" style="height:100%;width:0%;background:#22c55e;border-radius:4px;transition:width .4s;"></div>
-      </div>
-      <span id="ov-val-disk" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;white-space:nowrap;">—</span>
-    </div>
-    <!-- RAM -->
-    <div style="display:grid;grid-template-columns:44px 1fr 56px;align-items:center;gap:.5rem;">
-      <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">RAM</span>
-      <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
-        <div id="ov-bar-mem" style="height:100%;width:0%;background:#8b5cf6;border-radius:4px;transition:width .4s;"></div>
-      </div>
-      <span id="ov-val-mem" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;">—</span>
-    </div>
-    <!-- Temp + Uptime -->
-    <div style="display:flex;gap:1.5rem;align-items:center;">
-      <div>
-        <span style="font-size:.72rem;color:var(--text-dim);">Temp</span>
-        <span id="ov-val-temp" style="font-size:.82rem;font-weight:700;color:var(--text);margin-left:.35rem;">—</span>
-      </div>
-      <div>
-        <span style="font-size:.72rem;color:var(--text-dim);">Uptime</span>
-        <span id="ov-val-uptime" style="font-size:.82rem;font-weight:700;color:var(--text);margin-left:.35rem;">—</span>
-      </div>
+<!-- ── Responsive body: PC grid (left) + health sidebar (right) ── -->
+<div class="overview-body">
+
+  <!-- PC Grid -->
+  <div class="overview-pc-col">
+    <div
+      id="pc-grid"
+      class="pc-grid"
+      hx-get="/dashboard/partials/pc-grid"
+      hx-trigger="every 10s"
+      hx-swap="outerHTML"
+    >
+      {% for pc in pcs %}
+      {% include "partials/pc_card.html" %}
+      {% endfor %}
     </div>
   </div>
-</div>
 
-<!-- PC Grid — auto-refreshes every 10s via HTMX -->
-<div
-  id="pc-grid"
-  class="pc-grid"
-  hx-get="/dashboard/partials/pc-grid"
-  hx-trigger="every 10s"
-  hx-swap="outerHTML"
->
-  {% for pc in pcs %}
-  {% include "partials/pc_card.html" %}
-  {% endfor %}
-</div>
+  <!-- Server Health sidebar -->
+  <div class="overview-health-col">
+    <div class="card" style="padding:1rem;">
+      <h2 style="margin-bottom:1rem;">Server Health</h2>
+
+      <!-- Metric bars -->
+      <div style="display:flex;flex-direction:column;gap:.65rem;">
+
+        <!-- CPU -->
+        <div style="display:grid;grid-template-columns:36px 1fr 44px;align-items:center;gap:.5rem;">
+          <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">CPU</span>
+          <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
+            <div id="ov-bar-cpu" style="height:100%;width:0%;background:#3b82f6;border-radius:4px;transition:width .4s;"></div>
+          </div>
+          <span id="ov-val-cpu" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;">—</span>
+        </div>
+
+        <!-- RAM -->
+        <div style="display:grid;grid-template-columns:36px 1fr 44px;align-items:center;gap:.5rem;">
+          <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">RAM</span>
+          <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
+            <div id="ov-bar-mem" style="height:100%;width:0%;background:#8b5cf6;border-radius:4px;transition:width .4s;"></div>
+          </div>
+          <span id="ov-val-mem" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;">—</span>
+        </div>
+
+        <!-- Disk -->
+        <div style="display:grid;grid-template-columns:36px 1fr auto;align-items:center;gap:.5rem;">
+          <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">Disk</span>
+          <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
+            <div id="ov-bar-disk" style="height:100%;width:0%;background:#22c55e;border-radius:4px;transition:width .4s;"></div>
+          </div>
+          <span id="ov-val-disk" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;white-space:nowrap;">—</span>
+        </div>
+
+      </div><!-- /bars -->
+
+      <!-- Temp + Uptime row -->
+      <div style="display:flex;gap:1.25rem;margin-top:.85rem;padding-top:.75rem;border-top:1px solid var(--border);">
+        <div>
+          <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:.2rem;">Temp</div>
+          <div id="ov-val-temp" style="font-size:.9rem;font-weight:700;color:var(--text);">—</div>
+        </div>
+        <div>
+          <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:.2rem;">Uptime</div>
+          <div id="ov-val-uptime" style="font-size:.9rem;font-weight:700;color:var(--text);">—</div>
+        </div>
+      </div>
+
+      <!-- Restart / Shutdown -->
+      <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.85rem;padding-top:.75rem;border-top:1px solid var(--border);">
+        <button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;"
+          onclick="ovSysControl('restart')">↻ Restart Service</button>
+        <button class="btn btn-danger btn-sm" style="width:100%;justify-content:center;"
+          onclick="ovSysControl('shutdown')">⏻ Shutdown OPi</button>
+      </div>
+      <div id="ov-sys-status" style="font-size:.78rem;margin-top:.5rem;min-height:1.1em;"></div>
+
+    </div><!-- /card -->
+  </div><!-- /health col -->
+
+</div><!-- /overview-body -->
 
 <!-- Announcement Modal -->
 <div id="announcement-modal" class="modal hidden">
@@ -158,7 +199,7 @@
 </div>
 
 <script>
-// ── Overview server health widget ─────────────────────────────────────────────
+// ── Overview: server health widget ───────────────────────────────────────────
 (function() {
   function _barColor(pct) {
     if (pct >= 85) return '#ef4444';
@@ -200,6 +241,35 @@
   _loadOvHealth();
   setInterval(_loadOvHealth, 10000);
 })();
+
+// ── Overview: restart / shutdown buttons ──────────────────────────────────────
+async function ovSysControl(action) {
+  const msgs = {
+    restart:  'Restart the PisoNet service? Clients will briefly disconnect.',
+    shutdown: 'Shut down the Orange Pi? All clients will go offline.',
+  };
+  if (!confirm(msgs[action])) return;
+  const el = document.getElementById('ov-sys-status');
+  el.style.color = 'var(--text-dim)';
+  el.textContent = action === 'restart' ? 'Restarting…' : 'Shutting down…';
+  try {
+    const res = await fetch(`/dashboard/api/system/${action}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      el.style.color = 'var(--green)';
+      el.textContent = action === 'restart'
+        ? 'Restarting — page reloads in 6s…'
+        : 'Shutdown initiated.';
+      if (action === 'restart') setTimeout(() => location.reload(), 6000);
+    } else {
+      el.style.color = 'var(--red)';
+      el.textContent = data.detail || 'Failed.';
+    }
+  } catch (e) {
+    el.style.color = 'var(--red)';
+    el.textContent = 'Request failed.';
+  }
+}
 </script>
 
 {% endblock %}

@@ -157,6 +157,8 @@ body {
   margin-left: var(--sidebar-w);
   padding: 24px;
   flex: 1;
+  /* Cap width on ultra-wide monitors so content stays readable */
+  max-width: calc(1440px - var(--sidebar-w));
 }
 
 .page-header {
@@ -181,6 +183,58 @@ body {
 .stat-pill.online   { color: var(--green);  border-color: var(--green); }
 .stat-pill.active   { color: var(--blue);   border-color: var(--blue); }
 .stat-pill.earnings { color: var(--yellow); border-color: var(--yellow); }
+
+/* ── Overview stat bar (read-only info strip below header) ──── */
+.stat-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.stat-bar-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  user-select: none;          /* clearly not a button */
+  cursor: default;
+}
+.stat-bar-pill .pill-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.stat-bar-pill.online  .pill-val { color: var(--green); }
+.stat-bar-pill.active  .pill-val { color: var(--blue); }
+.stat-bar-pill.earnings .pill-val { color: var(--yellow); }
+
+/* ── Overview responsive layout: PC grid + health sidebar ───── */
+.overview-body {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+.overview-pc-col {
+  flex: 1;
+  min-width: 0;   /* prevent flex children from overflowing */
+}
+.overview-health-col {
+  width: 272px;
+  flex-shrink: 0;
+}
+@media (max-width: 1080px) {
+  .overview-body {
+    flex-direction: column;
+  }
+  .overview-health-col {
+    width: 100%;
+  }
+}
 
 /* ── Cards ─────────────────────────────────────────────────── */
 .card {
