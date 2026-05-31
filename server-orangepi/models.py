@@ -142,3 +142,30 @@ class ServerConfig(Base):
     coin_edge          = Column(String(10), nullable=True)  # "RISING" | "FALLING"
     coin_debounce_ms   = Column(Integer, nullable=True)   # software debounce window (ms)
     coin_pulse_timeout = Column(String(16), nullable=True)  # seconds of silence to finalize (stored as text to allow decimals)
+
+
+class CoinSchedule(Base):
+    """Time ranges when the coin slot is automatically blocked."""
+    __tablename__ = "coin_schedules"
+
+    id           = Column(Integer, primary_key=True)
+    label        = Column(String(120), default="")        # human name e.g. "Night block"
+    start_time   = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    end_time     = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    days_of_week = Column(String(7),  default="0123456")  # subset of "0123456" (Mon=0…Sun=6)
+    is_active    = Column(Boolean, default=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class ScheduledAnnouncement(Base):
+    """Announcements that fire automatically at a set time each day."""
+    __tablename__ = "scheduled_announcements"
+
+    id              = Column(Integer, primary_key=True)
+    label           = Column(String(120), default="")
+    fire_time       = Column(String(5),   nullable=False)  # "HH:MM" 24h
+    message         = Column(String(500), nullable=False)
+    days_of_week    = Column(String(7),   default="0123456")
+    is_active       = Column(Boolean, default=True)
+    last_fired_date = Column(String(10),  nullable=True)   # "YYYY-MM-DD", prevents double-fire
+    created_at      = Column(DateTime, default=datetime.utcnow)

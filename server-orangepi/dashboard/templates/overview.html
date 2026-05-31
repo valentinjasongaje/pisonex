@@ -18,6 +18,47 @@
   <button class="btn btn-sm btn-danger" onclick="clearAnnouncement()" style="flex-shrink:0">✕ Clear</button>
 </div>
 
+<!-- Server Health widget -->
+<div class="card" id="overview-health-card" style="margin-bottom:1.25rem;padding:.85rem 1rem;">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem 1.5rem;">
+    <!-- CPU -->
+    <div style="display:grid;grid-template-columns:44px 1fr 56px;align-items:center;gap:.5rem;">
+      <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">CPU</span>
+      <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
+        <div id="ov-bar-cpu" style="height:100%;width:0%;background:#3b82f6;border-radius:4px;transition:width .4s;"></div>
+      </div>
+      <span id="ov-val-cpu" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;">—</span>
+    </div>
+    <!-- Disk -->
+    <div style="display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:.5rem;">
+      <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">Disk</span>
+      <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
+        <div id="ov-bar-disk" style="height:100%;width:0%;background:#22c55e;border-radius:4px;transition:width .4s;"></div>
+      </div>
+      <span id="ov-val-disk" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;white-space:nowrap;">—</span>
+    </div>
+    <!-- RAM -->
+    <div style="display:grid;grid-template-columns:44px 1fr 56px;align-items:center;gap:.5rem;">
+      <span style="font-size:.75rem;font-weight:600;color:var(--text-dim);">RAM</span>
+      <div style="height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;">
+        <div id="ov-bar-mem" style="height:100%;width:0%;background:#8b5cf6;border-radius:4px;transition:width .4s;"></div>
+      </div>
+      <span id="ov-val-mem" style="font-size:.8rem;font-weight:600;color:var(--text);text-align:right;">—</span>
+    </div>
+    <!-- Temp + Uptime -->
+    <div style="display:flex;gap:1.5rem;align-items:center;">
+      <div>
+        <span style="font-size:.72rem;color:var(--text-dim);">Temp</span>
+        <span id="ov-val-temp" style="font-size:.82rem;font-weight:700;color:var(--text);margin-left:.35rem;">—</span>
+      </div>
+      <div>
+        <span style="font-size:.72rem;color:var(--text-dim);">Uptime</span>
+        <span id="ov-val-uptime" style="font-size:.82rem;font-weight:700;color:var(--text);margin-left:.35rem;">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- PC Grid — auto-refreshes every 10s via HTMX -->
 <div
   id="pc-grid"
@@ -115,5 +156,50 @@
     </form>
   </div>
 </div>
+
+<script>
+// ── Overview server health widget ─────────────────────────────────────────────
+(function() {
+  function _barColor(pct) {
+    if (pct >= 85) return '#ef4444';
+    if (pct >= 65) return '#f59e0b';
+    return null;
+  }
+  function _fmtUptime(sec) {
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
+  function _setBar(barId, valId, pct, label) {
+    const bar = document.getElementById(barId);
+    const val = document.getElementById(valId);
+    if (!bar || !val) return;
+    bar.style.width = pct + '%';
+    const c = _barColor(pct);
+    if (c) bar.style.background = c; else bar.style.background = '';
+    val.textContent = label;
+  }
+  async function _loadOvHealth() {
+    try {
+      const res = await fetch('/dashboard/api/system/health');
+      if (!res.ok) return;
+      const d = await res.json();
+      _setBar('ov-bar-cpu', 'ov-val-cpu', d.cpu_percent, d.cpu_percent + '%');
+      _setBar('ov-bar-mem', 'ov-val-mem', d.memory_percent, d.memory_percent + '%');
+      if (d.disk_percent !== null)
+        _setBar('ov-bar-disk', 'ov-val-disk', d.disk_percent, (d.disk_used_gb || '?') + ' GB');
+      const tv = document.getElementById('ov-val-temp');
+      if (tv) tv.textContent = d.temperature_c !== null ? d.temperature_c + ' °C' : '—';
+      const uv = document.getElementById('ov-val-uptime');
+      if (uv) uv.textContent = _fmtUptime(d.uptime_seconds);
+    } catch (e) { /* silently ignore — widget is non-critical */ }
+  }
+  _loadOvHealth();
+  setInterval(_loadOvHealth, 10000);
+})();
+</script>
 
 {% endblock %}

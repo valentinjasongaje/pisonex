@@ -22,7 +22,7 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from config import settings
@@ -2032,3 +2032,227 @@ def system_shutdown(
 def confirm_sys_action() -> bool:
     """Stub — confirmation is done client-side via JS confirm()."""
     return True
+
+
+# ── Schedule management ───────────────────────────────────────────────────────
+
+_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+_DOW_RE  = re.compile(r"^[0-6]+$")
+
+
+def _validate_time(t: str, field: str):
+    if not _TIME_RE.match(t):
+        raise HTTPException(status_code=400, detail=f"{field} must be in HH:MM format")
+
+
+def _validate_dow(dow: str):
+    if not dow or not _DOW_RE.match(dow):
+        raise HTTPException(status_code=400, detail="days_of_week must contain only digits 0-6")
+
+
+class CoinScheduleBody(BaseModel):
+    label:        str = ""
+    start_time:   str          # "HH:MM"
+    end_time:     str          # "HH:MM"
+    days_of_week: str = "0123456"
+
+
+class ScheduledAnnouncementBody(BaseModel):
+    label:        str = ""
+    fire_time:    str          # "HH:MM"
+    message:      str
+    days_of_week: str = "0123456"
+
+
+@router.get("/schedule", response_class=HTMLResponse)
+def schedule_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
+
+    coin_schedules = db.query(CoinSchedule).order_by(CoinSchedule.created_at).all()
+    announcements  = db.query(ScheduledAnnouncement).order_by(ScheduledAnnouncement.fire_time).all()
+    return templates.TemplateResponse("schedule.html", {
+        "request": request,
+        "coin_schedules": coin_schedules,
+        "announcements": announcements,
+        "schedule_blocked_now": command_store.is_schedule_blocked(),
+    })
+
+
+# ── Coin block CRUD ───────────────────────────────────────────────────────────
+
+@router.post("/api/schedule/coin-blocks")
+def create_coin_block(
+    body: CoinScheduleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.start_time, "start_time")
+    _validate_time(body.end_time, "end_time")
+    _validate_dow(body.days_of_week)
+
+    sched = CoinSchedule(
+        label=body.label.strip(),
+        start_time=body.start_time,
+        end_time=body.end_time,
+        days_of_week=body.days_of_week,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return {
+        "id": sched.id,
+        "label": sched.label,
+        "start_time": sched.start_time,
+        "end_time": sched.end_time,
+        "days_of_week": sched.days_of_week,
+        "is_active": sched.is_active,
+    }
+
+
+@router.delete("/api/schedule/coin-blocks/{sched_id}")
+def delete_coin_block(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(CoinSchedule).filter(CoinSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    db.delete(sched)
+    db.commit()
+    return {"status": "deleted", "id": sched_id}
+
+
+@router.post("/api/schedule/coin-blocks/{sched_id}/toggle")
+def toggle_coin_block(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(CoinSchedule).filter(CoinSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    sched.is_active = not sched.is_active
+    db.commit()
+    return {"id": sched_id, "is_active": sched.is_active}
+
+
+# ── Scheduled announcement CRUD ───────────────────────────────────────────────
+
+@router.post("/api/schedule/announcements")
+def create_scheduled_announcement(
+    body: ScheduledAnnouncementBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.fire_time, "fire_time")
+    _validate_dow(body.days_of_week)
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+
+    ann = ScheduledAnnouncement(
+        label=body.label.strip(),
+        fire_time=body.fire_time,
+        message=body.message.strip(),
+        days_of_week=body.days_of_week,
+    )
+    db.add(ann)
+    db.commit()
+    db.refresh(ann)
+    return {
+        "id": ann.id,
+        "label": ann.label,
+        "fire_time": ann.fire_time,
+        "message": ann.message,
+        "days_of_week": ann.days_of_week,
+        "is_active": ann.is_active,
+    }
+
+
+@router.delete("/api/schedule/announcements/{ann_id}")
+def delete_scheduled_announcement(
+    ann_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    ann = db.query(ScheduledAnnouncement).filter(ScheduledAnnouncement.id == ann_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    db.delete(ann)
+    db.commit()
+    return {"status": "deleted", "id": ann_id}
+
+
+@router.post("/api/schedule/announcements/{ann_id}/toggle")
+def toggle_scheduled_announcement(
+    ann_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    ann = db.query(ScheduledAnnouncement).filter(ScheduledAnnouncement.id == ann_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    ann.is_active = not ann.is_active
+    db.commit()
+    return {"id": ann_id, "is_active": ann.is_active}
+
+
+@router.get("/api/schedule/status")
+def get_schedule_status(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Return current schedule-blocked state and the label of the active block, if any."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    from datetime import datetime as _dt
+    now      = _dt.now()
+    cur_time = now.strftime("%H:%M")
+    cur_dow  = str(now.weekday())
+
+    active_label = None
+    if command_store.is_schedule_blocked():
+        # Find the label of the matching schedule
+        from main import _time_in_range
+        schedules = db.query(CoinSchedule).filter(CoinSchedule.is_active == True).all()
+        for s in schedules:
+            if cur_dow in s.days_of_week and _time_in_range(s.start_time, s.end_time, cur_time):
+                active_label = s.label or f"{s.start_time}–{s.end_time}"
+                break
+
+    return {
+        "schedule_blocked": command_store.is_schedule_blocked(),
+        "active_block_label": active_label,
+    }
