@@ -57,6 +57,12 @@ Namespace Forms
         Private _pbLogo   As PictureBox
         Private _lblMember As Label
         Private _btnLogout As Button
+        ' Tracks whether the member is currently allowed to log out (server-driven).
+        ' We do NOT disable the button when False — disabling makes the button
+        ' silently swallow clicks, which looks broken.  Instead, OnLogoutClick
+        ' surfaces a "Cannot Log Out" dialog explaining the minimum-time rule.
+        Private _canLogout             As Boolean = False
+        Private _minimumLogoutMinutes  As Integer = 0
 
         ' Add Time row — idle state
         Private _btnAddTime As Button
@@ -78,6 +84,11 @@ Namespace Forms
         ' ── Receiving-coins countdown ─────────────────────────────────
         Private _coinCountdownTimer  As System.Windows.Forms.Timer
         Private _coinCountdownSecs   As Integer = OVERLAY_COIN_MAX
+        ' Dedup state for UpdateCoinProgress — heartbeats fire every second; without
+        ' these guards each tick rewrites the progress label and resets the countdown
+        ' bar to full, causing visible flicker and freezing the bar at 100%.
+        Private _lastRecvPesos       As Integer = -1
+        Private _lastRecvSeconds     As Integer = -1
 
         ' ── Pulse animation ───────────────────────────────────────────
         Private _pulseTimer      As System.Windows.Forms.Timer
@@ -716,9 +727,10 @@ Namespace Forms
             Me.Invalidate()
         End Sub
 
-        Public Sub SetMemberInfo(username As String, canLogout As Boolean)
+        Public Sub SetMemberInfo(username As String, canLogout As Boolean,
+                                  Optional minimumLogoutMinutes As Integer = 0)
             If Me.InvokeRequired Then
-                Me.Invoke(Sub() SetMemberInfo(username, canLogout))
+                Me.Invoke(Sub() SetMemberInfo(username, canLogout, minimumLogoutMinutes))
                 Return
             End If
             ' Track whether the member row is actually appearing or disappearing.
@@ -727,12 +739,29 @@ Namespace Forms
             ' Me.Size and Me.Region every second, which is the main source of flicker.
             Dim wasVisible = _lblMember.Visible
             Dim nowVisible = Not String.IsNullOrEmpty(username)
-            _memberName = username
+            _memberName            = username
+            _canLogout             = canLogout
+            _minimumLogoutMinutes  = minimumLogoutMinutes
             If nowVisible Then
                 If _lblMember.Text <> $"  {username}" Then _lblMember.Text = $"  {username}"
                 _lblMember.Visible = True
                 _btnLogout.Visible = True
-                _btnLogout.Enabled = canLogout   ' update enable without resize
+                ' The button stays Enabled regardless of canLogout — disabling it
+                ' silently eats clicks, which the user perceives as "broken".
+                ' OnLogoutClick handles the soft-disabled state explicitly by
+                ' surfacing a dialog explaining the minimum-time rule.
+                _btnLogout.Enabled = True
+                ' Visual cue for the soft-disabled state: dim the button when
+                ' logout isn't permitted yet so it looks intentionally gated.
+                If canLogout Then
+                    _btnLogout.ForeColor = Color.FromArgb(239, 150, 150)
+                    _btnLogout.BackColor = Color.FromArgb(40, 239, 68, 68)
+                    _btnLogout.FlatAppearance.BorderColor = Color.FromArgb(80, 239, 68, 68)
+                Else
+                    _btnLogout.ForeColor = Color.FromArgb(140, 150, 160)
+                    _btnLogout.BackColor = Color.FromArgb(20, 100, 110, 130)
+                    _btnLogout.FlatAppearance.BorderColor = Color.FromArgb(60, 100, 110, 130)
+                End If
             Else
                 _lblMember.Visible = False
                 _btnLogout.Visible = False
@@ -788,6 +817,11 @@ Namespace Forms
                 ' Seed progress text
                 _lblRecvProgress.Text     = "Waiting for coins" & ChrW(&H2026)
                 _lblRecvProgress.ForeColor = Color.FromArgb(140, 160, 200)
+                ' Fresh slot session — clear dedup memory so the first heartbeat
+                ' always paints (otherwise a leftover value from the previous
+                ' session could suppress the very first update).
+                _lastRecvPesos   = -1
+                _lastRecvSeconds = -1
                 ' Reset and start countdown
                 _coinCountdownSecs = OVERLAY_COIN_MAX
                 UpdateCountdownLabel()
@@ -824,19 +858,31 @@ Namespace Forms
 
             If Not _isReceivingCoins Then Return
 
+            ' Dedup — skip if nothing changed since the previous heartbeat.  Without
+            ' this, every 1 s tick rewrites the label and resets the countdown bar,
+            ' producing visible flicker and freezing the bar permanently at 100 %.
+            If pesos = _lastRecvPesos AndAlso seconds = _lastRecvSeconds Then Return
+
+            Dim prevPesos = _lastRecvPesos
+            _lastRecvPesos   = pesos
+            _lastRecvSeconds = seconds
+
             If pesos > 0 Then
                 Dim hrs  = seconds \ 3600
                 Dim mins = (seconds Mod 3600) \ 60
                 Dim timeStr = If(hrs > 0, $"+{hrs}h {mins}m", $"+{mins}m")
-                _lblRecvProgress.Text = $"₱{pesos} inserted · {timeStr}"
-                ' Reset countdown on each coin
-                _coinCountdownSecs = OVERLAY_COIN_MAX
-                UpdateCountdownLabel()
-                _pnlRecvBar.Invalidate()
-            Else
-                If String.IsNullOrEmpty(_lblRecvProgress.Text) Then
-                    _lblRecvProgress.Text = "Waiting for coins" & ChrW(&H2026)
+                Dim newText = $"₱{pesos} inserted · {timeStr}"
+                If _lblRecvProgress.Text <> newText Then _lblRecvProgress.Text = newText
+                ' Only reset the countdown when a fresh coin actually arrived
+                ' (pesos increased) — not on every heartbeat.
+                If pesos > prevPesos Then
+                    _coinCountdownSecs = OVERLAY_COIN_MAX
+                    UpdateCountdownLabel()
+                    _pnlRecvBar.Invalidate()
                 End If
+            Else
+                Dim waiting = "Waiting for coins" & ChrW(&H2026)
+                If _lblRecvProgress.Text <> waiting Then _lblRecvProgress.Text = waiting
             End If
         End Sub
 
@@ -941,9 +987,45 @@ Namespace Forms
 
         ' ── Logout confirmation ──────────────────────────────────────
         Private Sub OnLogoutClick(sender As Object, e As EventArgs)
+            ' Soft-disabled state: server says the member hasn't met the
+            ' minimum-time threshold yet.  Show an explanation dialog instead
+            ' of silently swallowing the click (which makes the button look
+            ' broken to the user).
+            If Not _canLogout Then
+                ShowCannotLogoutDialog()
+                Return
+            End If
             If ConfirmLogout() Then
                 RaiseEvent MemberLogoutRequested()
             End If
+        End Sub
+
+        Private Sub ShowCannotLogoutDialog()
+            Dim minTime = _minimumLogoutMinutes
+            Dim timeStr = If(minTime > 0,
+                             $"{minTime} minute{If(minTime = 1, "", "s")}",
+                             "enough")
+            Dim msg = $"You need at least {timeStr} of remaining session time to be able to log out."
+
+            Dim dlg = New Form() With {.Size = New Size(420, 138), .TopMost = True}
+
+            Dim lbl = New Label() With {
+                .Text      = msg,
+                .Font      = New Font("Segoe UI", 10),
+                .ForeColor = FormStyles.TextDim,
+                .Location  = New Point(24, 16),
+                .Size      = New Size(372, 48),
+                .AutoSize  = False
+            }
+
+            Dim btn = FormStyles.CreateButton("Got it", 140, 36)
+            btn.DialogResult = DialogResult.OK
+            btn.Location = New Point(140, 76)
+
+            dlg.Controls.AddRange({lbl, btn})
+            dlg.AcceptButton = btn
+            FormStyles.MakeBorderless(dlg, "Cannot Log Out")
+            dlg.ShowDialog()
         End Sub
 
         Private Function ConfirmLogout() As Boolean

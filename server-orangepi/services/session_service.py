@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func
-from models import PC, Session, CoinTransaction, SystemLog
+from models import PC, Session, CoinTransaction, SystemLog, User
 from services.rate_service import pesos_to_seconds
 import command_store
 
@@ -166,16 +166,35 @@ class SessionService:
 
     def acknowledge_session_start(self, pc_number: int, session) -> None:
         """
-        Called on each client heartbeat. If the PC has a fresh session that the
-        client hasn't seen yet, reset started_at to now so the full granted time
-        is available from the moment the client unlocks — not from when the admin
-        clicked the button.
+        Called on each client heartbeat. Keeps `started_at` pinned to "now"
+        while the session is "pending" — i.e. created but not yet acknowledged
+        as ticking by the user.
+
+        A session enters pending state in two situations:
+          1. A new session was just created (first coin or admin add-time) and
+             the client hasn't received it yet — without the reset, the gap
+             between server-side creation and the client's next heartbeat poll
+             would be deducted from the granted time.
+          2. The coin slot is still open (`receiving_coins == True`).  The lock
+             screen is in front showing the Receiving Coins card while the user
+             keeps inserting coins; the user hasn't "started using" the PC yet,
+             so the session clock must not tick during this window.  Without
+             this, every second spent feeding coins (often 30 s+) is silently
+             deducted before the timer even appears.
+
+        The pending flag is only cleared once the slot is closed AND the client
+        has seen the heartbeat — so the timer starts ticking the moment the
+        user presses "Done inserting Coins" and the lock screen dismisses.
         """
         if pc_number not in _pending_start or not session:
             return
         session.started_at = datetime.utcnow()
         self._db.commit()
-        _pending_start.discard(pc_number)
+        # Hold the pending flag until the slot actually closes.  As long as
+        # the user is still inserting coins, every heartbeat refreshes
+        # started_at so the clock effectively pauses.
+        if not command_store.is_receiving_coins(pc_number):
+            _pending_start.discard(pc_number)
 
     def pop_pending_notification(self, pc_number: int) -> int:
         """Returns seconds added since the last heartbeat and clears the counter."""
@@ -186,7 +205,38 @@ class SessionService:
         pc = self.get_pc(pc_number)
         if not pc:
             return False
+
+        # ── Member-aware termination ─────────────────────────────────────
+        # If a member is currently logged in to this PC AND the session is
+        # being ended with time still remaining (admin Lock / forced end —
+        # NOT the natural-expiry path where remaining is already 0), preserve
+        # their unused time by saving it back to user.balance_seconds and
+        # cleanly logging them out.  Without this, an admin lock silently
+        # discards paid-for time, leaving the member stuck bound to a locked
+        # PC with no session until the zero-time sweep eventually unbinds them.
+        #
+        # No `logout_deduction_minutes` penalty is applied — that penalty was
+        # designed to discourage voluntary mid-session logout, but an admin
+        # lock isn't the customer's fault.
         if session:
+            remaining_sec = self.remaining_seconds(session)
+            member_user_id = command_store.get_member_for_pc(pc_number)
+            if remaining_sec > 0 and member_user_id is not None:
+                member_user = (
+                    self._db.query(User).filter(User.id == member_user_id).first()
+                )
+                if member_user is not None:
+                    member_user.balance_seconds = remaining_sec
+                    member_user.logged_in_pc_id = None
+                    command_store.unbind_member(pc_number)
+                    command_store.clear_zero_time_since(pc_number)
+                    command_store.clear_idle_since(pc_number)
+                    self._log(
+                        "INFO", "session",
+                        f"Admin-end on PC {pc_number:02d} preserved {remaining_sec}s "
+                        f"to member {member_user.username}'s balance",
+                    )
+
             elapsed_sec = int(
                 (datetime.utcnow() - session.started_at).total_seconds()
             )

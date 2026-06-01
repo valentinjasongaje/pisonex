@@ -404,6 +404,13 @@ class MembershipService:
             if now - since < timeout:
                 continue
 
+            # Guard: if the coin slot is currently open for this PC, the member
+            # is actively trying to insert coins — never log them out mid-flow.
+            # The countdown will resume (or be cleared by a successful coin) once
+            # the slot closes.
+            if command_store.is_receiving_coins(pc_number):
+                continue
+
             # Guard: if the member now has an active session (coins inserted after zero-time
             # started), they are no longer in zero-time state — cancel the auto-logout.
             svc_check = SessionService(self._db)

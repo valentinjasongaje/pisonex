@@ -299,6 +299,17 @@ def request_coins(pc_number: int):
     ok, message = hw_controller.request_coins_for_pc(pc_number)
     if not ok:
         raise HTTPException(status_code=409, detail=message)
+
+    # Zero-time member courtesy reset: if a member with no time is logged in
+    # to this PC and the auto-logout countdown is ticking, restart it now so
+    # they have the full window to actually insert a coin without being
+    # logged out mid-flow.  Successful coin insertion clears zero_time_since
+    # entirely (controller._process_coin), so this only matters when the
+    # countdown was already running when they pressed Insert Coin.
+    if command_store.get_member_for_pc(pc_number) is not None:
+        if command_store.get_zero_time_since(pc_number) is not None:
+            command_store.set_zero_time_since(pc_number, time.time())
+
     return {"status": "ok"}
 
 

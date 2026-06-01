@@ -25,6 +25,11 @@ Module Program
     ' voice/toast notification is not fired until the user clicks Done
     ' and the lock form actually hides.
     Private _pendingTimeAddedSeconds As Integer = 0
+    ' Set when a session starts while the coin slot is still open (lock screen
+    ' is in front showing the Receiving Coins card).  We defer showing the
+    ' TimerOverlay until the slot closes so it doesn't appear behind the lock
+    ' screen and isn't visible the moment the user finishes inserting coins.
+    Private _overlayShowPending As Boolean = False
 
     <STAThread>
     Sub Main()
@@ -237,6 +242,29 @@ Module Program
             Return
         End If
 
+        ' If the coin slot is still open (first coin created the session but the
+        ' user hasn't pressed Done yet), defer showing the overlay so it doesn't
+        ' appear while the lock screen is still in front.  OnReceivingCoinsChanged
+        ' will surface it when the slot closes.
+        If _lockMgr.IsReceivingCoins Then
+            _overlayShowPending = True
+            _tray.UpdateStatus("Pisonex — Session active")
+            Return
+        End If
+
+        ShowOverlayForActiveSession()
+    End Sub
+
+    ''' <summary>
+    ''' Brings up the TimerOverlay + tray timer for an active session.  Extracted
+    ''' from OnSessionStarted so the deferred path (slot was open at session start)
+    ''' can reuse the exact same logic when the slot finally closes.
+    ''' </summary>
+    Private Sub ShowOverlayForActiveSession()
+        If _overlay.InvokeRequired Then
+            _overlay.Invoke(Sub() ShowOverlayForActiveSession())
+            Return
+        End If
         If Not _overlay.Visible Then _overlay.Show()
         ' Show "Add Time" CTA immediately on session start.
         ' CoinSlotChanged only fires when the value changes, but _lastCoinSlotEnabled
@@ -254,6 +282,9 @@ Module Program
             _overlay.Invoke(Sub() OnSessionEnded())
             Return
         End If
+        ' Drop any deferred overlay-show — the session is over, the overlay
+        ' must not pop on the next slot close.
+        _overlayShowPending = False
         _overlay.ShowAddTimeButton(False)   ' reset CTA state before hiding
         _overlay.Hide()
         _tray.SetTimerVisible(False)
@@ -320,12 +351,21 @@ Module Program
         Dim active = If(LicenseService.IsActive(), isReceiving, False)
         _lockMgr.ShowReceivingCoins(active)
         _overlay.SetReceivingCoins(active)
-        ' Slot just closed — fire any time-added notification that was held back
-        ' while the lock form was still showing (could be multiple coins summed).
-        If Not isReceiving AndAlso _pendingTimeAddedSeconds > 0 Then
-            Dim total = _pendingTimeAddedSeconds
-            _pendingTimeAddedSeconds = 0
-            FireTimeAddedNotification(total)
+        If Not isReceiving Then
+            ' Slot just closed — if a session started while the slot was open
+            ' the overlay was held back so the lock screen could own the
+            ' display.  Surface it now that the lock screen is dismissing.
+            If _overlayShowPending Then
+                _overlayShowPending = False
+                ShowOverlayForActiveSession()
+            End If
+            ' Fire any time-added notification that was held back while the
+            ' lock form was still showing (could be multiple coins summed).
+            If _pendingTimeAddedSeconds > 0 Then
+                Dim total = _pendingTimeAddedSeconds
+                _pendingTimeAddedSeconds = 0
+                FireTimeAddedNotification(total)
+            End If
         End If
     End Sub
 
@@ -504,7 +544,7 @@ Module Program
         _lockMgr.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                      canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
                                      minimumLogoutMinutes, serverLicensed)
-        _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout)
+        _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout, minimumLogoutMinutes)
 
         ' Show/hide server license warning independently of the client license check
         If Not serverLicensed Then

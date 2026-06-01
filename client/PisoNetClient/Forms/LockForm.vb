@@ -100,6 +100,13 @@ Namespace Forms
         Private _coinPulseTimer    As System.Windows.Forms.Timer
         Private _coinPulseAlpha    As Integer = 255
         Private _coinPulseUp       As Boolean = False
+        ' Last values written to the receiving-coins progress label.  Heartbeats fire
+        ' UpdateCoinProgress every second; without these dedup guards each tick rewrites
+        ' the transparent label's Text, which forces the parent transparent panel to
+        ' repaint and causes a visible flicker.  We also use the pesos delta to decide
+        ' whether a NEW coin actually arrived (only then should the countdown reset).
+        Private _lastCoinProgressPesos   As Integer = -1
+        Private _lastCoinProgressSeconds As Integer = -1
 
         ' Done-inserting-coins button (shown only while receiving coins)
         Private _btnDoneCoins     As Button
@@ -239,6 +246,29 @@ Namespace Forms
         Public Sub New()
             LoadBackground()
             InitializeComponent()
+        End Sub
+
+        ''' <summary>
+        ''' Enables the flicker-free transparent-panel style set on the given control.
+        '''
+        ''' A stock Panel with BackColor = Transparent forces a parent repaint on
+        ''' every Invalidate (parent re-draws the wallpaper + dark overlay first,
+        ''' then the panel paints on top — visible two-stage flicker).  Enabling
+        ''' SupportsTransparentBackColor + AllPaintingInWmPaint + OptimizedDoubleBuffer
+        ''' + UserPaint moves the parent-erase + child-paint into the panel's
+        ''' off-screen buffer, so the screen sees a single blit per paint cycle.
+        '''
+        ''' ControlStyles.SetStyle is protected, so we reach for it via reflection.
+        ''' </summary>
+        Private Shared Sub EnableSmoothTransparency(c As Control)
+            Dim mi = GetType(Control).GetMethod("SetStyle",
+                System.Reflection.BindingFlags.Instance Or System.Reflection.BindingFlags.NonPublic)
+            If mi Is Nothing Then Return
+            mi.Invoke(c, New Object() {
+                ControlStyles.SupportsTransparentBackColor Or
+                ControlStyles.OptimizedDoubleBuffer Or
+                ControlStyles.AllPaintingInWmPaint Or
+                ControlStyles.UserPaint, True})
         End Sub
 
         Private Sub LoadBackground()
@@ -599,6 +629,11 @@ Namespace Forms
                 .BackColor = Color.Transparent,
                 .Visible = False
             }
+            ' Flicker-free buffering: the pulse timer Invalidates every 150 ms.
+            ' Without these styles each tick forces the parent form to repaint the
+            ' wallpaper image + dark overlay under the panel before the gradient
+            ' paints on top — a visible two-stage flicker.
+            EnableSmoothTransparency(_pnlReceivingCoins)
             AddHandler _pnlReceivingCoins.Paint, AddressOf OnReceivingCoinsPaint
 
             _lblCoinIcon = New Label() With {
@@ -670,6 +705,9 @@ Namespace Forms
                 .BackColor = Color.Transparent,
                 .Visible   = False
             }
+            ' Flicker-free buffering: invalidated every second from the countdown
+            ' tick — same parent-repaint flicker as _pnlReceivingCoins.
+            EnableSmoothTransparency(_pnlCoinCountdown)
             AddHandler _pnlCoinCountdown.Paint, AddressOf OnCoinCountdownPaint
 
             _lblCountdownRemain = New Label() With {
@@ -711,6 +749,8 @@ Namespace Forms
                 .BackColor = Color.Transparent,
                 .Visible = False
             }
+            ' Flicker-free buffering: pulse timer Invalidates every 60 ms.
+            EnableSmoothTransparency(_pnlIdleShutdown)
             AddHandler _pnlIdleShutdown.Paint, AddressOf OnIdleShutdownPaint
 
             _lblIdleTitle = New Label() With {
@@ -742,10 +782,22 @@ Namespace Forms
             AddHandler _idlePulseTimer.Tick, AddressOf OnIdlePulseTick
 
             ' ── Membership modal backdrop + badge button ──────────────────────
+            ' Panel.BackColor ignores alpha unless the control supports a transparent
+            ' back colour, so a literal FromArgb(160, 0, 0, 0) BackColor would render
+            ' as solid black — that's what produced the harsh "dark wave" flash when
+            ' the modal opened.  We enable SupportsTransparentBackColor (via the same
+            ' reflection trick used elsewhere for DoubleBuffered) and custom-paint a
+            ' semi-transparent fill so the dim is a smooth blend over the lock bg.
             _pnlModalBackdrop = New Panel() With {
-                .BackColor = Color.FromArgb(160, 0, 0, 0),
+                .BackColor = Color.Transparent,
                 .Visible   = False
             }
+            EnableSmoothTransparency(_pnlModalBackdrop)
+            AddHandler _pnlModalBackdrop.Paint, Sub(s, e)
+                                                    Using br As New SolidBrush(Color.FromArgb(160, 0, 0, 0))
+                                                        e.Graphics.FillRectangle(br, _pnlModalBackdrop.ClientRectangle)
+                                                    End Using
+                                                End Sub
             AddHandler _pnlModalBackdrop.Click, Sub(s, e) HideMemberModal()
 
             ' Pill trigger (sits to the right of the badge, overlapping its left edge)
@@ -1699,15 +1751,19 @@ Namespace Forms
                 Return
             End If
 
-            ' enabled = True: reset debounce and ensure composite trigger is visible
+            ' enabled = True: reset debounce and ensure composite trigger is visible —
+            ' but only when the coin slot is NOT currently open.  Opening the login
+            ' modal mid-insertion would steal focus from the running-total card.
             _membershipFalseCount = 0
-            If Not _btnMemberBadge.Visible Then
-                _btnMemberBadge.Visible   = True
-                _pnlMemberTrigger.Visible = True
-                _membershipShownAt        = DateTime.Now
+            If Not _pnlReceivingCoins.Visible Then
+                If Not _btnMemberBadge.Visible Then
+                    _btnMemberBadge.Visible   = True
+                    _pnlMemberTrigger.Visible = True
+                    _membershipShownAt        = DateTime.Now
+                End If
+                _btnMemberBadge.Invalidate()
+                _pnlMemberTrigger.Invalidate()   ' repaint pill text / border color
             End If
-            _btnMemberBadge.Invalidate()
-            _pnlMemberTrigger.Invalidate()   ' repaint pill text / border color
 
             Const PW As Integer = 440
             Const HeaderH As Integer = 88   ' gradient header height painted in OnMemberPanelPaint
@@ -2182,6 +2238,19 @@ Namespace Forms
                 _coinPulseAlpha = 255
                 _coinPulseUp = False
                 _coinPulseTimer.Start()
+                ' Fresh slot session — clear the dedup memory so the first heartbeat
+                ' payload always paints (otherwise leftover values from a previous
+                ' session could suppress the very first update).
+                _lastCoinProgressPesos   = -1
+                _lastCoinProgressSeconds = -1
+                ' Suppress the membership CTA while a coin slot is open — opening
+                ' the login modal mid-insertion would steal focus from the running
+                ' total / countdown card and confuse the user.  UpdateMembershipUI
+                ' honours _pnlReceivingCoins.Visible so subsequent heartbeats won't
+                ' re-show the badge until the slot closes.
+                If _memberModalOpen Then HideMemberModal()
+                If _btnMemberBadge.Visible   Then _btnMemberBadge.Visible   = False
+                If _pnlMemberTrigger.Visible Then _pnlMemberTrigger.Visible = False
                 LayoutReceivingPanel()
                 _lblSub.Text = "Coins are being loaded to this PC…"
                 _lblSub.ForeColor = Color.FromArgb(250, 204, 21)
@@ -2216,6 +2285,18 @@ Namespace Forms
                     _lblSub.Text = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
                     _lblSub.ForeColor = Color.FromArgb(140, 160, 200)
                 End If
+                ' Slot closed — restore the membership CTA if the feature is enabled.
+                ' UpdateMembershipUI on the next heartbeat will also handle this, but
+                ' bringing it back immediately avoids a 1-second gap with no badge.
+                If _membershipEnabled Then
+                    If Not _btnMemberBadge.Visible Then
+                        _btnMemberBadge.Visible   = True
+                        _pnlMemberTrigger.Visible = True
+                        _membershipShownAt        = DateTime.Now
+                        _btnMemberBadge.Invalidate()
+                        _pnlMemberTrigger.Invalidate()
+                    End If
+                End If
             End If
             CenterLabels()
         End Sub
@@ -2225,17 +2306,35 @@ Namespace Forms
         Public Sub UpdateCoinProgress(pesos As Integer, seconds As Integer)
             If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() UpdateCoinProgress(pesos, seconds)) : Return
+
+            ' Dedup: heartbeats fire this every second.  Skip when nothing changed
+            ' so we don't rewrite the transparent label (which would force the
+            ' parent transparent panel to repaint and produce a visible flicker).
+            If pesos = _lastCoinProgressPesos AndAlso seconds = _lastCoinProgressSeconds Then
+                Return
+            End If
+
+            Dim prevPesos = _lastCoinProgressPesos
+            _lastCoinProgressPesos   = pesos
+            _lastCoinProgressSeconds = seconds
+
             If pesos <= 0 Then
-                _lblCoinProgress.Text = "Waiting for coins…"
-                _lblCoinProgress.ForeColor = Color.FromArgb(170, 176, 190)
+                Dim placeholder = "Waiting for coins…"
+                Dim placeholderFore = Color.FromArgb(170, 176, 190)
+                If _lblCoinProgress.Text <> placeholder Then _lblCoinProgress.Text = placeholder
+                If _lblCoinProgress.ForeColor <> placeholderFore Then _lblCoinProgress.ForeColor = placeholderFore
             Else
-                _lblCoinProgress.Text = $"₱{pesos} inserted  ·  +{FormatHm(seconds)}"
-                _lblCoinProgress.ForeColor = Color.FromArgb(236, 238, 244)
-                ' Each confirmed coin resets the countdown so the user has a full
-                ' window to insert the next coin without being auto-closed.
-                If _pnlCoinCountdown.Visible Then
+                Dim newText = $"₱{pesos} inserted  ·  +{FormatHm(seconds)}"
+                Dim newFore = Color.FromArgb(236, 238, 244)
+                If _lblCoinProgress.Text <> newText Then _lblCoinProgress.Text = newText
+                If _lblCoinProgress.ForeColor <> newFore Then _lblCoinProgress.ForeColor = newFore
+                ' Reset the countdown ONLY when a fresh coin actually arrived
+                ' (pesos increased).  Resetting on every heartbeat made the bar
+                ' permanently sit at 100% and flicker its label each second.
+                If pesos > prevPesos AndAlso _pnlCoinCountdown.Visible Then
                     _coinCountdownSecs = COIN_COUNTDOWN_MAX
                     _lblCountdownRemain.Text = $"{_coinCountdownSecs}s · insert more coins"
+                    _lblCountdownRemain.ForeColor = Color.FromArgb(150, 165, 190)
                     _pnlCoinCountdown.Invalidate()
                 End If
             End If
