@@ -34,12 +34,24 @@ class PCHeartbeatResponse(BaseModel):
     zero_time_logout_seconds: int = 0
     idle_shutdown_seconds: int = 0
     receiving_coins: bool = False
+    # Live running total of coins inserted so far (drives the client's
+    # "₱X inserted · +Yh Zm" line while the coin slot is open).  The Windows
+    # variant has no hardware to populate these — they stay at 0 — but the
+    # fields are present so the heartbeat schema is identical across
+    # variants and the client's deserialiser doesn't choke.
+    coin_progress_pesos: int = 0
+    coin_progress_seconds: int = 0
     minimum_logout_minutes: int = 0
     # Branch / earnings fields — piggybacked onto the hourly pisonex.com status ping
     branch_name: str = ""
     today_pesos: int = 0
     today_sessions: int = 0
     today_minutes: int = 0
+    # Live-stream hint for monitoring: >0 means server wants client to capture
+    # screenshots at this rate (ms); 0 means client uses its own configured
+    # interval.  Not actively driven by this server variant — always 0 —
+    # but present so the heartbeat schema matches server-orangepi/.
+    capture_interval_ms: int = 0
 
 class PCStatusResponse(BaseModel):
     pc_number: int

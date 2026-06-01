@@ -207,6 +207,9 @@ def heartbeat(
         today_pesos=today_earnings["total_pesos"],
         today_sessions=today_earnings["total_sessions"],
         today_minutes=today_earnings["total_minutes"],
+        # Live-stream hint kept at 0 — the admin "watch PC" feature lives only
+        # in server-orangepi/.  Field included for client-API parity.
+        capture_interval_ms=0,
     )
 
 
