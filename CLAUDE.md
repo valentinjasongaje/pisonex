@@ -159,6 +159,16 @@ Key services:
 5. User clicks "Done inserting Coins" or countdown hits 0 → `POST /api/pc/{n}/done-inserting-coins`
 6. Slot closes → `receiving_coins=False` → `LockManager` completes deferred unlock → voice fires
 
+### Licensing model — server-only, unlimited clients
+
+Licensing is enforced **only at the server**, one license per shop, **unlimited PCs**.
+
+- The **Orange Pi server** activates against `pisonex.com` (`services/license_service.py`, `device_type="server"`, bound to `/etc/machine-id`). This is the single paid license.
+- Each **heartbeat** (`api/pc.py`) returns `server_licensed = license_service.is_active()`. When the server license lapses, every PC shows the server-license warning and is locked at the source.
+- The **PC client no longer has its own activation** and never contacts `pisonex.com`. `LicenseService` (`client/PisoNetClient/Services/LicenseService.vb`) is neutered: `IsActive()`/`IsActivated()`/`IsTrialAnchored()` always return `True`, `GetStatus()` is always `Activated`, and the verify/trial/telemetry network paths are no-ops (the activate/verify methods remain in the file but are dead/unreferenced for easy rollback).
+- Clients authenticate to their LAN server with the `X-API-Key` header (`CLIENT_API_KEY`) — that, not a per-PC license, is what prevents a foreign PC from leeching time.
+- **Customer-portal earnings** are forwarded by the **server** (`main.py` daily `/api/sync/earnings` with startup catch-up), not by the client.
+
 ### Dashboard (`server-orangepi/dashboard/routes.py`)
 
 Server-rendered with Jinja2 + HTMX — no JS framework. Authentication uses a JWT in a `pisonet_session` cookie (HS256).

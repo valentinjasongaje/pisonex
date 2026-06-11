@@ -1245,19 +1245,34 @@ Namespace Forms
 
             page.Controls.Add(PageTitle("License", New Point(LM, y))) : y += 34
 
-            ' Status card
-            Dim statusCard = CardPanel(New Point(LM, y), New Size(IW, 252))
+            ' Unlimited-clients model: this PC has no per-PC activation. Licensing is
+            ' managed centrally on the Pisonex server; if the server is unlicensed,
+            ' every PC in the shop is locked via the heartbeat's server_licensed flag.
+            Dim card = CardPanel(New Point(LM, y), New Size(IW, 232))
             Dim cy = 14
-            statusCard.Controls.Add(SectionLabel("Activation Status", New Point(14, cy))) : cy += 26
+            card.Controls.Add(SectionLabel("Licensing Model", New Point(14, cy))) : cy += 26
 
             _lblLicStatus = New Label() With {
+                .Text = "Unlimited Clients — no per-PC activation",
                 .AutoSize = True,
                 .Location = New Point(14, cy),
-                .Font = New Font("Segoe UI", 11, FontStyle.Bold)
+                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(34, 197, 94)
             }
-            statusCard.Controls.Add(_lblLicStatus) : cy += 30
+            card.Controls.Add(_lblLicStatus) : cy += 32
 
-            statusCard.Controls.Add(SmallLabel("Device ID", New Point(14, cy))) : cy += 18
+            card.Controls.Add(New Label() With {
+                .Text = "This PC does not require its own license. Licensing is managed" & Environment.NewLine &
+                        "centrally on the Pisonex server. While the server is licensed, every" & Environment.NewLine &
+                        "connected PC runs; if the server licence lapses, all PCs are locked.",
+                .AutoSize = False,
+                .Size = New Size(IW - 32, 60),
+                .Location = New Point(14, cy),
+                .ForeColor = ColSmall,
+                .Font = New Font("Segoe UI", 9)
+            }) : cy += 66
+
+            card.Controls.Add(SmallLabel("Device ID", New Point(14, cy))) : cy += 18
             _lblLicDeviceId = New Label() With {
                 .Text = LicenseService.GetDeviceId(),
                 .AutoSize = False,
@@ -1266,163 +1281,14 @@ Namespace Forms
                 .ForeColor = ColInfo,
                 .Font = New Font("Consolas", 8)
             }
-            statusCard.Controls.Add(_lblLicDeviceId) : cy += 24
+            card.Controls.Add(_lblLicDeviceId) : cy += 26
 
-            statusCard.Controls.Add(SmallLabel("Expires At", New Point(14, cy)))
-            statusCard.Controls.Add(SmallLabel("Last Verified", New Point(224, cy))) : cy += 18
-            _lblLicExpiry = New Label() With {
-                .Text = If(String.IsNullOrEmpty(LicenseStore.LicenseExpiresAt), "Lifetime / N/A", LicenseStore.LicenseExpiresAt),
-                .AutoSize = True, .Location = New Point(14, cy), .ForeColor = ColSmall
-            }
-            _lblLicVerified = New Label() With {
-                .Text = If(String.IsNullOrEmpty(LicenseStore.LicenseLastVerified), "—", LicenseStore.LicenseLastVerified),
-                .AutoSize = True, .Location = New Point(224, cy), .ForeColor = ColSmall
-            }
-            statusCard.Controls.Add(_lblLicExpiry)
-            statusCard.Controls.Add(_lblLicVerified)
-            cy += 24
+            Dim dashUrl = AppConfig.ServerUrl.TrimEnd("/"c) & "/dashboard"
+            card.Controls.Add(SmallLabel($"Manage licensing on the server: {dashUrl}", New Point(14, cy)))
 
-            ' Token diagnostic — shows exactly why a machine is activated vs trial
-            ' (token present / signature valid / device match / freshness).
-            statusCard.Controls.Add(SmallLabel("License Token", New Point(14, cy))) : cy += 18
-            _lblLicToken = New Label() With {
-                .Text = LicenseService.GetTokenDiagnostic(),
-                .AutoSize = False,
-                .Size = New Size(IW - 60, 32),
-                .Location = New Point(14, cy),
-                .ForeColor = ColSmall,
-                .Font = New Font("Segoe UI", 8)
-            }
-            statusCard.Controls.Add(_lblLicToken)
-
-            page.Controls.Add(statusCard) : y += 262
-
-            ' Activate card
-            Dim actCard = CardPanel(New Point(LM, y), New Size(IW, 160))
-            cy = 14
-            actCard.Controls.Add(SectionLabel("Enter License Key", New Point(14, cy))) : cy += 26
-
-            actCard.Controls.Add(SmallLabel("License Key", New Point(14, cy))) : cy += 18
-            _txtLicenseKey = DarkTextBox(New Point(14, cy), IW - 32, LicenseService.GetMaskedKey())
-            _txtLicenseKey.MaxLength = 24
-            _txtLicenseKey.Font = New Font("Consolas", 10)
-            _txtLicenseKey.CharacterCasing = CharacterCasing.Upper
-            actCard.Controls.Add(_txtLicenseKey) : cy += 34
-
-            Dim btnActivate = New Button() With {
-                .Text = "Activate",
-                .Location = New Point(14, cy),
-                .Size = New Size(120, 32),
-                .BackColor = ColAccent,
-                .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .Font = New Font("Segoe UI", 9, FontStyle.Bold)
-            }
-            btnActivate.FlatAppearance.BorderSize = 0
-            AddHandler btnActivate.Click, AddressOf OnActivateLicense
-            actCard.Controls.Add(btnActivate)
-
-            Dim btnDeactivate = New Button() With {
-                .Text = "Deactivate",
-                .Location = New Point(146, cy),
-                .Size = New Size(120, 32),
-                .BackColor = ColDanger,
-                .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-                .Enabled = LicenseService.IsActivated()
-            }
-            btnDeactivate.FlatAppearance.BorderSize = 0
-            AddHandler btnDeactivate.Click, AddressOf OnDeactivateLicense
-            actCard.Controls.Add(btnDeactivate) : cy += 38
-
-            _lblLicResult = New Label() With {
-                .AutoSize = True, .Location = New Point(14, cy),
-                .ForeColor = ColInfo, .Text = ""
-            }
-            actCard.Controls.Add(_lblLicResult)
-
-            page.Controls.Add(actCard)
-
-            ' Update status display
-            UpdateLicenseStatusDisplay()
-
+            page.Controls.Add(card)
             Return page
         End Function
-
-        Private Sub UpdateLicenseStatusDisplay()
-            If _lblLicStatus Is Nothing Then Return
-
-            If _lblLicToken IsNot Nothing Then
-                _lblLicToken.Text = LicenseService.GetTokenDiagnostic()
-            End If
-
-            Dim status = LicenseService.GetStatus()
-            Select Case status
-                Case LicenseStatus.Activated
-                    _lblLicStatus.Text = "Activated"
-                    _lblLicStatus.ForeColor = Color.FromArgb(34, 197, 94)
-                Case LicenseStatus.Trial
-                    _lblLicStatus.Text = $"Trial — {LicenseService.TrialDaysRemaining()} day(s) remaining"
-                    _lblLicStatus.ForeColor = Color.FromArgb(245, 158, 11)
-                Case LicenseStatus.OfflineLocked
-                    _lblLicStatus.Text = "Offline Locked — Cannot verify activation"
-                    _lblLicStatus.ForeColor = Color.FromArgb(239, 68, 68)
-                Case LicenseStatus.Expired
-                    _lblLicStatus.Text = "Expired"
-                    _lblLicStatus.ForeColor = Color.FromArgb(239, 68, 68)
-            End Select
-        End Sub
-
-        Private Async Sub OnActivateLicense(sender As Object, e As EventArgs)
-            Dim key = _txtLicenseKey.Text.Trim().ToUpper()
-            If String.IsNullOrEmpty(key) Then
-                _lblLicResult.Text = "Please enter a license key."
-                _lblLicResult.ForeColor = Color.FromArgb(245, 158, 11)
-                Return
-            End If
-
-            _lblLicResult.Text = "Activating..."
-            _lblLicResult.ForeColor = ColInfo
-            CType(sender, Button).Enabled = False
-
-            Dim result = Await LicenseService.ActivateAsync(key)
-
-            If result.Success Then
-                _lblLicResult.Text = "License activated successfully!"
-                _lblLicResult.ForeColor = Color.FromArgb(34, 197, 94)
-                _lblLicExpiry.Text = If(String.IsNullOrEmpty(result.ExpiresAt), "Lifetime", result.ExpiresAt)
-                _lblLicVerified.Text = DateTime.UtcNow.ToString("o")
-            Else
-                _lblLicResult.Text = result.ErrorMessage
-                _lblLicResult.ForeColor = Color.FromArgb(239, 68, 68)
-            End If
-
-            CType(sender, Button).Enabled = True
-            UpdateLicenseStatusDisplay()
-        End Sub
-
-        Private Async Sub OnDeactivateLicense(sender As Object, e As EventArgs)
-            Dim answer = MessageBox.Show(
-                "Deactivate this license? The software will revert to trial mode.",
-                "Deactivate", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
-            If answer <> DialogResult.Yes Then Return
-
-            _lblLicResult.Text = "Deactivating..."
-            _lblLicResult.ForeColor = ColInfo
-
-            Await LicenseService.DeactivateAsync()
-
-            _lblLicResult.Text = "License deactivated."
-            _lblLicResult.ForeColor = Color.FromArgb(245, 158, 11)
-            _txtLicenseKey.Text = ""
-            _lblLicExpiry.Text = "N/A"
-            _lblLicVerified.Text = "—"
-            CType(sender, Button).Enabled = False
-            UpdateLicenseStatusDisplay()
-        End Sub
 
         Private Sub OnSave(sender As Object, e As EventArgs)
             Dim newPin  = _txtPin.Text.Trim()

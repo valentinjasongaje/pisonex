@@ -69,61 +69,13 @@ Namespace Services
         End Property
 
         Public Async Function SyncStartupStatusAsync() As Task
-            Try
-                ' POST telemetry to pisonex.com on startup.
-                ' The server records first_seen_at on the first ping so deleting
-                ' license.dat cannot reset the trial as long as the device_id stays the same.
-                Dim payload = New Dictionary(Of String, String) From {
-                    {"device_id", GetDeviceId()}
-                }
-                For Each kv In BuildTelemetry()
-                    payload(kv.Key) = kv.Value
-                Next
-                ' Multi-source fingerprint hashes — let the server fuzzy-match returning
-                ' devices whose MachineGuid was edited after license.dat was deleted.
-                For Each kv In HardwareFingerprint.Collect()
-                    payload(kv.Key) = kv.Value
-                Next
-
-                Dim json = JsonSerializer.Serialize(payload)
-                Dim content = New StringContent(json, Encoding.UTF8, "application/json")
-                Dim resp = Await _httpClient.PostAsync($"{PISONEX_API}/api/status", content)
-                If resp.IsSuccessStatusCode Then
-                    _lastSyncOk = True
-                    ' Persist the anchor so the gate survives a process restart while
-                    ' offline. Once anchored, the device may run offline for the normal
-                    ' grace period without re-checking.
-                    LicenseStore.TrialAnchored = True
-                    Dim body = Await resp.Content.ReadAsStringAsync()
-                    Dim doc = JsonDocument.Parse(body)
-
-                    ' Always apply the earlier of local vs server first-run date.
-                    ' This prevents trial-clock reset via license.dat deletion.
-                    Dim firstSeenProp As JsonElement
-                    If doc.RootElement.TryGetProperty("first_seen_at", firstSeenProp) AndAlso
-                       firstSeenProp.ValueKind = JsonValueKind.String Then
-                        Dim serverDate = firstSeenProp.GetString()
-                        If Not String.IsNullOrEmpty(serverDate) Then
-                            Dim localDate = LicenseStore.LicenseFirstRunDate
-                            Dim shouldUpdate = String.IsNullOrEmpty(localDate)
-                            If Not shouldUpdate Then
-                                Try
-                                    Dim localDt = DateTime.Parse(localDate, Nothing, Globalization.DateTimeStyles.RoundtripKind)
-                                    Dim serverDt = DateTime.Parse(serverDate, Nothing, Globalization.DateTimeStyles.RoundtripKind)
-                                    If serverDt < localDt Then shouldUpdate = True
-                                Catch
-                                    shouldUpdate = True
-                                End Try
-                            End If
-                            If shouldUpdate Then
-                                LicenseStore.LicenseFirstRunDate = serverDate
-                            End If
-                        End If
-                    End If
-                End If
-            Catch
-                ' Cannot reach pisonex.com — trial date not restored this time
-            End Try
+            ' Unlimited-clients model: the PC client no longer activates against, nor
+            ' reports telemetry to, pisonex.com. Licensing is enforced solely at the
+            ' Orange Pi server and delivered to the client on every heartbeat via the
+            ' server_licensed flag (see Program.OnMembershipUpdated). Kept as an
+            ' awaitable no-op so existing call sites continue to compile.
+            _lastSyncOk = True
+            Await Task.CompletedTask
         End Function
 
         ' ── Telemetry helpers ────────────────────────────────────────────
@@ -458,19 +410,9 @@ Namespace Services
         ''' freshness check separately.
         ''' </summary>
         Public Function IsActivated() As Boolean
-            ' Both string fields must still be present — they're the user-visible
-            ' state and other code paths assume LicenseKey is non-empty when
-            ' activated. But these alone are not sufficient.
-            If String.IsNullOrEmpty(LicenseStore.LicenseKey) Then Return False
-            If String.IsNullOrEmpty(LicenseStore.LicenseActivatedAt) Then Return False
-
-            ' The unforgeable part: a stored token whose signature verifies under
-            ' the embedded pisonex.com public key and whose `did` claim matches
-            ' the current hardware. Without this, anyone who can write to
-            ' license.dat could claim "activated" by adding two strings.
-            Dim claims = LicenseTokenVerifier.VerifySignature(
-                LicenseStore.LicenseToken, GetDeviceId())
-            Return claims IsNot Nothing
+            ' Per-PC activation removed (unlimited-clients model). The client is
+            ' always considered licensed locally; shop licensing lives on the server.
+            Return True
         End Function
 
         Public Function TrialDaysRemaining() As Integer
@@ -541,34 +483,15 @@ Namespace Services
         End Function
 
         Public Function IsActive() As Boolean
-            If IsActivated() Then
-                ' Server explicitly rejected — no grace period
-                If LicenseStore.ServerRejected Then Return False
-
-                Dim claims = LicenseTokenVerifier.Verify(LicenseStore.LicenseToken, GetDeviceId())
-                If claims IsNot Nothing Then
-                    If DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.ExpiresAt Then
-                        Return Not IsOfflineLocked()
-                    End If
-                    If claims.LicenseExpiresAt.HasValue AndAlso
-                       DateTimeOffset.UtcNow.ToUnixTimeSeconds() > claims.LicenseExpiresAt.Value Then Return False
-                    Return True
-                End If
-                If IsLicenseExpired() Then Return False
-                If IsOfflineLocked() Then Return False
-                Return True
-            End If
-            Return Not IsTrialExpired()
+            ' Unlimited-clients model: the client is always permitted to run. Whether
+            ' the SHOP is licensed is decided by the Orange Pi server and surfaced via
+            ' the heartbeat's server_licensed flag — never by per-PC activation.
+            Return True
         End Function
 
         Public Function GetStatus() As LicenseStatus
-            If IsActivated() Then
-                If IsLicenseExpired() Then Return LicenseStatus.Expired
-                If IsOfflineLocked() Then Return LicenseStatus.OfflineLocked
-                Return LicenseStatus.Activated
-            End If
-            If IsTrialExpired() Then Return LicenseStatus.Expired
-            Return LicenseStatus.Trial
+            ' Per-PC activation removed — the client is always considered licensed.
+            Return LicenseStatus.Activated
         End Function
 
         ''' <summary>
@@ -614,40 +537,9 @@ Namespace Services
         ' ── Background verification timer ────────────────────────────────
 
         Public Sub StartVerificationTimer()
-            If _verifyTimer IsNot Nothing Then Return
-            ' Verify hourly. Combined with the server's 2h token TTL, a device
-            ' deactivated on pisonex.com loses access within ~1h instead of ~6h.
-            ' On a LAN café (~20 PCs) this is one extra pisonex.com request per
-            ' PC per hour — negligible load.
-            _verifyTimer = New System.Timers.Timer(1 * 60 * 60 * 1000)  ' 1 hour
-            AddHandler _verifyTimer.Elapsed, Async Sub(s, e)
-                ' Re-anchor the trial clock every 6h so an attacker can't reset it
-                ' by deleting license.dat and staying offline until the next reboot.
-                Await SyncStartupStatusAsync()
-                ' Gate on HasActivationRecord — if a forged license.dat ever holds
-                ' strings without a real token, this verify path will ask the server
-                ' and either get a real token (it cannot, the key/device won't match)
-                ' or have ClearActivation wipe the strings.
-                If HasActivationRecord() Then
-                    Dim valid = Await VerifyAsync()
-                    If Not valid Then
-                        ' Distinguish "server explicitly rejected" from "couldn't reach
-                        ' server." Only the former warrants clearing activation — a
-                        ' transient network blip must NOT deactivate a paying customer.
-                        ' VerifyAsync sets ServerRejected when the server returned a
-                        ' definitive non-success response; it sets OfflineSince when
-                        ' it hit a HttpRequestException / timeout.
-                        If LicenseStore.ServerRejected Then
-                            Debug.WriteLine("[LICENSE] Server rejected — clearing local license")
-                            LicenseStore.ClearActivation()
-                        Else
-                            Debug.WriteLine("[LICENSE] Verification failed (offline?) — keeping license, offline grace applies")
-                        End If
-                    End If
-                End If
-            End Sub
-            _verifyTimer.AutoReset = True
-            _verifyTimer.Start()
+            ' No-op: per-PC license verification against pisonex.com has been removed.
+            ' Shop licensing is enforced at the Orange Pi server (heartbeat
+            ' server_licensed flag), so the client has nothing to verify remotely.
         End Sub
 
         Public Sub EnsureFirstRunDate()
@@ -669,9 +561,8 @@ Namespace Services
         ''' cannot start.
         ''' </summary>
         Public Function IsTrialAnchored() As Boolean
-            If IsActivated() Then Return True
-            If LicenseStore.TrialAnchored Then Return True
-            Return _lastSyncOk
+            ' Unlimited-clients model: no trial, no anchor requirement. Always allowed.
+            Return True
         End Function
 
     End Module

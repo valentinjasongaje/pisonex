@@ -85,39 +85,14 @@ Module Program
         _guardTimer.Start()
 #End If
 
-        ' ── License initialization ────────────────────────────────────────
-        ' SyncStartupStatusAsync runs first: it restores LicenseFirstRunDate from
-        ' pisonex.com (first_seen_at) if license.dat was deleted. EnsureFirstRunDate
-        ' then only writes a fresh date if the server had no record either.
-        LicenseService.SyncStartupStatusAsync().GetAwaiter().GetResult()
-
-        ' Trial-anchor gate: a trial install must have pinged pisonex.com at least
-        ' once. Without this gate, an attacker could install offline, run the full
-        ' 14-day trial, then ever-so-slightly re-install to reset the clock without
-        ' the server ever recording a first_seen_at for the device.
-        If Not LicenseService.IsTrialAnchored() Then
-            MessageBox.Show(
-                "Pisonex requires internet access on first start to activate your trial." & Environment.NewLine & Environment.NewLine &
-                "Please connect this PC to the internet and re-launch the application.",
-                "Activation Required",
-                MessageBoxButtons.OK, MessageBoxIcon.Information)
-            Application.Exit()
-            Return
-        End If
-
-        LicenseService.EnsureFirstRunDate()
-        LicenseService.StartVerificationTimer()
-
-        ' Periodic license enforcement — catches expiry during active sessions
-        Dim licenseEnforcementTimer = New System.Timers.Timer(10 * 60 * 1000) ' every 10 min
-        AddHandler licenseEnforcementTimer.Elapsed, Sub(s, e)
-            If Not LicenseService.IsActive() Then
-                _lockMgr.LockPC()
-                CheckLicenseStatus()
-            End If
-        End Sub
-        licenseEnforcementTimer.AutoReset = True
-        licenseEnforcementTimer.Start()
+        ' ── Licensing ──────────────────────────────────────────────────────
+        ' Unlimited-clients model: the PC client has no per-PC activation and never
+        ' contacts pisonex.com. There is no trial and no internet requirement on the
+        ' client — it always runs locally and trusts its LAN server, authenticating
+        ' with the X-API-Key header. Whether the SHOP is licensed is decided by the
+        ' Orange Pi server and delivered on every heartbeat via the server_licensed
+        ' flag (handled in OnMembershipUpdated → ShowServerLicenseWarning). An
+        ' unlicensed server therefore locks every PC in the shop at the source.
 
         ' ── Apply Windows restrictions ────────────────────────────────────
         WindowsPolicy.Apply()
@@ -206,16 +181,9 @@ Module Program
             _metrics = New MetricsService(_api)
             _metrics.Start()
 
-            ' The startup SyncStartupStatusAsync() ran before heartbeats started,
-            ' so it sent today_pesos=0 and overwrote any previous value in devicePings.
-            ' Re-sync after 30 s once heartbeats have populated the earnings cache.
-            Dim earlyEarningsSync = New Timer() With {.Interval = 30_000}
-            AddHandler earlyEarningsSync.Tick, Async Sub(ss, ee)
-                earlyEarningsSync.Stop()
-                earlyEarningsSync.Dispose()
-                Await LicenseService.SyncStartupStatusAsync()
-            End Sub
-            earlyEarningsSync.Start()
+            ' Earnings reporting to the customer portal is handled entirely by the
+            ' Orange Pi server (daily /api/sync/earnings with startup catch-up), so
+            ' the client no longer forwards branch earnings to pisonex.com.
         End Sub
         startTimer.Start()
 

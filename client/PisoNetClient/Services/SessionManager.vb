@@ -286,13 +286,9 @@ Namespace Services
                 response.minimum_logout_minutes,
                 response.server_licensed)
 
-            ' Update branch + today's earnings cache in LicenseService so the next
-            ' hourly pisonex.com ping includes them (forwards to customer portal).
-            LicenseService.UpdateBranchEarnings(
-                response.branch_name,
-                response.today_pesos,
-                response.today_sessions,
-                response.today_minutes)
+            ' Branch earnings are forwarded to the customer portal by the Orange Pi
+            ' server (daily /api/sync/earnings), so the client no longer relays them
+            ' to pisonex.com.
 
             ' Server-driven capture interval — ramp up when admin is watching this PC,
             ' reset to configured when not watched (0 = use own config).
