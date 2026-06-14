@@ -165,7 +165,7 @@ Licensing is enforced **only at the server**, one license per shop, **unlimited 
 
 - The **Orange Pi server** activates against `pisonex.com` (`services/license_service.py`, `device_type="server"`, bound to `/etc/machine-id`). This is the single paid license.
 - Each **heartbeat** (`api/pc.py`) returns `server_licensed = license_service.is_active()`. When the server license lapses, every PC shows the server-license warning and is locked at the source.
-- The **PC client no longer has its own activation** and never contacts `pisonex.com`. `LicenseService` (`client/PisoNetClient/Services/LicenseService.vb`) is neutered: `IsActive()`/`IsActivated()`/`IsTrialAnchored()` always return `True`, `GetStatus()` is always `Activated`, and the verify/trial/telemetry network paths are no-ops (the activate/verify methods remain in the file but are dead/unreferenced for easy rollback).
+- The **PC client has no licensing code at all** and never contacts `pisonex.com`. The client-side `LicenseService`, `LicenseTokenVerifier`, and `HardwareFingerprint` files were deleted, all `IsActive()`/trial gates were removed from `Program.vb`, `SessionManager.vb` (no more `canUnlock` delegate), and `LockManager.vb`, and the AdminPanel **License tab is gone**. `Config/LicenseStore.vb` is kept only as the DPAPI-encrypted store for the **admin PIN hash** (the module name is retained for compatibility).
 - Clients authenticate to their LAN server with the `X-API-Key` header (`CLIENT_API_KEY`) — that, not a per-PC license, is what prevents a foreign PC from leeching time.
 - **Customer-portal earnings** are forwarded by the **server** (`main.py` daily `/api/sync/earnings` with startup catch-up), not by the client.
 

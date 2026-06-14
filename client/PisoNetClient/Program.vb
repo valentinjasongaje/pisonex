@@ -104,7 +104,7 @@ Module Program
         _api = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
         _memberSvc = New MemberService(AppConfig.ServerUrl)
         _lockMgr = New LockManager()
-        _session = New SessionManager(_api, _lockMgr, Function() LicenseService.IsActive())
+        _session = New SessionManager(_api, _lockMgr)
         _overlay = New TimerOverlay()
         _tray = New SystemTray()
         _notifs = New NotificationService(_overlay)
@@ -150,9 +150,6 @@ Module Program
 
         ' ── Lock immediately on startup ──────────────────────────────────
         _lockMgr.LockPC()
-
-        ' ── Check license status ────────────────────────────────────────
-        CheckLicenseStatus()
 
         ' ── Defer session start until the message loop is running ────────
         ' This ensures Invoke works correctly for UnlockPC and other UI
@@ -200,13 +197,6 @@ Module Program
     Private Sub OnSessionStarted()
         If _overlay.InvokeRequired Then
             _overlay.Invoke(Sub() OnSessionStarted())
-            Return
-        End If
-
-        ' Block session start if license is not active
-        If Not LicenseService.IsActive() Then
-            CheckLicenseStatus()
-            _lockMgr.LockPC()   ' re-lock — UnlockPC was already called in SessionManager
             Return
         End If
 
@@ -316,9 +306,8 @@ Module Program
     End Sub
 
     Private Sub OnReceivingCoinsChanged(isReceiving As Boolean)
-        Dim active = If(LicenseService.IsActive(), isReceiving, False)
-        _lockMgr.ShowReceivingCoins(active)
-        _overlay.SetReceivingCoins(active)
+        _lockMgr.ShowReceivingCoins(isReceiving)
+        _overlay.SetReceivingCoins(isReceiving)
         If Not isReceiving Then
             ' Slot just closed — if a session started while the slot was open
             ' the overlay was held back so the lock screen could own the
@@ -524,10 +513,6 @@ Module Program
     End Sub
 
     Private Sub OnMemberLogin(username As String, password As String)
-        If Not LicenseService.IsActive() Then
-            _lockMgr.ShowMemberError("License expired. Contact administrator to activate this PC.")
-            Return
-        End If
         Task.Run(Async Function()
             Dim result = Await _memberSvc.LoginAsync(AppConfig.PCNumber, username, password)
             If result.success Then
@@ -546,10 +531,6 @@ Module Program
     End Sub
 
     Private Sub OnMemberRegister(username As String, password As String)
-        If Not LicenseService.IsActive() Then
-            _lockMgr.ShowMemberError("License expired. Contact administrator to activate this PC.")
-            Return
-        End If
         Task.Run(Async Function()
                      Dim result = Await _memberSvc.RegisterAsync(AppConfig.PCNumber, username, password)
                      If result.success Then
@@ -694,24 +675,6 @@ Module Program
     Private Sub EnsureGuardRunning()
         If Process.GetProcessesByName("pnxsystem").Length > 0 Then Return
         SpawnGuard()
-    End Sub
-
-    ' ── License check ────────────────────────────────────────────────────
-
-    Private Sub CheckLicenseStatus()
-        Dim status = LicenseService.GetStatus()
-        Select Case status
-            Case LicenseStatus.Expired
-                _lockMgr.ShowLicenseWarning(
-                    "Trial expired. Contact administrator to activate this PC.")
-            Case LicenseStatus.OfflineLocked
-                _lockMgr.ShowLicenseWarning(
-                    "Activation cannot be confirmed. Please connect to the internet.")
-            Case LicenseStatus.Trial
-                ' Trial active — no warning needed, but could show subtle trial indicator
-            Case LicenseStatus.Activated
-                _lockMgr.HideLicenseWarning()
-        End Select
     End Sub
 
     ' ── Windows startup registration ──────────────────────────────────────

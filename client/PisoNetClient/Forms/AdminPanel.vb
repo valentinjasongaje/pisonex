@@ -109,19 +109,10 @@ Namespace Forms
         Private Shared ReadOnly ColText       As Color = Color.FromArgb(220, 228, 240)
         Private Shared ReadOnly ColDanger     As Color = Color.FromArgb(239, 68, 68)
 
-        ' License tab controls
-        Private _txtLicenseKey  As TextBox
-        Private _lblLicStatus   As Label
-        Private _lblLicDeviceId As Label
-        Private _lblLicExpiry   As Label
-        Private _lblLicVerified As Label
-        Private _lblLicResult   As Label
-        Private _lblLicToken    As Label
-
         ' Nav item definitions
         Private Shared ReadOnly NavLabels() As String = {
             "Connection", "Lock Screen", "Restrictions",
-            "Security", "Notifications", "License"
+            "Security", "Notifications"
         }
         Private Shared ReadOnly NavIcons() As String = {
             ChrW(&H26A1), Char.ConvertFromUtf32(&H1F512), Char.ConvertFromUtf32(&H1F6E1),
@@ -387,8 +378,7 @@ Namespace Forms
                 AddressOf BuildLockScreenPage,
                 AddressOf BuildRestrictionsPage,
                 AddressOf BuildSecurityPage,
-                AddressOf BuildNotificationsPage,
-                AddressOf BuildLicensePage
+                AddressOf BuildNotificationsPage
             }
             For i = 0 To builders.Length - 1
                 Dim page = builders(i)()
@@ -1236,59 +1226,6 @@ Namespace Forms
             End If
             If dlg.ShowDialog(Me) = DialogResult.OK Then _txtImgPath.Text = dlg.FileName
         End Sub
-
-        ' ── License page ─────────────────────────────────────────────────────
-
-        Private Function BuildLicensePage() As Panel
-            Dim page = ScrollPage()
-            Dim y = 16
-
-            page.Controls.Add(PageTitle("License", New Point(LM, y))) : y += 34
-
-            ' Unlimited-clients model: this PC has no per-PC activation. Licensing is
-            ' managed centrally on the Pisonex server; if the server is unlicensed,
-            ' every PC in the shop is locked via the heartbeat's server_licensed flag.
-            Dim card = CardPanel(New Point(LM, y), New Size(IW, 232))
-            Dim cy = 14
-            card.Controls.Add(SectionLabel("Licensing Model", New Point(14, cy))) : cy += 26
-
-            _lblLicStatus = New Label() With {
-                .Text = "Unlimited Clients — no per-PC activation",
-                .AutoSize = True,
-                .Location = New Point(14, cy),
-                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-                .ForeColor = Color.FromArgb(34, 197, 94)
-            }
-            card.Controls.Add(_lblLicStatus) : cy += 32
-
-            card.Controls.Add(New Label() With {
-                .Text = "This PC does not require its own license. Licensing is managed" & Environment.NewLine &
-                        "centrally on the Pisonex server. While the server is licensed, every" & Environment.NewLine &
-                        "connected PC runs; if the server licence lapses, all PCs are locked.",
-                .AutoSize = False,
-                .Size = New Size(IW - 32, 60),
-                .Location = New Point(14, cy),
-                .ForeColor = ColSmall,
-                .Font = New Font("Segoe UI", 9)
-            }) : cy += 66
-
-            card.Controls.Add(SmallLabel("Device ID", New Point(14, cy))) : cy += 18
-            _lblLicDeviceId = New Label() With {
-                .Text = LicenseService.GetDeviceId(),
-                .AutoSize = False,
-                .Size = New Size(IW - 60, 18),
-                .Location = New Point(14, cy),
-                .ForeColor = ColInfo,
-                .Font = New Font("Consolas", 8)
-            }
-            card.Controls.Add(_lblLicDeviceId) : cy += 26
-
-            Dim dashUrl = AppConfig.ServerUrl.TrimEnd("/"c) & "/dashboard"
-            card.Controls.Add(SmallLabel($"Manage licensing on the server: {dashUrl}", New Point(14, cy)))
-
-            page.Controls.Add(card)
-            Return page
-        End Function
 
         Private Sub OnSave(sender As Object, e As EventArgs)
             Dim newPin  = _txtPin.Text.Trim()

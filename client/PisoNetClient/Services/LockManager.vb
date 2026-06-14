@@ -52,8 +52,6 @@ Namespace Services
                 _lockForm.Invoke(Sub() UnlockPC())
                 Return
             End If
-            ' Defense-in-depth: never unlock if license is not active
-            If Not LicenseService.IsActive() Then Return
             ' While the coin slot is open keep the lock form visible so the user
             ' can insert additional coins.  Record that an unlock is waiting and
             ' hide the form once the slot actually closes (ShowReceivingCoins(False)).

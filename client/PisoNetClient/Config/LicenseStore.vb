@@ -6,9 +6,11 @@ Imports System.Text.Json
 Namespace Config
 
     ''' <summary>
-    ''' Persists license data as a DPAPI-encrypted binary file in %ProgramData%\PisoNet\.
-    ''' The file is encrypted to the local machine key — unreadable and unmodifiable
-    ''' by users, and non-portable (decryption fails on any other machine).
+    ''' DPAPI-encrypted credential store in %ProgramData%\PisoNet\license.dat.
+    ''' Holds the admin PIN hash (the client has no per-PC license — licensing is
+    ''' enforced solely at the server). The file is encrypted to the local machine
+    ''' key — unreadable and unmodifiable by users, and non-portable (decryption
+    ''' fails on any other machine). The module name is retained for compatibility.
     ''' </summary>
     Public Module LicenseStore
 
@@ -97,116 +99,6 @@ Namespace Config
             End SyncLock
         End Sub
 
-        ' ── License fields ───────────────────────────────────────────────
-
-        Public Property LicenseKey As String
-            Get
-                Return GetValue("LicenseKey")
-            End Get
-            Set(v As String)
-                SetValue("LicenseKey", v)
-            End Set
-        End Property
-
-        Public Property LicenseDeviceId As String
-            Get
-                Return GetValue("LicenseDeviceId")
-            End Get
-            Set(v As String)
-                SetValue("LicenseDeviceId", v)
-            End Set
-        End Property
-
-        Public Property LicenseActivatedAt As String
-            Get
-                Return GetValue("LicenseActivatedAt")
-            End Get
-            Set(v As String)
-                SetValue("LicenseActivatedAt", v)
-            End Set
-        End Property
-
-        Public Property LicenseExpiresAt As String
-            Get
-                Return GetValue("LicenseExpiresAt")
-            End Get
-            Set(v As String)
-                SetValue("LicenseExpiresAt", v)
-            End Set
-        End Property
-
-        Public Property LicenseLastVerified As String
-            Get
-                Return GetValue("LicenseLastVerified")
-            End Get
-            Set(v As String)
-                SetValue("LicenseLastVerified", v)
-            End Set
-        End Property
-
-        Public Property LicenseFirstRunDate As String
-            Get
-                Return GetValue("LicenseFirstRunDate")
-            End Get
-            Set(v As String)
-                SetValue("LicenseFirstRunDate", v)
-            End Set
-        End Property
-
-        ''' <summary>
-        ''' "true" once pisonex.com has anchored the trial clock at least once for
-        ''' this install. Required to run in trial mode — refusing to start when
-        ''' missing kills the offline-install trial-reset attack (install offline,
-        ''' use for 14 days, repeat with a fresh first_seen_at on first online ping).
-        ''' Persisted in the DPAPI-encrypted license.dat so deleting the file forces
-        ''' a re-anchor.
-        ''' </summary>
-        Public Property TrialAnchored As Boolean
-            Get
-                Return GetValue("TrialAnchored") = "true"
-            End Get
-            Set(v As Boolean)
-                SetValue("TrialAnchored", If(v, "true", ""))
-            End Set
-        End Property
-
-        ''' <summary>
-        ''' ES256-signed JWT from pisonex.com. Stored alongside license data.
-        ''' Verified on every load — file tampering breaks the signature.
-        ''' </summary>
-        Public Property LicenseToken As String
-            Get
-                Return GetValue("LicenseToken")
-            End Get
-            Set(v As String)
-                SetValue("LicenseToken", v)
-            End Set
-        End Property
-
-        ''' <summary>ISO timestamp of first consecutive network failure. Cleared on success.</summary>
-        Public Property OfflineSince As String
-            Get
-                Return GetValue("OfflineSince")
-            End Get
-            Set(v As String)
-                SetValue("OfflineSince", v)
-            End Set
-        End Property
-
-        ''' <summary>
-        ''' Set to "true" when pisonex.com explicitly rejects the device (revoked/inactive).
-        ''' No offline grace applies — is_active returns False immediately.
-        ''' Cleared on next successful verification.
-        ''' </summary>
-        Public Property ServerRejected As Boolean
-            Get
-                Return GetValue("ServerRejected") = "true"
-            End Get
-            Set(v As Boolean)
-                SetValue("ServerRejected", If(v, "true", ""))
-            End Set
-        End Property
-
         ' ── Admin PIN (hashed) ────────────────────────────────────────────
 
         Private Const DEFAULT_PIN As String = "1234"
@@ -256,24 +148,6 @@ Namespace Config
                 Encoding.UTF8.GetBytes(If(pin, "")))
             Return BitConverter.ToString(bytes).Replace("-", "").ToLower()
         End Function
-
-        ''' <summary>
-        ''' Clears activation fields only. Keeps FirstRunDate so the trial clock
-        ''' is not reset on deactivation.
-        ''' </summary>
-        Public Sub ClearActivation()
-            SyncLock _lock
-                If _cache Is Nothing Then _cache = ReadFromDisk()
-                _cache.Remove("LicenseKey")
-                _cache.Remove("LicenseActivatedAt")
-                _cache.Remove("LicenseExpiresAt")
-                _cache.Remove("LicenseLastVerified")
-                _cache.Remove("LicenseToken")
-                _cache.Remove("OfflineSince")
-                _cache.Remove("ServerRejected")
-                WriteToDisk(_cache)
-            End SyncLock
-        End Sub
 
     End Module
 

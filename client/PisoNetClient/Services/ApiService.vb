@@ -38,7 +38,8 @@ Namespace Services
         Public Property coin_progress_pesos As Integer = 0
         Public Property coin_progress_seconds As Integer = 0
         Public Property minimum_logout_minutes As Integer = 0
-        ' Branch / earnings fields — piggybacked to forward on the hourly pisonex.com ping
+        ' Branch / earnings fields returned by the server heartbeat (informational;
+        ' the server forwards earnings to the customer portal, not the client)
         Public Property branch_name As String = ""
         Public Property today_pesos As Integer = 0
         Public Property today_sessions As Integer = 0
