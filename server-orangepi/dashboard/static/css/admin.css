@@ -1063,3 +1063,136 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+/* ── License activation banner ─────────────────────────────────
+   Shown at the top of every dashboard page when the server's own
+   license is expired or offline-locked. Suppressed on
+   /dashboard/license so the activation flow stays clean.        */
+.license-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin: 0 0 18px;
+  border-radius: 14px;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.15s ease;
+}
+.license-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 0% 50%,
+      color-mix(in srgb, var(--banner-accent, #ef4444) 22%, transparent),
+      transparent 55%);
+  pointer-events: none;
+}
+.license-banner:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--banner-accent, #ef4444) 60%, transparent);
+  filter: brightness(1.05);
+}
+
+/* Expired or trial-expired → red urgency */
+.license-banner-expired {
+  --banner-accent: #ef4444;
+  background: color-mix(in srgb, #ef4444 10%, var(--surface));
+  border-color: color-mix(in srgb, #ef4444 35%, var(--border));
+}
+.license-banner-expired .license-banner-icon { color: #ef4444; }
+.license-banner-expired .license-banner-cta {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+/* Offline-locked → amber, less alarming (it's recoverable by network) */
+.license-banner-offline_locked {
+  --banner-accent: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 10%, var(--surface));
+  border-color: color-mix(in srgb, #f59e0b 35%, var(--border));
+}
+.license-banner-offline_locked .license-banner-icon { color: #f59e0b; }
+.license-banner-offline_locked .license-banner-cta {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+/* Trial / unknown / default fallback → purple call-to-action */
+.license-banner-trial,
+.license-banner-None,
+.license-banner {
+  --banner-accent: #7c3aed;
+}
+.license-banner-trial {
+  background: color-mix(in srgb, #7c3aed 10%, var(--surface));
+  border-color: color-mix(in srgb, #7c3aed 35%, var(--border));
+}
+.license-banner-trial .license-banner-icon { color: #7c3aed; }
+
+.license-banner-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--banner-accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--banner-accent) 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: licenseBannerPulse 2.4s ease-in-out infinite;
+}
+@keyframes licenseBannerPulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--banner-accent, #ef4444) 35%, transparent); }
+  50%      { box-shadow: 0 0 0 6px transparent; }
+}
+
+.license-banner-text {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  position: relative;
+}
+.license-banner-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text, #e5e7eb);
+}
+.license-banner-sub {
+  font-size: 12.5px;
+  color: var(--gray, #94a3b8);
+  line-height: 1.4;
+}
+
+.license-banner-cta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--banner-accent, #ef4444) 60%, transparent);
+  position: relative;
+}
+
+/* Compact on narrow screens — drop the CTA pill and the subtext, but keep
+   the title + icon visible at a glance. */
+@media (max-width: 640px) {
+  .license-banner { padding: 12px 14px; gap: 12px; }
+  .license-banner-icon { width: 34px; height: 34px; }
+  .license-banner-sub { display: none; }
+  .license-banner-cta {
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+}

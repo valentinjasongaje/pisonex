@@ -804,6 +804,26 @@ async def attach_session_to_request(request: Request, call_next):
             request.state.user_role = payload.get("role", "admin")
         except Exception:
             pass
+
+    # ── License state for dashboard banner ─────────────────────────────────
+    # Only computed for /dashboard/* requests so API / static / heartbeat
+    # paths stay zero-cost. The layout template reads these to decide whether
+    # to render the activation banner (suppressed on /dashboard/license so
+    # the activation flow isn't blocked by its own warning).
+    request.state.show_license_banner = False
+    request.state.license_status = None
+    request.state.license_trial_days = 0
+    path = request.url.path
+    if path.startswith("/dashboard") and license_service is not None:
+        try:
+            status = license_service.get_status()
+            request.state.license_status = status.get("status")
+            request.state.license_trial_days = int(status.get("trial_days_remaining") or 0)
+            if not status.get("is_active") and path != "/dashboard/license":
+                request.state.show_license_banner = True
+        except Exception:
+            pass
+
     return await call_next(request)
 
 

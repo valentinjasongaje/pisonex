@@ -47,6 +47,51 @@
 </nav>
 
 <main class="main-content">
+  {# License activation banner — rendered on every dashboard page when the
+     server's own license is expired or offline-locked.  Suppressed on
+     /dashboard/license so the activation page itself stays clean. #}
+  {% if request.state.show_license_banner %}
+  {% set _lic_status = request.state.license_status %}
+  <a href="/dashboard/license" class="license-banner license-banner-{{ _lic_status }}">
+    <span class="license-banner-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="22" height="22">
+        <path d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+              stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="license-banner-text">
+      <strong class="license-banner-title">
+        {% if _lic_status == "offline_locked" %}
+          Activation cannot be confirmed
+        {% elif _lic_status == "expired" %}
+          {% if request.state.license_trial_days <= 0 and not request.state.license_status == "activated" %}
+            Trial expired — activation required
+          {% else %}
+            License expired
+          {% endif %}
+        {% else %}
+          Activation required
+        {% endif %}
+      </strong>
+      <span class="license-banner-sub">
+        {% if _lic_status == "offline_locked" %}
+          This server can't reach the licensing service. Reconnect to the internet to confirm activation.
+        {% elif _lic_status == "expired" %}
+          Your server license needs to be renewed to keep PCs running.
+        {% else %}
+          Activate your Pisonex server license to continue using the dashboard.
+        {% endif %}
+      </span>
+    </span>
+    <span class="license-banner-cta">
+      Activate now
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+        <path d="M5 12h14M13 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+  </a>
+  {% endif %}
+
   {% block content %}{% endblock %}
 </main>
 
