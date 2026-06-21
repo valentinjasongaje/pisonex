@@ -36,13 +36,9 @@ Namespace Forms
         Private _pnlStatus    As Panel        ' connection status pill (bottom-center)
         Private _lblStatusDot As Label        ' colored dot inside pill
         Private _lblStatusTxt As Label        ' "Connected" / "Disconnected"
-        Private _lblLicenseWarn As Label
-        Private _pnlServerLicenseWarn As Panel   ' top banner when server license is expired
-        Private _serverDashboardUrl As String = ""
         Private _bgImage      As Image
         Private _allowClose   As Boolean = False
         Private _isConnected  As Boolean = True
-        Private _licenseActive As Boolean = True
 
         ' Membership UI controls
         Private _pnlMember      As Panel        ' container for membership UI
@@ -390,73 +386,6 @@ Namespace Forms
             }
 
             _pnlStatus.Controls.AddRange({_lblStatusDot, _lblStatusTxt})
-
-            ' License warning — shown when software is not activated
-            _lblLicenseWarn = New Label() With {
-                .Text = "Software Not Activated",
-                .Font = New Font("Segoe UI", 11, FontStyle.Bold),
-                .ForeColor = Color.FromArgb(239, 68, 68),
-                .BackColor = Color.Transparent,
-                .AutoSize = True,
-                .Visible = False
-            }
-
-            ' Server license expired banner — shown at top of screen
-            _pnlServerLicenseWarn = New Panel() With {
-                .BackColor = Color.FromArgb(220, 120, 53, 15),
-                .Visible = False,
-                .Dock = DockStyle.Top,
-                .Height = 40
-            }
-            Dim _lblSrvWarnIcon = New Label() With {
-                .Text = "⚠",
-                .Font = New Font("Segoe UI", 12),
-                .ForeColor = Color.FromArgb(251, 191, 36),
-                .BackColor = Color.Transparent,
-                .AutoSize = True,
-                .Location = New Point(16, 8)
-            }
-            Dim _lblSrvWarnText = New Label() With {
-                .Text = "Server license expired",
-                .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-                .ForeColor = Color.White,
-                .BackColor = Color.Transparent,
-                .AutoSize = True,
-                .Location = New Point(42, 4)
-            }
-            Dim _lblSrvWarnSub = New Label() With {
-                .Text = "Open the server dashboard to activate — Ctrl+Shift+F12 for admin panel",
-                .Font = New Font("Segoe UI", 8),
-                .ForeColor = Color.FromArgb(253, 230, 138),
-                .BackColor = Color.Transparent,
-                .AutoSize = True,
-                .Location = New Point(42, 22)
-            }
-            Dim _lblSrvWarnLink = New Label() With {
-                .Text = "Open Dashboard",
-                .Font = New Font("Segoe UI", 8, FontStyle.Underline),
-                .ForeColor = Color.FromArgb(147, 210, 255),
-                .BackColor = Color.Transparent,
-                .AutoSize = True,
-                .Cursor = Cursors.Hand
-            }
-            AddHandler _lblSrvWarnLink.Click, Sub(s, ev)
-                                                  If Not String.IsNullOrEmpty(_serverDashboardUrl) Then
-                                                      Try
-                                                          Me.TopMost = False
-                                                          Me.WindowState = FormWindowState.Minimized
-                                                          Process.Start(New ProcessStartInfo(_serverDashboardUrl) With {.UseShellExecute = True})
-                                                      Catch
-                                                      End Try
-                                                  End If
-                                              End Sub
-            ' Position the link label after the sub text is laid out
-            AddHandler _pnlServerLicenseWarn.Layout, Sub(s, ev)
-                                                         _lblSrvWarnLink.Location = New Point(
-                    _pnlServerLicenseWarn.Width - _lblSrvWarnLink.Width - 16,
-                    (_pnlServerLicenseWarn.Height - _lblSrvWarnLink.Height) \ 2)
-                                                     End Sub
-            _pnlServerLicenseWarn.Controls.AddRange({_lblSrvWarnIcon, _lblSrvWarnText, _lblSrvWarnSub, _lblSrvWarnLink})
 
             ' ── Membership UI ────────────────────────────────────────────────────
             _pnlMember = New Panel() With {
@@ -823,7 +752,7 @@ Namespace Forms
             AddHandler _btnMemberBadge.Paint, AddressOf OnBadgeButtonPaint
             AddHandler _btnMemberBadge.Click, Sub(s, e) ShowMemberModal()
 
-            Me.Controls.AddRange({_pnlServerLicenseWarn, _pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlReceivingCoins, _pnlCoinCountdown, _btnDoneCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _lblLicenseWarn, _pnlMemberTrigger, _btnMemberBadge, _pnlModalBackdrop, _pnlMember})
+            Me.Controls.AddRange({_pnlPCBadge, _lblOffline, _lblMessage, _lblSub, _pnlReceivingCoins, _pnlCoinCountdown, _btnDoneCoins, _btnInsertCoin, _pnlIdleShutdown, _pnlStatus, _pnlMemberTrigger, _btnMemberBadge, _pnlModalBackdrop, _pnlMember})
             _btnInsertCoin.BringToFront()
             _btnDoneCoins.BringToFront()
             ' Badge must sit above the pill trigger (so the circle overlaps the pill's left edge)
@@ -1142,7 +1071,7 @@ Namespace Forms
         End Sub
 
         Private Function GetLayoutKey() As String
-            Return $"{_btnMemberBadge.Visible}|{_pnlReceivingCoins.Visible}|{_pnlCoinCountdown.Visible}|{_lblLicenseWarn.Visible}|{_btnInsertCoin.Visible}|{_btnDoneCoins.Visible}"
+            Return $"{_btnMemberBadge.Visible}|{_pnlReceivingCoins.Visible}|{_pnlCoinCountdown.Visible}|{_btnInsertCoin.Visible}|{_btnDoneCoins.Visible}"
         End Function
 
         Private Sub CenterLabels()
@@ -1238,53 +1167,7 @@ Namespace Forms
                     _lblMemberTitle.Size     = New Size(_pnlMember.Width - 80, 28)
                 End If
             End If
-
-            ' License warning — centered, below sub-message
-            If _lblLicenseWarn.Visible Then
-                _lblLicenseWarn.Location = New Point(
-                    (Me.ClientSize.Width - _lblLicenseWarn.Width) \ 2,
-                    _lblSub.Bottom + 24)
-            End If
         End Sub
-
-        ' ── License status ───────────────────────────────────────────────────
-
-        Public Sub ShowLicenseWarning(message As String)
-            If Me.InvokeRequired Then Me.Invoke(Sub() ShowLicenseWarning(message)) : Return
-            _licenseActive = False
-            _lblLicenseWarn.Text = message
-            _lblLicenseWarn.Visible = True
-            _lblMessage.Text = "Software Not Activated"
-            _lblSub.Text = "Contact administrator to activate this PC"
-            CenterLabels()
-        End Sub
-
-        Public Sub HideLicenseWarning()
-            If Me.InvokeRequired Then Me.Invoke(Sub() HideLicenseWarning()) : Return
-            _licenseActive = True
-            _lblLicenseWarn.Visible = False
-            _lblMessage.Text = AppConfig.LockMessage
-            _lblSub.Text = $"Go to the PisoNet unit and select PC {AppConfig.PCNumber:D2}"
-            CenterLabels()
-        End Sub
-
-        Public Sub ShowServerLicenseWarning(dashboardUrl As String)
-            If Me.InvokeRequired Then Me.Invoke(Sub() ShowServerLicenseWarning(dashboardUrl)) : Return
-            _serverDashboardUrl = dashboardUrl
-            _pnlServerLicenseWarn.Visible = True
-        End Sub
-
-        Public Sub HideServerLicenseWarning()
-            If Me.InvokeRequired Then Me.Invoke(Sub() HideServerLicenseWarning()) : Return
-            _serverDashboardUrl = ""
-            _pnlServerLicenseWarn.Visible = False
-        End Sub
-
-        Public ReadOnly Property IsLicenseActive As Boolean
-            Get
-                Return _licenseActive
-            End Get
-        End Property
 
         ' ── Server-status API ─────────────────────────────────────────────────
 
@@ -1707,14 +1590,14 @@ Namespace Forms
         Public Sub UpdateMembershipUI(enabled As Boolean, absorption As Boolean, username As String,
                                        balanceSeconds As Integer, canLogout As Boolean,
                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                       minimumLogoutMinutes As Integer, serverLicensed As Boolean)
+                                       minimumLogoutMinutes As Integer)
             ' Guard against the form being disposed/torn down while a heartbeat callback
             ' is still in flight (app shutdown) — otherwise Invoke throws ObjectDisposedException.
             If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then
                 Me.Invoke(Sub() UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                                     canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
-                                                    minimumLogoutMinutes, serverLicensed))
+                                                    minimumLogoutMinutes))
                 Return
             End If
 

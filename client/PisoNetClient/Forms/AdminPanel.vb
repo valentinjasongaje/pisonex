@@ -109,23 +109,14 @@ Namespace Forms
         Private Shared ReadOnly ColText       As Color = Color.FromArgb(220, 228, 240)
         Private Shared ReadOnly ColDanger     As Color = Color.FromArgb(239, 68, 68)
 
-        ' License tab controls
-        Private _txtLicenseKey  As TextBox
-        Private _lblLicStatus   As Label
-        Private _lblLicDeviceId As Label
-        Private _lblLicExpiry   As Label
-        Private _lblLicVerified As Label
-        Private _lblLicResult   As Label
-        Private _lblLicToken    As Label
-
         ' Nav item definitions
         Private Shared ReadOnly NavLabels() As String = {
             "Connection", "Lock Screen", "Restrictions",
-            "Security", "Notifications", "License"
+            "Security", "Notifications"
         }
         Private Shared ReadOnly NavIcons() As String = {
             ChrW(&H26A1), Char.ConvertFromUtf32(&H1F512), Char.ConvertFromUtf32(&H1F6E1),
-            Char.ConvertFromUtf32(&H1F511), Char.ConvertFromUtf32(&H1F514), ChrW(&H26BF)
+            Char.ConvertFromUtf32(&H1F511), Char.ConvertFromUtf32(&H1F514)
         }
 
         Public Sub New()
@@ -387,8 +378,7 @@ Namespace Forms
                 AddressOf BuildLockScreenPage,
                 AddressOf BuildRestrictionsPage,
                 AddressOf BuildSecurityPage,
-                AddressOf BuildNotificationsPage,
-                AddressOf BuildLicensePage
+                AddressOf BuildNotificationsPage
             }
             For i = 0 To builders.Length - 1
                 Dim page = builders(i)()
@@ -1235,193 +1225,6 @@ Namespace Forms
                 dlg.FileName = _txtImgPath.Text
             End If
             If dlg.ShowDialog(Me) = DialogResult.OK Then _txtImgPath.Text = dlg.FileName
-        End Sub
-
-        ' ── License page ─────────────────────────────────────────────────────
-
-        Private Function BuildLicensePage() As Panel
-            Dim page = ScrollPage()
-            Dim y = 16
-
-            page.Controls.Add(PageTitle("License", New Point(LM, y))) : y += 34
-
-            ' Status card
-            Dim statusCard = CardPanel(New Point(LM, y), New Size(IW, 252))
-            Dim cy = 14
-            statusCard.Controls.Add(SectionLabel("Activation Status", New Point(14, cy))) : cy += 26
-
-            _lblLicStatus = New Label() With {
-                .AutoSize = True,
-                .Location = New Point(14, cy),
-                .Font = New Font("Segoe UI", 11, FontStyle.Bold)
-            }
-            statusCard.Controls.Add(_lblLicStatus) : cy += 30
-
-            statusCard.Controls.Add(SmallLabel("Device ID", New Point(14, cy))) : cy += 18
-            _lblLicDeviceId = New Label() With {
-                .Text = LicenseService.GetDeviceId(),
-                .AutoSize = False,
-                .Size = New Size(IW - 60, 18),
-                .Location = New Point(14, cy),
-                .ForeColor = ColInfo,
-                .Font = New Font("Consolas", 8)
-            }
-            statusCard.Controls.Add(_lblLicDeviceId) : cy += 24
-
-            statusCard.Controls.Add(SmallLabel("Expires At", New Point(14, cy)))
-            statusCard.Controls.Add(SmallLabel("Last Verified", New Point(224, cy))) : cy += 18
-            _lblLicExpiry = New Label() With {
-                .Text = If(String.IsNullOrEmpty(LicenseStore.LicenseExpiresAt), "Lifetime / N/A", LicenseStore.LicenseExpiresAt),
-                .AutoSize = True, .Location = New Point(14, cy), .ForeColor = ColSmall
-            }
-            _lblLicVerified = New Label() With {
-                .Text = If(String.IsNullOrEmpty(LicenseStore.LicenseLastVerified), "—", LicenseStore.LicenseLastVerified),
-                .AutoSize = True, .Location = New Point(224, cy), .ForeColor = ColSmall
-            }
-            statusCard.Controls.Add(_lblLicExpiry)
-            statusCard.Controls.Add(_lblLicVerified)
-            cy += 24
-
-            ' Token diagnostic — shows exactly why a machine is activated vs trial
-            ' (token present / signature valid / device match / freshness).
-            statusCard.Controls.Add(SmallLabel("License Token", New Point(14, cy))) : cy += 18
-            _lblLicToken = New Label() With {
-                .Text = LicenseService.GetTokenDiagnostic(),
-                .AutoSize = False,
-                .Size = New Size(IW - 60, 32),
-                .Location = New Point(14, cy),
-                .ForeColor = ColSmall,
-                .Font = New Font("Segoe UI", 8)
-            }
-            statusCard.Controls.Add(_lblLicToken)
-
-            page.Controls.Add(statusCard) : y += 262
-
-            ' Activate card
-            Dim actCard = CardPanel(New Point(LM, y), New Size(IW, 160))
-            cy = 14
-            actCard.Controls.Add(SectionLabel("Enter License Key", New Point(14, cy))) : cy += 26
-
-            actCard.Controls.Add(SmallLabel("License Key", New Point(14, cy))) : cy += 18
-            _txtLicenseKey = DarkTextBox(New Point(14, cy), IW - 32, LicenseService.GetMaskedKey())
-            _txtLicenseKey.MaxLength = 24
-            _txtLicenseKey.Font = New Font("Consolas", 10)
-            _txtLicenseKey.CharacterCasing = CharacterCasing.Upper
-            actCard.Controls.Add(_txtLicenseKey) : cy += 34
-
-            Dim btnActivate = New Button() With {
-                .Text = "Activate",
-                .Location = New Point(14, cy),
-                .Size = New Size(120, 32),
-                .BackColor = ColAccent,
-                .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .Font = New Font("Segoe UI", 9, FontStyle.Bold)
-            }
-            btnActivate.FlatAppearance.BorderSize = 0
-            AddHandler btnActivate.Click, AddressOf OnActivateLicense
-            actCard.Controls.Add(btnActivate)
-
-            Dim btnDeactivate = New Button() With {
-                .Text = "Deactivate",
-                .Location = New Point(146, cy),
-                .Size = New Size(120, 32),
-                .BackColor = ColDanger,
-                .ForeColor = Color.White,
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .Font = New Font("Segoe UI", 9, FontStyle.Bold),
-                .Enabled = LicenseService.IsActivated()
-            }
-            btnDeactivate.FlatAppearance.BorderSize = 0
-            AddHandler btnDeactivate.Click, AddressOf OnDeactivateLicense
-            actCard.Controls.Add(btnDeactivate) : cy += 38
-
-            _lblLicResult = New Label() With {
-                .AutoSize = True, .Location = New Point(14, cy),
-                .ForeColor = ColInfo, .Text = ""
-            }
-            actCard.Controls.Add(_lblLicResult)
-
-            page.Controls.Add(actCard)
-
-            ' Update status display
-            UpdateLicenseStatusDisplay()
-
-            Return page
-        End Function
-
-        Private Sub UpdateLicenseStatusDisplay()
-            If _lblLicStatus Is Nothing Then Return
-
-            If _lblLicToken IsNot Nothing Then
-                _lblLicToken.Text = LicenseService.GetTokenDiagnostic()
-            End If
-
-            Dim status = LicenseService.GetStatus()
-            Select Case status
-                Case LicenseStatus.Activated
-                    _lblLicStatus.Text = "Activated"
-                    _lblLicStatus.ForeColor = Color.FromArgb(34, 197, 94)
-                Case LicenseStatus.Trial
-                    _lblLicStatus.Text = $"Trial — {LicenseService.TrialDaysRemaining()} day(s) remaining"
-                    _lblLicStatus.ForeColor = Color.FromArgb(245, 158, 11)
-                Case LicenseStatus.OfflineLocked
-                    _lblLicStatus.Text = "Offline Locked — Cannot verify activation"
-                    _lblLicStatus.ForeColor = Color.FromArgb(239, 68, 68)
-                Case LicenseStatus.Expired
-                    _lblLicStatus.Text = "Expired"
-                    _lblLicStatus.ForeColor = Color.FromArgb(239, 68, 68)
-            End Select
-        End Sub
-
-        Private Async Sub OnActivateLicense(sender As Object, e As EventArgs)
-            Dim key = _txtLicenseKey.Text.Trim().ToUpper()
-            If String.IsNullOrEmpty(key) Then
-                _lblLicResult.Text = "Please enter a license key."
-                _lblLicResult.ForeColor = Color.FromArgb(245, 158, 11)
-                Return
-            End If
-
-            _lblLicResult.Text = "Activating..."
-            _lblLicResult.ForeColor = ColInfo
-            CType(sender, Button).Enabled = False
-
-            Dim result = Await LicenseService.ActivateAsync(key)
-
-            If result.Success Then
-                _lblLicResult.Text = "License activated successfully!"
-                _lblLicResult.ForeColor = Color.FromArgb(34, 197, 94)
-                _lblLicExpiry.Text = If(String.IsNullOrEmpty(result.ExpiresAt), "Lifetime", result.ExpiresAt)
-                _lblLicVerified.Text = DateTime.UtcNow.ToString("o")
-            Else
-                _lblLicResult.Text = result.ErrorMessage
-                _lblLicResult.ForeColor = Color.FromArgb(239, 68, 68)
-            End If
-
-            CType(sender, Button).Enabled = True
-            UpdateLicenseStatusDisplay()
-        End Sub
-
-        Private Async Sub OnDeactivateLicense(sender As Object, e As EventArgs)
-            Dim answer = MessageBox.Show(
-                "Deactivate this license? The software will revert to trial mode.",
-                "Deactivate", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
-            If answer <> DialogResult.Yes Then Return
-
-            _lblLicResult.Text = "Deactivating..."
-            _lblLicResult.ForeColor = ColInfo
-
-            Await LicenseService.DeactivateAsync()
-
-            _lblLicResult.Text = "License deactivated."
-            _lblLicResult.ForeColor = Color.FromArgb(245, 158, 11)
-            _txtLicenseKey.Text = ""
-            _lblLicExpiry.Text = "N/A"
-            _lblLicVerified.Text = "—"
-            CType(sender, Button).Enabled = False
-            UpdateLicenseStatusDisplay()
         End Sub
 
         Private Sub OnSave(sender As Object, e As EventArgs)

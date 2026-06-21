@@ -107,10 +107,6 @@ def heartbeat(
         scheme = request.url.scheme
         wp_url = f"{scheme}://{host}{wp_url}"
 
-    # Server license status
-    from main import license_service
-    srv_licensed = license_service.is_active() if license_service else True
-
     # ── Membership fields ─────────────────────────────────────────
     membership_enabled = False
     absorption_enabled = False
@@ -176,10 +172,6 @@ def heartbeat(
     # Minimum logout minutes (from membership config, 0 if not configured)
     minimum_logout_minutes = cfg.minimum_logout_minutes if cfg else 0
 
-    # Today's earnings for this PC — piggybacked onto heartbeat so the
-    # client can forward them to pisonex.com on its hourly status ping.
-    today_earnings = svc.get_today_earnings(pc_number)
-
     return PCHeartbeatResponse(
         is_locked=is_locked,
         remaining_seconds=remaining_sec,
@@ -192,7 +184,6 @@ def heartbeat(
         coin_slot_enabled=coins_ok,
         wallpaper_url=wp_url,
         wallpaper_hash=wp_hash,
-        server_licensed=srv_licensed,
         membership_enabled=membership_enabled,
         absorption_enabled=absorption_enabled,
         member_username=member_username,
@@ -204,10 +195,6 @@ def heartbeat(
         coin_progress_pesos=coin_progress_pesos,
         coin_progress_seconds=coin_progress_seconds,
         minimum_logout_minutes=minimum_logout_minutes,
-        branch_name=settings.BRANCH_NAME,
-        today_pesos=today_earnings["total_pesos"],
-        today_sessions=today_earnings["total_sessions"],
-        today_minutes=today_earnings["total_minutes"],
         # When an admin is watching this PC AND FFmpeg streaming is enabled,
         # tell the client to ramp up; 0 = use own config (1 s JPEG snapshots).
         capture_interval_ms=(

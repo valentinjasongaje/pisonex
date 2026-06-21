@@ -6,7 +6,7 @@ Imports System.Text.Json
 Namespace Config
 
     ''' <summary>
-    ''' Persists license data as a DPAPI-encrypted binary file in %ProgramData%\PisoNet\.
+    ''' Persists the admin PIN hash as a DPAPI-encrypted binary file in %ProgramData%\PisoNet\.
     ''' The file is encrypted to the local machine key — unreadable and unmodifiable
     ''' by users, and non-portable (decryption fails on any other machine).
     ''' </summary>
@@ -15,8 +15,6 @@ Namespace Config
         Private ReadOnly _filePath As String = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "PisoNet", "license.dat")
-
-        ' ── In-memory cache (loaded once on first access) ─────────────────
 
         Private _cache As Dictionary(Of String, String) = Nothing
         Private ReadOnly _lock As New Object()
@@ -28,14 +26,6 @@ Namespace Config
                 Return _cache
             End SyncLock
         End Function
-
-        Private Sub Flush()
-            SyncLock _lock
-                WriteToDisk(_cache)
-            End SyncLock
-        End Sub
-
-        ' ── Disk I/O ─────────────────────────────────────────────────────
 
         Private Function ReadFromDisk() As Dictionary(Of String, String)
             Try
@@ -54,7 +44,6 @@ Namespace Config
                 Next
                 Return result
             Catch
-                ' File is missing, corrupted, or was tampered with — start fresh
                 Return New Dictionary(Of String, String)()
             End Try
         End Function
@@ -73,8 +62,6 @@ Namespace Config
             End Try
         End Sub
 
-        ' ── Generic get/set ──────────────────────────────────────────────
-
         Private Function GetValue(key As String) As String
             Dim d = Load()
             Dim v As String = Nothing
@@ -88,124 +75,6 @@ Namespace Config
                 WriteToDisk(_cache)
             End SyncLock
         End Sub
-
-        Private Sub RemoveValue(key As String)
-            SyncLock _lock
-                If _cache Is Nothing Then _cache = ReadFromDisk()
-                _cache.Remove(key)
-                WriteToDisk(_cache)
-            End SyncLock
-        End Sub
-
-        ' ── License fields ───────────────────────────────────────────────
-
-        Public Property LicenseKey As String
-            Get
-                Return GetValue("LicenseKey")
-            End Get
-            Set(v As String)
-                SetValue("LicenseKey", v)
-            End Set
-        End Property
-
-        Public Property LicenseDeviceId As String
-            Get
-                Return GetValue("LicenseDeviceId")
-            End Get
-            Set(v As String)
-                SetValue("LicenseDeviceId", v)
-            End Set
-        End Property
-
-        Public Property LicenseActivatedAt As String
-            Get
-                Return GetValue("LicenseActivatedAt")
-            End Get
-            Set(v As String)
-                SetValue("LicenseActivatedAt", v)
-            End Set
-        End Property
-
-        Public Property LicenseExpiresAt As String
-            Get
-                Return GetValue("LicenseExpiresAt")
-            End Get
-            Set(v As String)
-                SetValue("LicenseExpiresAt", v)
-            End Set
-        End Property
-
-        Public Property LicenseLastVerified As String
-            Get
-                Return GetValue("LicenseLastVerified")
-            End Get
-            Set(v As String)
-                SetValue("LicenseLastVerified", v)
-            End Set
-        End Property
-
-        Public Property LicenseFirstRunDate As String
-            Get
-                Return GetValue("LicenseFirstRunDate")
-            End Get
-            Set(v As String)
-                SetValue("LicenseFirstRunDate", v)
-            End Set
-        End Property
-
-        ''' <summary>
-        ''' "true" once pisonex.com has anchored the trial clock at least once for
-        ''' this install. Required to run in trial mode — refusing to start when
-        ''' missing kills the offline-install trial-reset attack (install offline,
-        ''' use for 14 days, repeat with a fresh first_seen_at on first online ping).
-        ''' Persisted in the DPAPI-encrypted license.dat so deleting the file forces
-        ''' a re-anchor.
-        ''' </summary>
-        Public Property TrialAnchored As Boolean
-            Get
-                Return GetValue("TrialAnchored") = "true"
-            End Get
-            Set(v As Boolean)
-                SetValue("TrialAnchored", If(v, "true", ""))
-            End Set
-        End Property
-
-        ''' <summary>
-        ''' ES256-signed JWT from pisonex.com. Stored alongside license data.
-        ''' Verified on every load — file tampering breaks the signature.
-        ''' </summary>
-        Public Property LicenseToken As String
-            Get
-                Return GetValue("LicenseToken")
-            End Get
-            Set(v As String)
-                SetValue("LicenseToken", v)
-            End Set
-        End Property
-
-        ''' <summary>ISO timestamp of first consecutive network failure. Cleared on success.</summary>
-        Public Property OfflineSince As String
-            Get
-                Return GetValue("OfflineSince")
-            End Get
-            Set(v As String)
-                SetValue("OfflineSince", v)
-            End Set
-        End Property
-
-        ''' <summary>
-        ''' Set to "true" when pisonex.com explicitly rejects the device (revoked/inactive).
-        ''' No offline grace applies — is_active returns False immediately.
-        ''' Cleared on next successful verification.
-        ''' </summary>
-        Public Property ServerRejected As Boolean
-            Get
-                Return GetValue("ServerRejected") = "true"
-            End Get
-            Set(v As Boolean)
-                SetValue("ServerRejected", If(v, "true", ""))
-            End Set
-        End Property
 
         ' ── Admin PIN (hashed) ────────────────────────────────────────────
 
@@ -226,9 +95,7 @@ Namespace Config
         Public Function VerifyAdminPin(enteredPin As String) As Boolean
             Dim storedHash = GetValue("AdminPinHash")
 
-            ' First-time migration: no hash in the encrypted store yet
             If String.IsNullOrEmpty(storedHash) Then
-                ' Read legacy plain-text PIN from registry (one-time migration)
                 Dim legacyPin = AppConfig.AdminPin
                 storedHash = HashPin(legacyPin)
                 SetValue("AdminPinHash", storedHash)
@@ -256,24 +123,6 @@ Namespace Config
                 Encoding.UTF8.GetBytes(If(pin, "")))
             Return BitConverter.ToString(bytes).Replace("-", "").ToLower()
         End Function
-
-        ''' <summary>
-        ''' Clears activation fields only. Keeps FirstRunDate so the trial clock
-        ''' is not reset on deactivation.
-        ''' </summary>
-        Public Sub ClearActivation()
-            SyncLock _lock
-                If _cache Is Nothing Then _cache = ReadFromDisk()
-                _cache.Remove("LicenseKey")
-                _cache.Remove("LicenseActivatedAt")
-                _cache.Remove("LicenseExpiresAt")
-                _cache.Remove("LicenseLastVerified")
-                _cache.Remove("LicenseToken")
-                _cache.Remove("OfflineSince")
-                _cache.Remove("ServerRejected")
-                WriteToDisk(_cache)
-            End SyncLock
-        End Sub
 
     End Module
 

@@ -24,8 +24,8 @@ class Settings(BaseSettings):
 
     # Branch name for this installation — shown in pisonex.com customer portal.
     # Set this so the portal can group PCs by branch (e.g. "Tomas Morato Branch").
-    # Leave empty to show PCs under "Unassigned" in the portal.
-    BRANCH_NAME: str = ""
+    # Defaults to "My Internet Cafe" so fresh installs have a usable identifier.
+    BRANCH_NAME: str = "My Internet Cafe"
 
     # PC client API key — shared secret sent in X-API-Key header by all clients.
     # Leave empty ("") to disable auth (default, backward-compatible).

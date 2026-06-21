@@ -23,8 +23,6 @@ class PCHeartbeatResponse(BaseModel):
     # Server-pushed wallpaper — optional, ignored by older clients
     wallpaper_url:  Optional[str] = None   # full URL to download wallpaper image
     wallpaper_hash: Optional[str] = None   # MD5 hex — client compares to cached hash
-    # Server license status — clients can show warnings if server is unlicensed
-    server_licensed: bool = True
     # Membership fields
     membership_enabled: bool = False
     absorption_enabled: bool = False
@@ -37,11 +35,6 @@ class PCHeartbeatResponse(BaseModel):
     coin_progress_pesos: int = 0
     coin_progress_seconds: int = 0
     minimum_logout_minutes: int = 0
-    # Branch / earnings fields — piggybacked onto the hourly pisonex.com status ping
-    branch_name: str = ""
-    today_pesos: int = 0
-    today_sessions: int = 0
-    today_minutes: int = 0
     # Live-stream hint: >0 means server wants client to capture at this rate (ms),
     # 0 means client should use its own configured interval.
     capture_interval_ms: int = 0

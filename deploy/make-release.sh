@@ -172,13 +172,13 @@ if [ -f "$ENV_FILE" ]; then
     done
     plan "  ADMIN_PASSWORD → admin123  (kept at default — customer changes via dashboard)"
     plan "  CLIENT_API_KEY → (empty)   (customer enables/generates via dashboard Security card)"
-    plan "  BRANCH_NAME    → (empty)   (customer sets via dashboard Branch card)"
+    plan "  BRANCH_NAME    → My Internet Cafe   (customer renames via dashboard Branch card)"
     if ! $DRY_RUN; then
         sed -i -E 's|^SECRET_KEY=.*|SECRET_KEY=changeme|'             "$ENV_FILE"
         sed -i -E 's|^LICENSE_HMAC_SECRET=.*|LICENSE_HMAC_SECRET=changeme|' "$ENV_FILE"
         sed -i -E 's|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=admin123|'     "$ENV_FILE"
         sed -i -E 's|^CLIENT_API_KEY=.*|CLIENT_API_KEY=|'             "$ENV_FILE"
-        sed -i -E 's|^BRANCH_NAME=.*|BRANCH_NAME=|'                   "$ENV_FILE"
+        sed -i -E 's|^BRANCH_NAME=.*|BRANCH_NAME=My Internet Cafe|'   "$ENV_FILE"
         ok ".env reset"
     fi
 else

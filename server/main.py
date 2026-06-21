@@ -166,12 +166,16 @@ async def lifespan(app: FastAPI):
     # Background task: nightly earnings archive to pisonex.com
     earnings_task = asyncio.create_task(_nightly_earnings_sync_loop())
 
+    # Background task: hourly status ping to pisonex.com (live branch totals)
+    status_task = asyncio.create_task(_hourly_status_ping_loop())
+
     yield
 
     # Shutdown
     expire_task.cancel()
     license_task.cancel()
     membership_task.cancel()
+    status_task.cancel()
     earnings_task.cancel()
     if hw_controller:
         hw_controller.cleanup()
@@ -563,6 +567,74 @@ async def _nightly_earnings_sync_loop():
 
         # Sleep 24 hours until the next midnight cycle
         await asyncio.sleep(24 * 60 * 60)
+
+
+async def _hourly_status_ping_loop():
+    """
+    Once per hour, POST today's branch totals to pisonex.com /api/status.
+    Used by the customer portal to display live (≤ 1 h stale) branch earnings.
+    Replaces the per-PC client-side ping that was removed alongside client
+    licensing — the server now owns this telemetry.
+
+    Skipped if no pisonex.com license_key is available.
+    """
+    import httpx
+
+    # Sleep 5 minutes after startup so the first ping carries real activity
+    # rather than zeros, then enter the hourly cadence.
+    await asyncio.sleep(5 * 60)
+
+    while True:
+        try:
+            license_key = ""
+            if license_service and hasattr(license_service, "_data"):
+                license_key = license_service._data.get("license_key", "") or ""
+
+            if not license_key:
+                logger.debug("Hourly status ping skipped — no pisonex.com license key")
+            else:
+                device_id = license_service.get_device_id()
+                db = SessionLocal()
+                try:
+                    svc = SessionService(db)
+                    totals = svc.get_today_earnings()  # branch-wide totals
+                finally:
+                    db.close()
+
+                payload = {
+                    "device_id": device_id,
+                    "device_type": "server",
+                    "license_key": license_key,
+                    "branch_name": settings.BRANCH_NAME,
+                    "today_pesos": totals["total_pesos"],
+                    "today_sessions": totals["total_sessions"],
+                    "today_minutes": totals["total_minutes"],
+                }
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        "https://www.pisonex.com/api/status",
+                        json=payload,
+                    )
+                    if resp.status_code in (200, 201):
+                        logger.debug(
+                            "Hourly status ping ok — ₱%d, %d sessions, %d min",
+                            totals["total_pesos"],
+                            totals["total_sessions"],
+                            totals["total_minutes"],
+                        )
+                    else:
+                        logger.warning(
+                            "Hourly status ping HTTP %d: %s",
+                            resp.status_code,
+                            resp.text[:200],
+                        )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Hourly status ping error: %s", e)
+
+        await asyncio.sleep(60 * 60)
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────

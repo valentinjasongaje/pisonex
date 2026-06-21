@@ -52,8 +52,6 @@ Namespace Services
                 _lockForm.Invoke(Sub() UnlockPC())
                 Return
             End If
-            ' Defense-in-depth: never unlock if license is not active
-            If Not LicenseService.IsActive() Then Return
             ' While the coin slot is open keep the lock form visible so the user
             ' can insert additional coins.  Record that an unlock is waiting and
             ' hide the form once the slot actually closes (ShowReceivingCoins(False)).
@@ -76,29 +74,13 @@ Namespace Services
             _lockForm.RefreshAppearance()
         End Sub
 
-        Public Sub ShowLicenseWarning(message As String)
-            _lockForm.ShowLicenseWarning(message)
-        End Sub
-
-        Public Sub HideLicenseWarning()
-            _lockForm.HideLicenseWarning()
-        End Sub
-
-        Public Sub ShowServerLicenseWarning(dashboardUrl As String)
-            _lockForm.ShowServerLicenseWarning(dashboardUrl)
-        End Sub
-
-        Public Sub HideServerLicenseWarning()
-            _lockForm.HideServerLicenseWarning()
-        End Sub
-
         Public Sub UpdateMembershipUI(enabled As Boolean, absorption As Boolean, username As String,
                                        balanceSeconds As Integer, canLogout As Boolean,
                                        zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                       minimumLogoutMinutes As Integer, serverLicensed As Boolean)
+                                       minimumLogoutMinutes As Integer)
             _lockForm.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                           canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
-                                          minimumLogoutMinutes, serverLicensed)
+                                          minimumLogoutMinutes)
         End Sub
 
         Public Sub UpdateCoinProgress(pesos As Integer, seconds As Integer)
@@ -147,12 +129,6 @@ Namespace Services
         Public Sub ShowMemberSuccess(message As String)
             _lockForm.ShowMemberSuccess(message)
         End Sub
-
-        Public ReadOnly Property IsLicenseActive As Boolean
-            Get
-                Return _lockForm.IsLicenseActive
-            End Get
-        End Property
 
         ''' <summary>True while the hardware coin slot is open for this PC.</summary>
         Public ReadOnly Property IsReceivingCoins As Boolean

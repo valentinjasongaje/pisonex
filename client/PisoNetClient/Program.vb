@@ -85,40 +85,6 @@ Module Program
         _guardTimer.Start()
 #End If
 
-        ' ── License initialization ────────────────────────────────────────
-        ' SyncStartupStatusAsync runs first: it restores LicenseFirstRunDate from
-        ' pisonex.com (first_seen_at) if license.dat was deleted. EnsureFirstRunDate
-        ' then only writes a fresh date if the server had no record either.
-        LicenseService.SyncStartupStatusAsync().GetAwaiter().GetResult()
-
-        ' Trial-anchor gate: a trial install must have pinged pisonex.com at least
-        ' once. Without this gate, an attacker could install offline, run the full
-        ' 14-day trial, then ever-so-slightly re-install to reset the clock without
-        ' the server ever recording a first_seen_at for the device.
-        If Not LicenseService.IsTrialAnchored() Then
-            MessageBox.Show(
-                "Pisonex requires internet access on first start to activate your trial." & Environment.NewLine & Environment.NewLine &
-                "Please connect this PC to the internet and re-launch the application.",
-                "Activation Required",
-                MessageBoxButtons.OK, MessageBoxIcon.Information)
-            Application.Exit()
-            Return
-        End If
-
-        LicenseService.EnsureFirstRunDate()
-        LicenseService.StartVerificationTimer()
-
-        ' Periodic license enforcement — catches expiry during active sessions
-        Dim licenseEnforcementTimer = New System.Timers.Timer(10 * 60 * 1000) ' every 10 min
-        AddHandler licenseEnforcementTimer.Elapsed, Sub(s, e)
-            If Not LicenseService.IsActive() Then
-                _lockMgr.LockPC()
-                CheckLicenseStatus()
-            End If
-        End Sub
-        licenseEnforcementTimer.AutoReset = True
-        licenseEnforcementTimer.Start()
-
         ' ── Apply Windows restrictions ────────────────────────────────────
         WindowsPolicy.Apply()
 
@@ -129,7 +95,7 @@ Module Program
         _api = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)
         _memberSvc = New MemberService(AppConfig.ServerUrl)
         _lockMgr = New LockManager()
-        _session = New SessionManager(_api, _lockMgr, Function() LicenseService.IsActive())
+        _session = New SessionManager(_api, _lockMgr)
         _overlay = New TimerOverlay()
         _tray = New SystemTray()
         _notifs = New NotificationService(_overlay)
@@ -176,9 +142,6 @@ Module Program
         ' ── Lock immediately on startup ──────────────────────────────────
         _lockMgr.LockPC()
 
-        ' ── Check license status ────────────────────────────────────────
-        CheckLicenseStatus()
-
         ' ── Defer session start until the message loop is running ────────
         ' This ensures Invoke works correctly for UnlockPC and other UI
         ' calls triggered by the first heartbeat response.
@@ -205,17 +168,6 @@ Module Program
             ' Start performance metrics reporting
             _metrics = New MetricsService(_api)
             _metrics.Start()
-
-            ' The startup SyncStartupStatusAsync() ran before heartbeats started,
-            ' so it sent today_pesos=0 and overwrote any previous value in devicePings.
-            ' Re-sync after 30 s once heartbeats have populated the earnings cache.
-            Dim earlyEarningsSync = New Timer() With {.Interval = 30_000}
-            AddHandler earlyEarningsSync.Tick, Async Sub(ss, ee)
-                earlyEarningsSync.Stop()
-                earlyEarningsSync.Dispose()
-                Await LicenseService.SyncStartupStatusAsync()
-            End Sub
-            earlyEarningsSync.Start()
         End Sub
         startTimer.Start()
 
@@ -232,13 +184,6 @@ Module Program
     Private Sub OnSessionStarted()
         If _overlay.InvokeRequired Then
             _overlay.Invoke(Sub() OnSessionStarted())
-            Return
-        End If
-
-        ' Block session start if license is not active
-        If Not LicenseService.IsActive() Then
-            CheckLicenseStatus()
-            _lockMgr.LockPC()   ' re-lock — UnlockPC was already called in SessionManager
             Return
         End If
 
@@ -348,9 +293,8 @@ Module Program
     End Sub
 
     Private Sub OnReceivingCoinsChanged(isReceiving As Boolean)
-        Dim active = If(LicenseService.IsActive(), isReceiving, False)
-        _lockMgr.ShowReceivingCoins(active)
-        _overlay.SetReceivingCoins(active)
+        _lockMgr.ShowReceivingCoins(isReceiving)
+        _overlay.SetReceivingCoins(isReceiving)
         If Not isReceiving Then
             ' Slot just closed — if a session started while the slot was open
             ' the overlay was held back so the lock screen could own the
@@ -404,8 +348,6 @@ Module Program
                     msg = "This PC appears offline to the server. Please check your connection."
                 ElseIf detail.Contains("disabled") Then
                     msg = "The coin slot has been disabled. Please contact the cashier."
-                ElseIf detail.Contains("license") Then
-                    msg = "The server license has expired. Please contact the administrator."
                 ElseIf detail.Contains("hardware") OrElse detail.Contains("not available") Then
                     msg = "This server has no coin slot hardware. Please contact the cashier."
                 Else
@@ -540,26 +482,14 @@ Module Program
     Private Sub OnMembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                      balanceSeconds As Integer, canLogout As Boolean,
                                      zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                     minimumLogoutMinutes As Integer, serverLicensed As Boolean)
+                                     minimumLogoutMinutes As Integer)
         _lockMgr.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                      canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
-                                     minimumLogoutMinutes, serverLicensed)
+                                     minimumLogoutMinutes)
         _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout, minimumLogoutMinutes)
-
-        ' Show/hide server license warning independently of the client license check
-        If Not serverLicensed Then
-            Dim dashboardUrl = AppConfig.ServerUrl.TrimEnd("/"c) & "/dashboard"
-            _lockMgr.ShowServerLicenseWarning(dashboardUrl)
-        Else
-            _lockMgr.HideServerLicenseWarning()
-        End If
     End Sub
 
     Private Sub OnMemberLogin(username As String, password As String)
-        If Not LicenseService.IsActive() Then
-            _lockMgr.ShowMemberError("License expired. Contact administrator to activate this PC.")
-            Return
-        End If
         Task.Run(Async Function()
             Dim result = Await _memberSvc.LoginAsync(AppConfig.PCNumber, username, password)
             If result.success Then
@@ -578,10 +508,6 @@ Module Program
     End Sub
 
     Private Sub OnMemberRegister(username As String, password As String)
-        If Not LicenseService.IsActive() Then
-            _lockMgr.ShowMemberError("License expired. Contact administrator to activate this PC.")
-            Return
-        End If
         Task.Run(Async Function()
                      Dim result = Await _memberSvc.RegisterAsync(AppConfig.PCNumber, username, password)
                      If result.success Then
@@ -726,24 +652,6 @@ Module Program
     Private Sub EnsureGuardRunning()
         If Process.GetProcessesByName("pnxsystem").Length > 0 Then Return
         SpawnGuard()
-    End Sub
-
-    ' ── License check ────────────────────────────────────────────────────
-
-    Private Sub CheckLicenseStatus()
-        Dim status = LicenseService.GetStatus()
-        Select Case status
-            Case LicenseStatus.Expired
-                _lockMgr.ShowLicenseWarning(
-                    "Trial expired. Contact administrator to activate this PC.")
-            Case LicenseStatus.OfflineLocked
-                _lockMgr.ShowLicenseWarning(
-                    "Activation cannot be confirmed. Please connect to the internet.")
-            Case LicenseStatus.Trial
-                ' Trial active — no warning needed, but could show subtle trial indicator
-            Case LicenseStatus.Activated
-                _lockMgr.HideLicenseWarning()
-        End Select
     End Sub
 
     ' ── Windows startup registration ──────────────────────────────────────

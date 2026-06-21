@@ -156,7 +156,6 @@ curl -X POST http://192.168.1.100/api/pc/heartbeat/1
   "coin_slot_enabled": true,
   "wallpaper_url": null,
   "wallpaper_hash": null,
-  "server_licensed": true,
   "membership_enabled": false,
   "absorption_enabled": false,
   "member_username": null,
@@ -165,15 +164,11 @@ curl -X POST http://192.168.1.100/api/pc/heartbeat/1
   "zero_time_logout_seconds": 0,
   "idle_shutdown_seconds": 0,
   "receiving_coins": false,
-  "minimum_logout_minutes": 10,
-  "branch_name": "Tomas Morato Branch",
-  "today_pesos": 250,
-  "today_sessions": 8,
-  "today_minutes": 480
+  "minimum_logout_minutes": 10
 }
 ```
 
-> **Branch/earnings fields** (added v4.0): `branch_name` is from the server's `BRANCH_NAME` config. `today_pesos`, `today_sessions`, `today_minutes` are the running totals for this PC since UTC midnight. The client forwards these to `pisonex.com/api/status` on its hourly ping so the customer portal can display live branch earnings. Empty string for `branch_name` means the server has no branch configured.
+> **Branch/earnings telemetry** (changed): the per-PC `branch_name`/`today_pesos`/`today_sessions`/`today_minutes` and `server_licensed` fields were removed from this response. The server now POSTs branch totals directly to `pisonex.com/api/status` on an hourly background loop (see `_hourly_status_ping_loop` in `main.py`), so the client no longer needs to forward them.
 
 **Response `200 OK` — No session, PC locked**
 ```json
