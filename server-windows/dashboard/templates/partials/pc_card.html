@@ -1,41 +1,106 @@
 {% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
+{% set _tsec = (pc.remaining_minutes or 0) * 60 + (pc.remaining_seconds or 0) %}
 <div class="pc-card pc-{{ state }}">
+  {# ── Header: PC number + status pill ─────────────────────────────────── #}
   <div class="pc-header">
     <span class="pc-number">PC {{ "%02d" | format(pc.pc_number) }}</span>
-    <span class="pc-badge badge-{{ state }}">
-      {% if not pc.is_online %}OFFLINE
-      {% elif not pc.is_locked %}ACTIVE
-      {% else %}LOCKED{% endif %}
+    <span class="pc-pill pill-{{ state }}">
+      <span class="pc-pill-dot"></span>
+      {% if not pc.is_online %}Offline
+      {% elif not pc.is_locked %}Active
+      {% else %}Locked{% endif %}
     </span>
   </div>
 
-  <div class="pc-body">
-    {% if not pc.is_locked and (pc.remaining_minutes > 0 or pc.remaining_seconds > 0) %}
-    {% set _tsec = pc.remaining_minutes * 60 + pc.remaining_seconds %}
+  {# ── Center icon ─────────────────────────────────────────────────────── #}
+  <div class="pc-icon-wrap" aria-hidden="true">
+    <div class="pc-icon-halo"></div>
+    <div class="pc-icon">
+      {# Inline monitor SVG so we don't need an external icon font. #}
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2.5" y="4" width="19" height="13" rx="2.2" stroke="currentColor" stroke-width="1.7"/>
+        <path d="M8.5 20.5h7M12 17.5v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      </svg>
+      {% if not pc.is_online %}
+      {# Slash overlay when offline #}
+      <svg class="pc-icon-overlay" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4l16 16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      </svg>
+      {% elif pc.is_locked %}
+      {# Lock overlay in the corner when locked #}
+      <span class="pc-icon-badge" title="Locked">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="5" y="11" width="14" height="10" rx="2" fill="currentColor"/>
+          <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2" fill="none"/>
+        </svg>
+      </span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Status block: timer / idle / last-seen ──────────────────────────── #}
+  <div class="pc-status">
+    {% if state == "active" and _tsec > 0 %}
     {% set _h = _tsec // 3600 %}{% set _m = (_tsec % 3600) // 60 %}{% set _s = _tsec % 60 %}
-    <div class="pc-timer" data-remaining-sec="{{ _tsec }}">{{ _h }}h {{ _m }}m {{ "%02d" | format(_s) }}s</div>
-    {% elif pc.is_online %}
-    <div class="pc-idle">Idle</div>
+    <div class="pc-timer" data-remaining-sec="{{ _tsec }}">
+      {{ "%02d" | format(_h) }}:{{ "%02d" | format(_m) }}:{{ "%02d" | format(_s) }}
+    </div>
+    <div class="pc-status-sub">remaining</div>
+    {% elif state == "locked" %}
+    <div class="pc-status-label">Idle</div>
+    <div class="pc-status-sub">Waiting for coins</div>
     {% else %}
-    <div class="pc-offline-msg">{{ pc.last_seen.strftime('%H:%M') if pc.last_seen else "Never" }}</div>
-    {% endif %}
-    <div class="pc-ip">{{ pc.ip_address or "—" }}</div>
-    {% if pc.membership_enabled and pc.member_username %}
-    <div class="pc-member-badge">👤 {{ pc.member_username }}</div>
+    <div class="pc-status-label">Offline</div>
+    <div class="pc-status-sub">
+      {% if pc.last_seen %}Last seen {{ pc.last_seen.strftime('%H:%M') }}{% else %}Never connected{% endif %}
+    </div>
     {% endif %}
   </div>
 
+  {# ── Member chip (only when logged in) ───────────────────────────────── #}
+  {% if pc.membership_enabled and pc.member_username %}
+  <div class="pc-member">
+    <span class="pc-member-avatar">{{ pc.member_username[0] | upper }}</span>
+    <span class="pc-member-name">{{ pc.member_username }}</span>
+  </div>
+  {% endif %}
+
+  {# ── IP footer ──────────────────────────────────────────────────────── #}
+  <div class="pc-ip">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="11" height="11">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" stroke="currentColor" stroke-width="1.5"/>
+    </svg>
+    <span>{{ pc.ip_address or "—" }}</span>
+  </div>
+
+  {# ── Actions ─────────────────────────────────────────────────────────── #}
   {% if pc.is_online %}
   <div class="pc-actions">
     <button
-      class="btn btn-sm btn-primary"
+      type="button"
+      class="pc-btn pc-btn-primary"
       onclick="openAddTime({{ pc.pc_number }})"
-    >+ Time</button>
+      aria-label="Add time to PC {{ pc.pc_number }}"
+    >
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="13" height="13">
+        <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      Time
+    </button>
     {% if not pc.is_locked %}
     <button
-      class="btn btn-sm btn-danger"
+      type="button"
+      class="pc-btn pc-btn-ghost"
       onclick="lockPc({{ pc.pc_number }})"
-    >Lock</button>
+      aria-label="Lock PC {{ pc.pc_number }}"
+      title="Lock"
+    >
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+        <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.7"/>
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.7"/>
+      </svg>
+    </button>
     {% endif %}
   </div>
   {% endif %}

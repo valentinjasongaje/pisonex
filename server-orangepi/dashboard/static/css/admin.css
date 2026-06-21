@@ -256,43 +256,286 @@ body {
 /* ── PC Grid ───────────────────────────────────────────────── */
 .pc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
   margin-bottom: 24px;
 }
 
 .pc-card {
-  background: var(--surface);
+  position: relative;
+  background:
+    radial-gradient(circle at 50% 0%,
+      color-mix(in srgb, var(--surface-2, var(--surface)) 60%, transparent),
+      var(--surface)) ;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
+  border-radius: 16px;
+  padding: 16px 14px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  transition: transform 0.15s;
+  gap: 12px;
+  transition: transform 0.15s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  overflow: hidden;
 }
-.pc-card:hover { transform: translateY(-2px); }
-.pc-card.pc-active  { border-color: var(--green); }
-.pc-card.pc-locked  { border-color: var(--border); }
-.pc-card.pc-offline { opacity: 0.5; }
-
-.pc-header { display: flex; justify-content: space-between; align-items: center; }
-.pc-number { font-weight: 700; font-size: 16px; }
-
-.pc-badge {
-  font-size: 10px; font-weight: 700;
-  padding: 2px 8px; border-radius: 999px; letter-spacing: 0.05em;
+.pc-card::before {
+  /* Top accent strip — colored by state */
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--state-color, var(--border)), transparent);
+  opacity: 0.7;
 }
-.badge-active  { background: rgba(34,197,94,0.15);   color: var(--green); }
-.badge-locked  { background: rgba(107,114,128,0.15); color: var(--gray); }
-.badge-offline { background: rgba(239,68,68,0.15);   color: var(--red); }
+.pc-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -10px rgba(0,0,0,0.35);
+}
 
-.pc-body         { flex: 1; }
-.pc-timer        { font-size: 20px; font-weight: 700; color: var(--green); }
-.pc-idle         { color: var(--text-dim); font-size: 12px; }
-.pc-offline-msg  { color: var(--gray); font-size: 11px; }
-.pc-ip           { color: var(--gray); font-size: 11px; margin-top: 4px; }
-.pc-actions      { display: flex; gap: 8px; flex-wrap: wrap; }
+.pc-card.pc-active {
+  --state-color: var(--green, #22c55e);
+  border-color: color-mix(in srgb, var(--green, #22c55e) 45%, var(--border));
+}
+.pc-card.pc-locked {
+  --state-color: #7c3aed;
+  border-color: color-mix(in srgb, #7c3aed 35%, var(--border));
+}
+.pc-card.pc-offline {
+  --state-color: var(--red, #ef4444);
+  opacity: 0.55;
+}
+
+/* ── Header: PC number + status pill ──────────────────────── */
+.pc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pc-number {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.pc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.pc-pill-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+}
+.pill-active {
+  background: rgba(34,197,94,0.12);
+  border-color: rgba(34,197,94,0.3);
+  color: var(--green, #22c55e);
+}
+.pill-active .pc-pill-dot {
+  animation: pcPulseDot 1.6s ease-in-out infinite;
+}
+.pill-locked {
+  background: rgba(124,58,237,0.12);
+  border-color: rgba(124,58,237,0.3);
+  color: #a78bfa;
+}
+.pill-offline {
+  background: rgba(148,163,184,0.10);
+  border-color: rgba(148,163,184,0.25);
+  color: var(--gray, #94a3b8);
+}
+
+@keyframes pcPulseDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+}
+
+/* ── Icon + halo ──────────────────────────────────────────── */
+.pc-icon-wrap {
+  position: relative;
+  align-self: center;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0 2px;
+}
+.pc-icon-halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--state-color, var(--gray)) 28%, transparent) 0%,
+                    transparent 70%);
+}
+.pc-card.pc-active .pc-icon-halo {
+  animation: pcHaloPulse 2.4s ease-in-out infinite;
+}
+@keyframes pcHaloPulse {
+  0%, 100% { transform: scale(1);    opacity: 0.95; }
+  50%      { transform: scale(1.08); opacity: 1; }
+}
+.pc-icon {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--state-color, var(--gray)) 14%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--state-color, var(--gray)) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--state-color, var(--gray));
+}
+.pc-icon svg { width: 22px; height: 22px; }
+
+.pc-icon-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--red, #ef4444);
+}
+
+.pc-icon-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #7c3aed;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--surface);
+}
+.pc-icon-badge svg { width: 10px; height: 10px; }
+
+/* ── Status block ─────────────────────────────────────────── */
+.pc-status {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 38px;
+}
+.pc-timer {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--green, #22c55e);
+  line-height: 1.1;
+}
+.pc-status-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text, #e5e7eb);
+}
+.pc-status-sub {
+  font-size: 10.5px;
+  color: var(--gray, #94a3b8);
+  letter-spacing: 0.02em;
+}
+
+/* ── Member chip ──────────────────────────────────────────── */
+.pc-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  padding: 3px 9px 3px 3px;
+  border-radius: 999px;
+  background: rgba(59,130,246,0.12);
+  border: 1px solid rgba(59,130,246,0.3);
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 600;
+  max-width: 100%;
+}
+.pc-member-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #7c3aed);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+}
+.pc-member-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+/* ── IP footer ────────────────────────────────────────────── */
+.pc-ip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-content: center;
+  color: var(--gray, #94a3b8);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.pc-ip svg { opacity: 0.7; }
+
+/* ── Actions ──────────────────────────────────────────────── */
+.pc-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+.pc-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: filter 0.15s ease, transform 0.1s ease, background 0.15s ease;
+  font-family: inherit;
+}
+.pc-btn:active { transform: translateY(1px); }
+.pc-btn-primary {
+  flex: 1 1 auto;
+  background: linear-gradient(135deg, #3b82f6, #7c3aed);
+  color: #fff;
+  box-shadow: 0 4px 12px -4px rgba(59,130,246,0.55);
+}
+.pc-btn-primary:hover { filter: brightness(1.08); }
+.pc-btn-ghost {
+  flex: 0 0 36px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--surface-2, var(--surface)) 80%, transparent);
+  border-color: var(--border);
+  color: var(--gray, #94a3b8);
+}
+.pc-btn-ghost:hover {
+  background: rgba(239,68,68,0.10);
+  border-color: rgba(239,68,68,0.35);
+  color: #fca5a5;
+}
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn {
