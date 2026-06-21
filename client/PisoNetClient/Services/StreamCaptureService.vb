@@ -17,8 +17,13 @@ Namespace Services
     '''   1. ffmpeg.exe beside the running executable
     '''   2. System PATH via where.exe
     '''
-    ''' If FFmpeg is not found, the service exits silently — the dashboard
-    ''' falls back to the MJPEG stream automatically.
+    ''' If FFmpeg is not found, the service marks itself <see cref="StreamState.Disabled"/>
+    ''' and exits — the dashboard falls back to the MJPEG stream automatically.
+    '''
+    ''' Every step writes to <see cref="StreamLog"/> so the operator can see
+    ''' WHY the stream is or isn't running from the Admin Panel.  Bare `Catch`
+    ''' blocks used to swallow ffmpeg crashes, WebSocket refusals, missing
+    ''' binaries — anything that went wrong was invisible.
     ''' </summary>
     Public Class StreamCaptureService
         Implements IDisposable
@@ -37,6 +42,10 @@ Namespace Services
             "-flush_packets 1 " &
             "pipe:1"
 
+        ' Bound the WebSocket connect.  A bad ServerUrl used to leave the
+        ' task hanging forever on the default tcp connect timeout.
+        Private Const CONNECT_TIMEOUT_MS As Integer = 5000
+
         Private ReadOnly _baseWsUrl As String   ' e.g. ws://192.168.1.21
         Private ReadOnly _pcNumber  As Integer
 
@@ -47,6 +56,10 @@ Namespace Services
 
         Private ReadOnly _lock As New Object()
         Private _running As Boolean = False
+
+        Private _stderrCaptured As Integer = 0   ' cap log spam at ~10 lines/attempt
+        Private _bytesSent As Long = 0
+        Private _firstChunkLogged As Boolean = False
 
         Public Sub New(baseWsUrl As String, pcNumber As Integer)
             _baseWsUrl = baseWsUrl
@@ -60,6 +73,10 @@ Namespace Services
                 If _running OrElse _disposed Then Return
                 _running = True
             End SyncLock
+            _stderrCaptured = 0
+            _bytesSent = 0
+            _firstChunkLogged = False
+            StreamLog.Info($"StartStream requested (PC {_pcNumber}, target {_baseWsUrl})")
             _cts = New CancellationTokenSource()
             Task.Run(AddressOf RunAsync)
         End Sub
@@ -68,6 +85,7 @@ Namespace Services
             SyncLock _lock
                 If Not _running Then Return
             End SyncLock
+            StreamLog.Info("StopStream requested")
             _cts?.Cancel()
             ' Cleanup() will set _running = False once the task exits
         End Sub
@@ -76,18 +94,41 @@ Namespace Services
 
         Private Async Function RunAsync() As Task
             Try
+                ' ── 1. Locate ffmpeg ────────────────────────────────────────
                 Dim ffmpegPath = FindFfmpeg()
-                If String.IsNullOrEmpty(ffmpegPath) Then Return  ' no FFmpeg — silent exit
+                If String.IsNullOrEmpty(ffmpegPath) Then
+                    StreamLog.SetState(StreamState.Disabled,
+                        "ffmpeg.exe not found beside PisoNetClient.exe and not on PATH")
+                    StreamLog.Err("Cannot start: ffmpeg.exe not found. Place ffmpeg.exe next to PisoNetClient.exe or add it to PATH.")
+                    Return
+                End If
+                StreamLog.Info($"ffmpeg located at {ffmpegPath}")
 
-                ' Connect WebSocket to OPi publish endpoint
+                ' ── 2. Open WebSocket to publish endpoint ───────────────────
+                StreamLog.SetState(StreamState.Connecting)
                 _ws = New ClientWebSocket()
                 If Not String.IsNullOrEmpty(AppConfig.ApiKey) Then
                     _ws.Options.SetRequestHeader("X-API-Key", AppConfig.ApiKey)
+                    StreamLog.Info("X-API-Key header attached")
                 End If
                 Dim wsUri = New Uri($"{_baseWsUrl}/dashboard/ws/stream/{_pcNumber}/publish")
-                Await _ws.ConnectAsync(wsUri, _cts.Token)
+                StreamLog.Info($"Connecting WebSocket → {wsUri}")
 
-                ' Launch FFmpeg — redirect stdout for pipe, stderr discarded
+                ' Bound the connect — a wrong URL used to hang the whole task.
+                Using connectCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token)
+                    connectCts.CancelAfter(CONNECT_TIMEOUT_MS)
+                    Try
+                        Await _ws.ConnectAsync(wsUri, connectCts.Token)
+                    Catch ex As OperationCanceledException When Not _cts.IsCancellationRequested
+                        StreamLog.SetState(StreamState.Failed,
+                            $"WebSocket connect timed out after {CONNECT_TIMEOUT_MS} ms")
+                        StreamLog.Err($"Connect timeout — is the server reachable at {_baseWsUrl}? Wrong port or firewall?")
+                        Return
+                    End Try
+                End Using
+                StreamLog.Info("WebSocket connected")
+
+                ' ── 3. Launch ffmpeg ────────────────────────────────────────
                 Dim psi As New ProcessStartInfo(ffmpegPath, FFMPEG_ARGS) With {
                     .RedirectStandardOutput = True,
                     .RedirectStandardError  = True,
@@ -95,43 +136,98 @@ Namespace Services
                     .CreateNoWindow         = True
                 }
                 _ffmpeg = Process.Start(psi)
-                _ffmpeg.BeginErrorReadLine()   ' drain stderr so it never blocks
+                If _ffmpeg Is Nothing Then
+                    StreamLog.SetState(StreamState.Failed, "ffmpeg.exe could not be launched")
+                    StreamLog.Err("Process.Start returned Nothing for ffmpeg")
+                    Return
+                End If
+                StreamLog.Info($"ffmpeg launched (pid {_ffmpeg.Id})")
 
-                ' Drain incoming WebSocket frames (pings, close) concurrently so the
-                ' server's ping/pong keepalive doesn't time out the publish connection.
+                ' Capture the first ~10 ffmpeg stderr lines so a crash on
+                ' startup (missing codec, gdigrab failure, etc.) is visible.
+                AddHandler _ffmpeg.ErrorDataReceived, AddressOf OnFfmpegStderr
+                _ffmpeg.BeginErrorReadLine()
+
+                ' ── 4. Drain incoming WS frames so server keepalive works ─
                 Dim drainTask = Task.Run(Async Function()
                     Dim recvBuf = New Byte(1023) {}
                     Try
                         While Not _cts.Token.IsCancellationRequested
                             Dim result = Await _ws.ReceiveAsync(
                                 New ArraySegment(Of Byte)(recvBuf), _cts.Token)
-                            If result.MessageType = WebSocketMessageType.Close Then Exit While
+                            If result.MessageType = WebSocketMessageType.Close Then
+                                StreamLog.Info($"WebSocket close received from server ({result.CloseStatus}: {result.CloseStatusDescription})")
+                                Exit While
+                            End If
                         End While
                     Catch
                         ' Connection closed — exit silently
                     End Try
                 End Function)
 
-                ' Pipe FFmpeg stdout → WebSocket in 64 KB chunks
+                StreamLog.SetState(StreamState.Running)
+
+                ' ── 5. Pipe ffmpeg stdout → WebSocket ──────────────────────
                 Dim buf       = New Byte(65535) {}
                 Dim outStream = _ffmpeg.StandardOutput.BaseStream
                 While Not _cts.Token.IsCancellationRequested
                     Dim n = Await outStream.ReadAsync(buf, 0, buf.Length, _cts.Token)
-                    If n = 0 Then Exit While   ' FFmpeg exited
+                    If n = 0 Then
+                        ' ffmpeg closed stdout — most often it crashed.  Wait
+                        ' briefly for it to actually exit so we can report
+                        ' the exit code.
+                        Try
+                            _ffmpeg.WaitForExit(500)
+                        Catch
+                        End Try
+                        StreamLog.Err($"ffmpeg stdout closed (exit code {SafeExitCode()}) after {_bytesSent} bytes")
+                        StreamLog.SetState(StreamState.Failed,
+                            $"ffmpeg exited early (code {SafeExitCode()}). See log for stderr.")
+                        Exit While
+                    End If
                     Await _ws.SendAsync(
                         New ArraySegment(Of Byte)(buf, 0, n),
                         WebSocketMessageType.Binary,
                         endOfMessage:=True,    ' each chunk is a complete message for the relay
                         cancellationToken:=_cts.Token)
+                    _bytesSent += n
+                    If Not _firstChunkLogged Then
+                        _firstChunkLogged = True
+                        StreamLog.Info($"First chunk sent: {n} bytes")
+                    End If
                 End While
 
             Catch ex As OperationCanceledException
                 ' Normal stop — swallow
-            Catch
-                ' Network drop, FFmpeg crash, etc. — swallow; MJPEG fallback covers view
+            Catch ex As WebSocketException
+                StreamLog.SetState(StreamState.Failed,
+                    $"WebSocket error: {ex.Message} (code {ex.WebSocketErrorCode})")
+                StreamLog.Err($"WebSocketException: {ex.Message} / WebSocketErrorCode={ex.WebSocketErrorCode}")
+            Catch ex As Exception
+                StreamLog.SetState(StreamState.Failed, $"Unexpected error: {ex.Message}")
+                StreamLog.Err($"{ex.GetType().Name}: {ex.Message}")
             Finally
                 Cleanup()
             End Try
+        End Function
+
+        Private Sub OnFfmpegStderr(sender As Object, e As DataReceivedEventArgs)
+            If String.IsNullOrEmpty(e?.Data) Then Return
+            ' Cap how many lines we capture per attempt so we don't fill the
+            ' buffer with ffmpeg's noisy frame stats.
+            If _stderrCaptured >= 10 Then Return
+            _stderrCaptured += 1
+            StreamLog.Info("ffmpeg> " & e.Data.Trim())
+        End Sub
+
+        Private Function SafeExitCode() As String
+            Try
+                If _ffmpeg IsNot Nothing AndAlso _ffmpeg.HasExited Then
+                    Return _ffmpeg.ExitCode.ToString()
+                End If
+            Catch
+            End Try
+            Return "?"
         End Function
 
         ' ── Cleanup ─────────────────────────────────────────────────────────
@@ -154,6 +250,13 @@ Namespace Services
             SyncLock _lock
                 _running = False
             End SyncLock
+
+            ' Only revert to Idle from Running/Connecting.  Failed/Disabled
+            ' should stay on the panel so the operator can still see WHY.
+            If StreamLog.State = StreamState.Running OrElse StreamLog.State = StreamState.Connecting Then
+                StreamLog.Info($"Stream stopped cleanly after {_bytesSent} bytes")
+                StreamLog.SetState(StreamState.Idle)
+            End If
         End Sub
 
         ' ── FFmpeg discovery ─────────────────────────────────────────────────

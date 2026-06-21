@@ -913,10 +913,203 @@ Namespace Forms
             capCard.Controls.Add(_nudInterval)
             capCard.Controls.Add(_nudQuality)
 
-            page.Controls.Add(capCard)
+            page.Controls.Add(capCard) : y += 150
+
+            ' Live Stream Diagnostics card — surfaces why FFmpeg streaming may
+            ' or may not be working.  Previously every error was swallowed,
+            ' so a missing ffmpeg.exe / wrong API key / firewall block was
+            ' invisible to the operator.
+            Dim streamCard = CardPanel(New Point(LM, y), New Size(IW, 120))
+            Dim sy = 14
+            streamCard.Controls.Add(SectionLabel("Live Stream Diagnostics", New Point(14, sy))) : sy += 26
+
+            _lblStreamStatus = New Label() With {
+                .AutoSize = True,
+                .Location = New Point(14, sy),
+                .Font = New Font("Segoe UI", 10, FontStyle.Bold)
+            }
+            streamCard.Controls.Add(_lblStreamStatus) : sy += 24
+
+            _lblStreamHint = New Label() With {
+                .AutoSize = False,
+                .Size = New Size(IW - 32, 32),
+                .Location = New Point(14, sy),
+                .ForeColor = ColSmall,
+                .Font = New Font("Segoe UI", 8)
+            }
+            streamCard.Controls.Add(_lblStreamHint) : sy += 36
+
+            Dim btnShowLog = New Button() With {
+                .Text = "Show log",
+                .Location = New Point(14, sy),
+                .Size = New Size(110, 28),
+                .BackColor = ColAccent,
+                .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor = Cursors.Hand,
+                .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold)
+            }
+            btnShowLog.FlatAppearance.BorderSize = 0
+            AddHandler btnShowLog.Click, AddressOf OnShowStreamLog
+            streamCard.Controls.Add(btnShowLog)
+
+            Dim btnClearLog = New Button() With {
+                .Text = "Clear log",
+                .Location = New Point(132, sy),
+                .Size = New Size(110, 28),
+                .BackColor = Color.FromArgb(38, 42, 60),
+                .ForeColor = ColText,
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor = Cursors.Hand,
+                .Font = New Font("Segoe UI", 8.5F)
+            }
+            btnClearLog.FlatAppearance.BorderColor = ColRule
+            AddHandler btnClearLog.Click, Sub()
+                                              Services.StreamLog.Clear()
+                                              UpdateStreamStatusDisplay()
+                                          End Sub
+            streamCard.Controls.Add(btnClearLog)
+
+            page.Controls.Add(streamCard)
+
+            UpdateStreamStatusDisplay()
+            AddHandler Services.StreamLog.StateChanged, AddressOf OnStreamStateChanged
 
             Return page
         End Function
+
+        ' ── Live stream diagnostics handlers ─────────────────────────────────
+
+        Private _lblStreamStatus As Label
+        Private _lblStreamHint As Label
+
+        Private Sub OnStreamStateChanged()
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
+            Try
+                Me.BeginInvoke(Sub() UpdateStreamStatusDisplay())
+            Catch
+            End Try
+        End Sub
+
+        Private Sub UpdateStreamStatusDisplay()
+            If _lblStreamStatus Is Nothing Then Return
+            Dim state = Services.StreamLog.State
+            Dim color As Color
+            Dim label As String
+            Select Case state
+                Case Services.StreamState.Idle
+                    color = Color.FromArgb(140, 148, 175) : label = "Idle"
+                Case Services.StreamState.Connecting
+                    color = Color.FromArgb(245, 158, 11) : label = "Connecting…"
+                Case Services.StreamState.Running
+                    color = Color.FromArgb(34, 197, 94) : label = "Running"
+                Case Services.StreamState.Failed
+                    color = Color.FromArgb(239, 68, 68) : label = "Failed"
+                Case Services.StreamState.Disabled
+                    color = Color.FromArgb(239, 68, 68) : label = "Disabled (ffmpeg missing)"
+                Case Else
+                    color = ColSmall : label = state.ToString()
+            End Select
+            _lblStreamStatus.Text = $"● {label}"
+            _lblStreamStatus.ForeColor = color
+
+            If _lblStreamHint IsNot Nothing Then
+                Dim hint = ""
+                Select Case state
+                    Case Services.StreamState.Idle
+                        hint = "Stream is not active. The dashboard starts it when an admin opens the fullscreen view."
+                    Case Services.StreamState.Connecting
+                        hint = "Connecting to the server's publish WebSocket…"
+                    Case Services.StreamState.Running
+                        hint = "FFmpeg is streaming live video to the server. Open ""Show log"" for chunk activity."
+                    Case Services.StreamState.Failed
+                        hint = Services.StreamLog.LastError
+                    Case Services.StreamState.Disabled
+                        hint = "ffmpeg.exe was not found. Place it next to PisoNetClient.exe or install it on PATH."
+                End Select
+                _lblStreamHint.Text = hint
+            End If
+        End Sub
+
+        Private Sub OnShowStreamLog(sender As Object, e As EventArgs)
+            Dim dlg = New Form() With {
+                .Text = "Live Stream Log",
+                .FormBorderStyle = FormBorderStyle.Sizable,
+                .StartPosition = FormStartPosition.CenterParent,
+                .Size = New Size(720, 460),
+                .BackColor = ColFormBg,
+                .ForeColor = Color.White,
+                .Font = New Font("Segoe UI", 9),
+                .MinimizeBox = False,
+                .MaximizeBox = True,
+                .ShowInTaskbar = False
+            }
+
+            Dim txt = New TextBox() With {
+                .Multiline = True,
+                .ReadOnly = True,
+                .ScrollBars = ScrollBars.Vertical,
+                .Dock = DockStyle.Fill,
+                .BackColor = Color.FromArgb(10, 14, 24),
+                .ForeColor = Color.FromArgb(220, 228, 240),
+                .Font = New Font("Consolas", 9),
+                .BorderStyle = BorderStyle.None,
+                .Text = If(String.IsNullOrEmpty(Services.StreamLog.Snapshot()),
+                           "No log entries yet. The stream will populate this when the admin opens the fullscreen view of this PC.",
+                           Services.StreamLog.Snapshot())
+            }
+
+            Dim btnRow = New Panel() With {
+                .Dock = DockStyle.Bottom,
+                .Height = 44,
+                .BackColor = Color.FromArgb(12, 16, 28)
+            }
+            Dim btnCopy = New Button() With {
+                .Text = "Copy",
+                .Size = New Size(96, 30),
+                .Location = New Point(12, 7),
+                .BackColor = ColAccent,
+                .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor = Cursors.Hand,
+                .Font = New Font("Segoe UI", 8.5F, FontStyle.Bold)
+            }
+            btnCopy.FlatAppearance.BorderSize = 0
+            AddHandler btnCopy.Click, Sub()
+                                          Try
+                                              Clipboard.SetText(If(String.IsNullOrEmpty(txt.Text), " ", txt.Text))
+                                          Catch
+                                          End Try
+                                          btnCopy.Text = "Copied"
+                                          Dim t = New System.Windows.Forms.Timer() With {.Interval = 1200}
+                                          AddHandler t.Tick, Sub(s2, e2)
+                                                                 btnCopy.Text = "Copy"
+                                                                 t.Stop()
+                                                                 t.Dispose()
+                                                             End Sub
+                                          t.Start()
+                                      End Sub
+            btnRow.Controls.Add(btnCopy)
+
+            Dim btnClose = New Button() With {
+                .Text = "Close",
+                .Size = New Size(96, 30),
+                .Location = New Point(116, 7),
+                .BackColor = Color.FromArgb(38, 42, 60),
+                .ForeColor = ColText,
+                .FlatStyle = FlatStyle.Flat,
+                .Cursor = Cursors.Hand,
+                .Font = New Font("Segoe UI", 8.5F)
+            }
+            btnClose.FlatAppearance.BorderColor = ColRule
+            AddHandler btnClose.Click, Sub() dlg.Close()
+            btnRow.Controls.Add(btnClose)
+
+            dlg.Controls.Add(txt)
+            dlg.Controls.Add(btnRow)
+            dlg.ShowDialog(Me)
+            dlg.Dispose()
+        End Sub
 
         Private Function BuildNotificationsPage() As Panel
             Dim page = ScrollPage()
