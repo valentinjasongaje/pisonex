@@ -1,8 +1,11 @@
 {% extends "layout.html" %}
 {% block content %}
 
-<div class="page-header">
-  <h1>Transactions</h1>
+<div class="page-header page-header-modern">
+  <div>
+    <h1>Transactions</h1>
+    <p class="page-subtitle">Every coin and admin top-up. Filter by period or PC.</p>
+  </div>
   <div class="header-stats">
     <div class="stat-pill earnings">₱ {{ total_pesos }} total</div>
     <div class="stat-pill" style="color:var(--text-dim);border-color:var(--border)">{{ transactions|length }} record{{ 's' if transactions|length != 1 else '' }}</div>
@@ -50,27 +53,34 @@
 
 <div class="card">
   {% if transactions %}
-  <table class="data-table">
+  <table class="data-table tx-table">
     <thead>
       <tr>
         <th>#</th>
         <th>PC</th>
         <th>Amount</th>
-        <th>Time Added</th>
-        <th>Date / Time</th>
+        <th>Time added</th>
+        <th>Date / time</th>
       </tr>
     </thead>
     <tbody>
       {% for tx in transactions %}
       <tr>
-        <td style="color:var(--gray)">{{ tx.id }}</td>
-        <td>{% if tx.pc %}PC {{ "%02d" | format(tx.pc.pc_number) }}{% else %}&mdash;{% endif %}</td>
-        <td class="money">₱{{ tx.amount_php }}</td>
+        <td class="tx-id">{{ tx.id }}</td>
         <td>
+          {% if tx.pc %}
+          <span class="pc-pill pill-locked">
+            <span class="pc-pill-dot"></span>
+            PC {{ "%02d" | format(tx.pc.pc_number) }}
+          </span>
+          {% else %}<span class="tx-id">&mdash;</span>{% endif %}
+        </td>
+        <td class="tx-money">₱{{ tx.amount_php }}</td>
+        <td class="tx-time">
           {% set _h = tx.seconds_added // 3600 %}{% set _m = (tx.seconds_added % 3600) // 60 %}{% set _s = tx.seconds_added % 60 %}
           {% if _h > 0 %}{{ _h }}h {{ _m }}m{% elif _m > 0 %}{{ _m }}m {{ _s }}s{% else %}{{ _s }}s{% endif %}
         </td>
-        <td style="color:var(--text-dim)">{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td class="tx-date">{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
       </tr>
       {% endfor %}
     </tbody>

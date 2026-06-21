@@ -1,0 +1,31 @@
+<!--
+  Confirmation modal for the bulk "Shutdown All" action.
+  Wired by admin.js: openShutdownAllModal() fills the online-count and
+  enables / disables the confirm button; submitting POSTs to
+  /dashboard/api/pcs/command-all and reports a queued count.
+-->
+<div id="shutdown-all-modal" class="modal hidden">
+  <div class="modal-box modal-confirm modal-confirm-danger">
+    <div class="confirm-icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+        <path d="M12 2v10M5.4 6.4a8 8 0 1 0 13.2 0"
+              stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2 class="confirm-title">Shutdown all online PCs?</h2>
+    <p class="confirm-body" id="shutdown-all-body">
+      This will queue a shutdown command for every café PC that is currently online.
+    </p>
+    <div class="confirm-meta" id="shutdown-all-meta">
+      <span class="confirm-meta-label">Online PCs</span>
+      <span class="confirm-meta-value" id="shutdown-all-count">—</span>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-default" onclick="closeShutdownAllModal()">Cancel</button>
+      <button type="button" id="shutdown-all-confirm" class="btn btn-danger" onclick="confirmShutdownAll()" disabled>
+        Shutdown PCs
+      </button>
+    </div>
+  </div>
+</div>

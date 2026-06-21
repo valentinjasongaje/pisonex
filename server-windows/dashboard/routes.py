@@ -970,6 +970,50 @@ def send_pc_command(
     return {"status": "queued", "pc_number": pc_number, "command": body.type}
 
 
+@router.post("/api/pcs/command-all", dependencies=[Depends(_require_active_license)])
+def send_command_to_all_pcs(
+    body: SendCommandBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Bulk-queue a command (shutdown / restart / lock) to every online PC.
+
+    "Online" uses the same `last_seen` cut-off as the overview grid, so a PC
+    that has gone silent without explicitly going offline is skipped.  Offline
+    PCs are counted in the response so the UI can report N skipped without
+    needing a second round-trip.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    allowed = {"shutdown", "restart", "lock"}
+    if body.type not in allowed:
+        raise HTTPException(status_code=422, detail=f"Unknown bulk command type: {body.type}")
+
+    payload = body.payload.strip()
+    svc = SessionService(db)
+    pcs = svc.get_all_pcs()
+    timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+
+    queued = 0
+    skipped = 0
+    for pc in pcs:
+        online = pc.is_online and pc.last_seen and pc.last_seen >= timeout
+        if not online:
+            skipped += 1
+            continue
+        command_store.push_command(pc.pc_number, body.type, payload)
+        queued += 1
+
+    return {
+        "status": "queued",
+        "command": body.type,
+        "queued_count": queued,
+        "skipped_count": skipped,
+    }
+
+
 @router.post("/api/announcement", dependencies=[Depends(_require_active_license)])
 def set_announcement(
     body: AnnouncementBody,

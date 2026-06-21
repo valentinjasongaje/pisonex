@@ -311,6 +311,70 @@ function updateAnnouncementBanner(text) {
   }
 }
 
+// ── Shutdown All ──────────────────────────────────────────────────────────────
+// Bulk shutdown of every online PC.  The online count is derived from the
+// rendered page so the modal can't lie about how many PCs are about to go
+// dark.  Overview uses .pc-card tiles; PC Management tags its rows with
+// data-pc-status so we can count without scraping the badge text.
+function _countOnlinePcsFromDom() {
+  const grid = document.getElementById('pc-grid');
+  if (grid) {
+    return grid.querySelectorAll('.pc-card.pc-active, .pc-card.pc-locked').length;
+  }
+  const rows = document.querySelectorAll('[data-pc-status]');
+  if (rows.length === 0) return 0;
+  let online = 0;
+  rows.forEach((r) => {
+    const status = (r.getAttribute('data-pc-status') || '').toLowerCase();
+    if (status && status !== 'offline') online += 1;
+  });
+  return online;
+}
+function openShutdownAllModal() {
+  const modal = document.getElementById('shutdown-all-modal');
+  if (!modal) return;
+  const countEl = document.getElementById('shutdown-all-count');
+  const bodyEl = document.getElementById('shutdown-all-body');
+  const btn = document.getElementById('shutdown-all-confirm');
+  const count = _countOnlinePcsFromDom();
+
+  if (countEl) countEl.textContent = String(count);
+  if (bodyEl) {
+    bodyEl.textContent = count > 0
+      ? `This will queue a shutdown command for every café PC that is currently online.`
+      : `No café PCs are currently online — nothing to shut down.`;
+  }
+  if (btn) {
+    btn.disabled = count === 0;
+    btn.textContent = count > 0 ? `Shutdown ${count} PC${count === 1 ? '' : 's'}` : 'Shutdown PCs';
+  }
+  modal.classList.remove('hidden');
+}
+function closeShutdownAllModal() {
+  const m = document.getElementById('shutdown-all-modal');
+  if (m) m.classList.add('hidden');
+}
+async function confirmShutdownAll() {
+  const btn = document.getElementById('shutdown-all-confirm');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  const res = await apiPost('/dashboard/api/pcs/command-all', { type: 'shutdown', payload: '' });
+  if (!res) { closeShutdownAllModal(); return; }
+  if (res.ok) {
+    const data = await res.json();
+    const q = data.queued_count || 0;
+    showToast(
+      q > 0
+        ? `Shutdown queued for ${q} PC${q === 1 ? '' : 's'}`
+        : 'No PCs were online to shut down',
+      q > 0 ? 'success' : 'error'
+    );
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || 'Failed to send bulk shutdown', 'error');
+  }
+  closeShutdownAllModal();
+}
+
 // ── Message modal ─────────────────────────────────────────────────────────────
 let _msgPc = null;
 function openMessageModal(pcNumber) {
@@ -400,6 +464,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('announcement-modal').addEventListener('click', e => {
       if (e.target.id === 'announcement-modal') closeAnnouncementModal();
+    });
+  }
+
+  // Shutdown All modal — click-outside-to-close
+  const shutdownAllModal = document.getElementById('shutdown-all-modal');
+  if (shutdownAllModal) {
+    shutdownAllModal.addEventListener('click', e => {
+      if (e.target.id === 'shutdown-all-modal') closeShutdownAllModal();
     });
   }
 

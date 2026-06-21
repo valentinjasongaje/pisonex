@@ -1,11 +1,31 @@
 {% extends "layout.html" %}
 {% block content %}
 
-<div class="page-header">
-  <h1>PC Management</h1>
+<div class="page-header page-header-modern">
+  <div>
+    <h1>PC Management</h1>
+    <p class="page-subtitle">Manage every café PC — toggle coin slots, lock a session, or broadcast to the room.</p>
+  </div>
   <div class="header-stats">
     <div class="stat-pill online">{{ total }} PC{{ 's' if total != 1 else '' }} registered</div>
   </div>
+</div>
+
+<div class="dashboard-toolbar">
+  <button type="button" class="toolbar-btn toolbar-btn-gradient" onclick="openAnnouncementModal()">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+      <path d="M3 11v2a2 2 0 0 0 2 2h2l5 4V5L7 9H5a2 2 0 0 0-2 2zM16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14"
+            stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Announce
+  </button>
+  <button type="button" class="toolbar-btn toolbar-btn-danger" onclick="openShutdownAllModal()">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+      <path d="M12 2v10M5.4 6.4a8 8 0 1 0 13.2 0"
+            stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Shutdown All
+  </button>
 </div>
 
 {% if not pcs %}
@@ -36,16 +56,17 @@
     <tbody>
       {% for pc in pcs %}
       {% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
-      <tr id="pc-row-{{ pc.pc_number }}">
+      <tr id="pc-row-{{ pc.pc_number }}" data-pc-status="{{ state }}">
         <td><strong>PC {{ "%02d" | format(pc.pc_number) }}</strong></td>
         <td>
           <span id="pc-name-{{ pc.pc_number }}">{{ pc.name }}</span>
         </td>
         <td>
-          <span class="pc-badge badge-{{ state }}">
-            {% if not pc.is_online %}OFFLINE
-            {% elif not pc.is_locked %}ACTIVE
-            {% else %}LOCKED{% endif %}
+          <span class="pc-pill pill-{{ state }}">
+            <span class="pc-pill-dot"></span>
+            {% if not pc.is_online %}Offline
+            {% elif not pc.is_locked %}Active
+            {% else %}Locked{% endif %}
           </span>
         </td>
         <td class="col-hide-sm" style="color: var(--text-dim);">{{ pc.ip_address }}</td>
@@ -111,17 +132,18 @@
 <div class="pcs-mobile-view">
   {% for pc in pcs %}
   {% set state = "offline" if not pc.is_online else ("active" if not pc.is_locked else "locked") %}
-  <div class="pc-mgmt-tile">
+  <div class="pc-mgmt-tile" data-pc-status="{{ state }}">
 
     <div class="pc-mgmt-tile-header">
       <div>
         <div class="pc-mgmt-tile-number">PC {{ "%02d" | format(pc.pc_number) }}</div>
         <div class="pc-mgmt-tile-name">{{ pc.name }}</div>
       </div>
-      <span class="pc-badge badge-{{ state }}">
-        {% if not pc.is_online %}OFFLINE
-        {% elif not pc.is_locked %}ACTIVE
-        {% else %}LOCKED{% endif %}
+      <span class="pc-pill pill-{{ state }}">
+        <span class="pc-pill-dot"></span>
+        {% if not pc.is_online %}Offline
+        {% elif not pc.is_locked %}Active
+        {% else %}Locked{% endif %}
       </span>
     </div>
 
@@ -174,6 +196,9 @@
 </div>
 
 {% endif %}
+
+{% include "partials/announce_modal.html" %}
+{% include "partials/shutdown_all_modal.html" %}
 
 <!-- Add Time Modal (shared with overview) -->
 <div id="add-time-modal" class="modal hidden">

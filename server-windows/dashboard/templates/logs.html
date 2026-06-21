@@ -1,32 +1,43 @@
 {% extends "layout.html" %}
 {% block content %}
 
-<div class="page-header">
-  <h1>System Logs</h1>
+<div class="page-header page-header-modern">
+  <div>
+    <h1>System Logs</h1>
+    <p class="page-subtitle">Server activity feed — session events, hardware warnings, and errors.</p>
+  </div>
   <div class="filter-bar">
-    <select onchange="filterLogs(this.value)">
-      <option value="">All Levels</option>
-      <option value="INFO">INFO</option>
-      <option value="WARNING">WARNING</option>
-      <option value="ERROR">ERROR</option>
+    <select class="log-filter-select" onchange="filterLogs(this.value)">
+      <option value="">All levels</option>
+      <option value="INFO">Info</option>
+      <option value="WARNING">Warning</option>
+      <option value="ERROR">Error</option>
     </select>
   </div>
 </div>
 
 <div class="card log-container">
+  {% if not logs %}
+  <p style="color: var(--text-dim); text-align: center; padding: 24px 0;">No log entries yet.</p>
+  {% else %}
   {% for log in logs %}
-  <div class="log-entry log-{{ log.level | lower }}">
-    <span class="log-time">{{ log.created_at.strftime('%H:%M:%S') }}</span>
-    <span class="log-level">{{ log.level }}</span>
-    <span class="log-source">[{{ log.source }}]</span>
-    <span class="log-msg">{{ log.message }}</span>
+  {% set lvl = log.level | upper %}
+  <div class="log-row log-{{ lvl | lower }}">
+    <span class="log-row-time">{{ log.created_at.strftime('%H:%M:%S') }}</span>
+    <span class="log-row-level">
+      <span class="log-row-level-dot"></span>
+      {{ lvl }}
+    </span>
+    <span class="log-row-source">{{ log.source }}</span>
+    <span class="log-row-msg">{{ log.message }}</span>
   </div>
   {% endfor %}
+  {% endif %}
 </div>
 
 <script>
 function filterLogs(level) {
-  const entries = document.querySelectorAll('.log-entry');
+  const entries = document.querySelectorAll('.log-row');
   entries.forEach(e => {
     e.style.display = (!level || e.classList.contains('log-' + level.toLowerCase())) ? '' : 'none';
   });

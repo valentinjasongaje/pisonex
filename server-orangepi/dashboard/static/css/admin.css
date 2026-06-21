@@ -1196,3 +1196,282 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
     font-size: 11px;
   }
 }
+
+/* ── Modern page header (two-line title + subtitle) ───────────
+   Pairs the bold h1 with a muted descriptive line so the chrome
+   matches the licence-banner / pc-card aesthetic.                */
+.page-header-modern {
+  align-items: flex-start;
+}
+.page-header-modern h1 {
+  margin-bottom: 4px;
+}
+.page-header-modern .page-subtitle {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  max-width: 60ch;
+  line-height: 1.45;
+}
+
+/* ── Dashboard toolbar row ────────────────────────────────────
+   Lives between the page header and the page content.  Holds
+   pill-shaped action buttons (Announce / Shutdown All / …).      */
+.dashboard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: inherit;
+  color: #fff;
+  text-decoration: none;
+  transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.2s ease;
+}
+.toolbar-btn:active { transform: translateY(1px); }
+.toolbar-btn-gradient {
+  background: linear-gradient(135deg, #3b82f6, #7c3aed);
+  box-shadow: 0 6px 16px -6px rgba(59, 130, 246, 0.55);
+}
+.toolbar-btn-gradient:hover { filter: brightness(1.08); }
+.toolbar-btn-danger {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 6px 16px -6px rgba(239, 68, 68, 0.55);
+}
+.toolbar-btn-danger:hover { filter: brightness(1.08); }
+.toolbar-btn-ghost {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: none;
+}
+.toolbar-btn-ghost:hover { border-color: var(--border-hi); }
+
+/* ── Confirm modal (Shutdown All etc.) ────────────────────────
+   Sits on top of the existing .modal backdrop.  Uses the same
+   surface tokens as .pc-card so it visually belongs to the new
+   design language.                                              */
+.modal-confirm {
+  text-align: center;
+  max-width: 380px;
+  padding: 24px 22px 20px;
+  border-radius: 16px;
+}
+.modal-confirm .confirm-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  animation: confirmIconPulse 2.4s ease-in-out infinite;
+}
+@keyframes confirmIconPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50%      { box-shadow: 0 0 0 7px rgba(239, 68, 68, 0); }
+}
+.modal-confirm .confirm-title {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+.modal-confirm .confirm-body {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+.modal-confirm .confirm-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  margin: 0 0 18px;
+  font-size: 13px;
+}
+.modal-confirm .confirm-meta-label {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  font-weight: 700;
+}
+.modal-confirm .confirm-meta-value {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #ef4444;
+}
+.modal-confirm .modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.modal-confirm .modal-actions .btn {
+  flex: 1;
+  justify-content: center;
+}
+
+/* ── Log rows (logs.html) ─────────────────────────────────────
+   Replaces the flat log-entry list with a card-row layout: a
+   coloured left accent encodes severity, the level pill matches
+   the pc-card pills, and timestamps + sources read as monospace
+   metadata.                                                      */
+.log-container {
+  padding: 0;
+  overflow: hidden;
+}
+.log-row {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 16px 10px 20px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  font-size: 13px;
+}
+.log-row:last-child { border-bottom: none; }
+.log-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--row-accent, var(--border));
+}
+.log-row.log-info    { --row-accent: #38bdf8; }
+.log-row.log-warning { --row-accent: #f59e0b; }
+.log-row.log-error   { --row-accent: #ef4444; }
+.log-row-time {
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.log-row-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 9px 2px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.log-row-level-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.log-row.log-info    .log-row-level { color: #38bdf8; background: rgba(56,189,248,0.10); border-color: rgba(56,189,248,0.3); }
+.log-row.log-warning .log-row-level { color: #f59e0b; background: rgba(245,158,11,0.10); border-color: rgba(245,158,11,0.3); }
+.log-row.log-error   .log-row-level { color: #ef4444; background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.3); }
+.log-row-source {
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.log-row-msg {
+  color: var(--text);
+  word-break: break-word;
+}
+.log-filter-select {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.log-filter-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .log-row {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "time level"
+      "source msg"
+      "msg msg";
+    padding-right: 12px;
+  }
+  .log-row-time   { grid-area: time; }
+  .log-row-level  { grid-area: level; justify-self: end; }
+  .log-row-source { grid-area: source; }
+  .log-row-msg    { grid-area: msg; }
+}
+
+/* ── Transactions table polish ─────────────────────────────── */
+.tx-table th {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.tx-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.tx-table tbody tr:last-child td { border-bottom: none; }
+.tx-table tbody tr {
+  transition: background 0.12s ease;
+}
+.tx-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.tx-table .tx-id {
+  color: var(--gray);
+  font-family: "JetBrains Mono", ui-monospace, "Consolas", monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tx-table .tx-money {
+  color: var(--green);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tx-table .tx-time {
+  font-variant-numeric: tabular-nums;
+}
+.tx-table .tx-date {
+  color: var(--text-dim);
+  font-family: "JetBrains Mono", ui-monospace, "Consolas", monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
