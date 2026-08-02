@@ -109,10 +109,10 @@ full rationale. Short version:
 - `rename` (`renPublic=true`) — scrambles class/method/field names,
   including public members. `IsActive`, `LicenseService`, `GetDeviceId`
   etc. become single-letter names, so dnSpy users can't navigate by name.
-  The 4 JSON DTO classes are excluded at the source via
+  The JSON DTO classes are excluded at the source via
   `<Obfuscation(Exclude:=True, ApplyToMembers:=True)>` attributes
-  (`HeartbeatResponse`, `MemberRegisterResponse`, `MemberLoginResponse`,
-  `MemberLogoutResponse`) so System.Text.Json deserialization keeps
+  (`HeartbeatResponse`, `MemberLoginResponse`, `MemberLogoutResponse`,
+  `MemberChangePasswordResponse`) so System.Text.Json deserialization keeps
   working. The metrics DTOs are safe automatically because they pin JSON
   keys with `<JsonPropertyName>` attributes.
 

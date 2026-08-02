@@ -17,10 +17,15 @@ Namespace Services
         Private _receivingCoins   As Boolean = False
         Private _isUnlockPending  As Boolean = False
 
+        ' Same deferral pattern as _receivingCoins: while the forced
+        ' change-password modal is open (admin-issued temp password), hold
+        ' off hiding the lock form even though the login already unlocked the
+        ' PC server-side. See ShowChangePasswordDialog.
+        Private _changePasswordPending As Boolean = False
+
         ''' <summary>Forwarded from LockForm.AdminPanelRequested — wired in Program.vb.</summary>
         Public Event LockFormAdminRequested()
         Public Event LockFormLoginRequested(username As String, password As String)
-        Public Event LockFormRegisterRequested(username As String, password As String)
         Public Event LockFormLogoutRequested()
         Public Event LockFormInsertCoinRequested()
         Public Event LockFormDoneInsertingCoinsRequested()
@@ -29,7 +34,6 @@ Namespace Services
             _lockForm = New Forms.LockForm()
             AddHandler _lockForm.AdminPanelRequested, Sub() RaiseEvent LockFormAdminRequested()
             AddHandler _lockForm.MemberLoginRequested, Sub(u, p) RaiseEvent LockFormLoginRequested(u, p)
-            AddHandler _lockForm.MemberRegisterRequested, Sub(u, p) RaiseEvent LockFormRegisterRequested(u, p)
             AddHandler _lockForm.MemberLogoutRequested, Sub() RaiseEvent LockFormLogoutRequested()
             AddHandler _lockForm.InsertCoinRequested, Sub() RaiseEvent LockFormInsertCoinRequested()
             AddHandler _lockForm.DoneInsertingCoinsRequested, Sub() RaiseEvent LockFormDoneInsertingCoinsRequested()
@@ -52,10 +56,10 @@ Namespace Services
                 _lockForm.Invoke(Sub() UnlockPC())
                 Return
             End If
-            ' While the coin slot is open keep the lock form visible so the user
-            ' can insert additional coins.  Record that an unlock is waiting and
-            ' hide the form once the slot actually closes (ShowReceivingCoins(False)).
-            If _receivingCoins Then
+            ' While the coin slot is open, or the forced change-password modal
+            ' is open, keep the lock form visible.  Record that an unlock is
+            ' waiting and complete it once the blocking condition clears.
+            If _receivingCoins OrElse _changePasswordPending Then
                 _isUnlockPending = True
                 Return
             End If
@@ -110,6 +114,16 @@ Namespace Services
             _lockForm.UpdateCoinSlot(enabled)
         End Sub
 
+        ''' <summary>
+        ''' Persistent "Traditional Café Mode" business-model toggle (admin-set
+        ''' via Settings) — hides the Insert Coin button entirely when
+        ''' enabled, regardless of the transient coin-slot pause/resume state
+        ''' above.
+        ''' </summary>
+        Public Sub UpdateTraditionalMode(enabled As Boolean)
+            _lockForm.UpdateTraditionalMode(enabled)
+        End Sub
+
         Public Sub SetInsertCoinResult(success As Boolean)
             _lockForm.SetInsertCoinResult(success)
         End Sub
@@ -119,12 +133,50 @@ Namespace Services
         End Sub
 
         ''' <summary>
-        ''' Clears login/register form fields after a successful authentication
-        ''' so the previous user's credentials are not left visible on the form.
+        ''' Clears the login form fields after a successful authentication so
+        ''' the previous user's credentials are not left visible on the form.
         ''' </summary>
         Public Sub ClearMemberForm()
             _lockForm.ClearMemberForm()
         End Sub
+
+        ''' <summary>
+        ''' Shows the forced "set a new password" modal on top of the lock screen
+        ''' and blocks the calling thread until the member successfully sets a
+        ''' new password (the dialog has no cancel/close option). Called from
+        ''' Program.vb's OnMemberLogin right after a login response comes back
+        ''' with must_change_password=True — typically from a background Task.Run
+        ''' thread, so this marshals onto the UI thread via Invoke and blocks
+        ''' that background thread for the duration, exactly like a synchronous
+        ''' ShowDialog would on the UI thread itself.
+        '''
+        ''' Any PC unlock that would otherwise happen while this is open (the
+        ''' login itself may have already told the server to unlock) is deferred
+        ''' the same way ShowReceivingCoins defers it, then completed once the
+        ''' dialog closes.
+        ''' </summary>
+        Public Function ShowChangePasswordDialog(memberSvc As MemberService, pcNumber As Integer, username As String) As Boolean
+            If _lockForm.InvokeRequired Then
+                Return CBool(_lockForm.Invoke(Function() ShowChangePasswordDialog(memberSvc, pcNumber, username)))
+            End If
+
+            _changePasswordPending = True
+            Try
+                Using dlg As New Forms.ChangePasswordForm(memberSvc, pcNumber, username)
+                    dlg.TopMost = True
+                    dlg.ShowDialog()
+                End Using
+            Finally
+                _changePasswordPending = False
+            End Try
+
+            ' Complete any unlock that was deferred while the dialog was open.
+            If _isUnlockPending Then
+                _isUnlockPending = False
+                UnlockPC()
+            End If
+            Return True
+        End Function
 
         Public Sub ShowMemberSuccess(message As String)
             _lockForm.ShowMemberSuccess(message)

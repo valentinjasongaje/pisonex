@@ -1,9 +1,19 @@
 Imports Microsoft.Win32
 Imports System.Drawing
+Imports System.IO
 
 Namespace Config
     Public Module AppConfig
         Private Const REG_KEY As String = "SOFTWARE\PisoNet\Client"
+
+        ' Shared with PnxSystem's WatchdogService — must stay in sync with the
+        ' path/filename used there. %ProgramData% is machine-wide (unlike HKCU,
+        ' which is per-user and invisible to the watchdog when it runs as the
+        ' SYSTEM account), so it's the one location both processes can reliably
+        ' read/write regardless of which Windows identity each one runs as.
+        Private ReadOnly _shutdownFlagPath As String = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "PisoNet", "shutdown.flag")
 
         ' ── Connection ────────────────────────────────────────────────────
         Public ReadOnly Property ServerUrl As String
@@ -520,21 +530,49 @@ Namespace Config
         ''' <summary>
         ''' Stamps the current UTC Unix timestamp so the watchdog knows the admin
         ''' intentionally shut down and should not restart for ~5 minutes.
+        '''
+        ''' Written to a %ProgramData% file rather than the registry: the client
+        ''' runs as a normal (non-elevated) user, and the watchdog normally runs
+        ''' as a Windows Service under the SYSTEM account when installed via
+        ''' install-watchdog.bat — SYSTEM's HKEY_CURRENT_USER is a completely
+        ''' different hive from the logged-in café user's, so a registry-based
+        ''' flag written by the client was never actually visible to the
+        ''' watchdog. %ProgramData% is machine-wide, so both sides see the same
+        ''' file regardless of which account each one runs as.
         ''' </summary>
         Public Sub SaveGracefulShutdown()
-            WriteReg("ShutdownAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString())
+            Try
+                Dim dir = Path.GetDirectoryName(_shutdownFlagPath)
+                If Not Directory.Exists(dir) Then Directory.CreateDirectory(dir)
+                File.WriteAllText(_shutdownFlagPath, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString())
+            Catch
+            End Try
         End Sub
 
         ' ── Registry helpers ───────────────────────────────────────────────
+        ''' <summary>
+        ''' Reads CurrentUser first, LocalMachine second.
+        '''
+        ''' WriteReg below tries LocalMachine first (so an elevated first-run —
+        ''' e.g. during install — can set a machine-wide default) and falls back
+        ''' to CurrentUser when not elevated, which is the normal case for this
+        ''' app. If ReadReg checked LocalMachine first, a value that was only
+        ''' ever set there would permanently shadow every later CurrentUser save
+        ''' — so a non-admin Settings change would appear to succeed but silently
+        ''' never take effect on the next launch. Checking CurrentUser first
+        ''' means the most recently saved value (wherever it actually landed)
+        ''' always wins, while LocalMachine still works as the fallback default
+        ''' for a value that was never overridden per-user.
+        ''' </summary>
         Private Function ReadReg(key As String) As String
             Try
-                Dim rk = Registry.LocalMachine.OpenSubKey(REG_KEY)
+                Dim rk = Registry.CurrentUser.OpenSubKey(REG_KEY)
                 Dim v = rk?.GetValue(key)?.ToString()
                 If v IsNot Nothing Then Return v
             Catch
             End Try
             Try
-                Dim rk = Registry.CurrentUser.OpenSubKey(REG_KEY)
+                Dim rk = Registry.LocalMachine.OpenSubKey(REG_KEY)
                 Return If(rk?.GetValue(key)?.ToString(), "")
             Catch
                 Return ""

@@ -44,21 +44,19 @@ Namespace Forms
         Private _pnlMember      As Panel        ' container for membership UI
         Private _lblMemberTitle As Label        ' "Member Access" header
         Private _btnLogin       As Button
-        Private _btnRegister    As Button
         Private _lblMemberInfo  As Label        ' "Logged in as: [name]"
         Private _lblMemberTime  As Label        ' balance / zero-time countdown
         Private _btnLogout      As Button
         Private _membershipEnabled    As Boolean = False
         Private _memberLoggedIn       As Boolean = False
 
-        ' Inline member login / register form
-        Private _isRegisterMode       As Boolean = False
+        ' Inline member login form
         Private _canLogout            As Boolean = False
         Private _minimumLogoutMinutes As Integer = 0
         Private _lastLayoutKey As String = ""
         ' Tracks current member-panel mode so layout is only rebuilt on actual transitions,
         ' not on every 1-second heartbeat tick.
-        ' Values: "" (uninitialised) | "off" | "member" | "login" | "register"
+        ' Values: "" (uninitialised) | "off" | "member" | "login"
         Private _lastMemberFormMode As String = ""
         ' Debounce counter: how many consecutive heartbeats have returned membership_enabled=False.
         ' The panel is only hidden when this reaches MEMBERSHIP_HIDE_THRESHOLD, preventing
@@ -71,13 +69,10 @@ Namespace Forms
         ' count to the threshold in under a second.
         Private Const MEMBERSHIP_HIDE_THRESHOLD     As Integer = 20   ' ~20 s of consecutive False
         Private Const MEMBERSHIP_MIN_VISIBLE_MS     As Integer = 15000 ' panel must show ≥ 15 s first
-        Private _lblModeToggle        As Label       ' "Register" / "Back to Login" link
         Private _lblUsernameHint      As Label
         Private _txtMemberUser        As TextBox
         Private _lblPasswordHint      As Label
         Private _txtMemberPass        As TextBox
-        Private _lblConfirmHint       As Label
-        Private _txtMemberConf        As TextBox
         Private _lblInlineError       As Label       ' red inline error text
 
         ' Membership modal trigger (upper-right composite: badge + pill) + overlay
@@ -119,6 +114,11 @@ Namespace Forms
         ' Insert Coin button
         Private _btnInsertCoin    As Button
         Private _coinSlotEnabled  As Boolean = True   ' tracked from heartbeat
+        ' Persistent "Traditional Café Mode" business-model toggle (admin-set
+        ' via Settings). Distinct from _coinSlotEnabled above, which is a
+        ' transient runtime pause/resume flag. When True, no coin hardware is
+        ' used or implied and the Insert Coin button is hidden entirely.
+        Private _traditionalModeEnabled As Boolean = False
         Private _isRequestingCoin As Boolean = False  ' true briefly after click, before receiving_coins=True
 
         ' Idle shutdown countdown UI
@@ -137,7 +137,6 @@ Namespace Forms
 
         Public Event AdminPanelRequested()
         Public Event MemberLoginRequested(username As String, password As String)
-        Public Event MemberRegisterRequested(username As String, password As String)
         Public Event MemberLogoutRequested()
         Public Event InsertCoinRequested()
         Public Event DoneInsertingCoinsRequested()
@@ -429,21 +428,6 @@ Namespace Forms
             _btnLogin.FlatAppearance.MouseOverBackColor = Color.FromArgb(100, 160, 255)
             AddHandler _btnLogin.Click, AddressOf OnLoginClick
 
-            _btnRegister = New Button() With {
-                .Text = "  Register",
-                .Size = New Size(140, 40),
-                .Font = New Font("Segoe UI", 10, FontStyle.Bold),
-                .ForeColor = Color.FromArgb(180, 195, 220),
-                .BackColor = Color.FromArgb(30, 38, 58),
-                .FlatStyle = FlatStyle.Flat,
-                .Cursor = Cursors.Hand,
-                .TextAlign = ContentAlignment.MiddleCenter
-            }
-            _btnRegister.FlatAppearance.BorderSize = 1
-            _btnRegister.FlatAppearance.BorderColor = Color.FromArgb(60, 80, 120, 200)
-            _btnRegister.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 50, 72)
-            AddHandler _btnRegister.Click, AddressOf OnRegisterClick
-
             _lblMemberInfo = New Label() With {
                 .Text = "",
                 .Font = New Font("Segoe UI", 11, FontStyle.Bold),
@@ -480,7 +464,7 @@ Namespace Forms
             _btnLogout.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 60, 60)
             AddHandler _btnLogout.Click, AddressOf OnLogoutClick
 
-            _pnlMember.Controls.AddRange({_lblMemberTitle, _btnLogin, _btnRegister, _lblMemberInfo, _lblMemberTime, _btnLogout})
+            _pnlMember.Controls.AddRange({_lblMemberTitle, _btnLogin, _lblMemberInfo, _lblMemberTime, _btnLogout})
 
             ' ── Inline member login / register form controls ──────────────────────
             Dim fldW = 312   ' field width = panel width (360) - padX (24) * 2
@@ -499,13 +483,6 @@ Namespace Forms
             _txtMemberPass.Visible = False
             AddHandler _txtMemberPass.KeyDown, Sub(s, e) If e.KeyCode = Keys.Enter Then OnLoginClick(s, e)
 
-            _lblConfirmHint = FormStyles.CreateLabel("Confirm Password")
-            _lblConfirmHint.Visible = False
-
-            _txtMemberConf = FormStyles.CreateInput(New Point(0, 0), fldW, maxLen:=128, pwChar:="●"c)
-            _txtMemberConf.Visible = False
-            AddHandler _txtMemberConf.KeyDown, Sub(s, e) If e.KeyCode = Keys.Enter Then OnLoginClick(s, e)
-
             _lblInlineError = New Label() With {
                 .Text = "",
                 .Font = New Font("Segoe UI", 9),
@@ -516,17 +493,6 @@ Namespace Forms
                 .TextAlign = ContentAlignment.MiddleCenter,
                 .Visible = False
             }
-
-            _lblModeToggle = New Label() With {
-                .Text = "Register",
-                .Font = New Font("Segoe UI", 8.5F, FontStyle.Underline),
-                .ForeColor = MemberAccent,
-                .BackColor = Color.Transparent,
-                .AutoSize = True,
-                .Cursor = Cursors.Hand,
-                .Visible = False
-            }
-            AddHandler _lblModeToggle.Click, AddressOf OnModeToggleClick
 
             ' Close button — top-right corner of the card (440px card width → x = 404)
             _btnModalClose = New Button() With {
@@ -545,8 +511,7 @@ Namespace Forms
 
             _pnlMember.Controls.AddRange({_lblUsernameHint, _txtMemberUser,
                                            _lblPasswordHint, _txtMemberPass,
-                                           _lblConfirmHint, _txtMemberConf,
-                                           _lblInlineError, _lblModeToggle,
+                                           _lblInlineError,
                                            _btnModalClose})
 
             ' ── Receiving-coins indicator (shown when hardware controller is accepting coins for this PC) ──
@@ -1293,36 +1258,7 @@ Namespace Forms
                 Return
             End If
 
-            If _isRegisterMode Then
-                If pass <> _txtMemberConf.Text Then
-                    _lblInlineError.Text = "Passwords do not match."
-                    _lblInlineError.Visible = True
-                    Return
-                End If
-                RaiseEvent MemberRegisterRequested(user, pass)
-            Else
-                RaiseEvent MemberLoginRequested(user, pass)
-            End If
-        End Sub
-
-        ' _btnRegister is hidden in inline mode; kept as no-op for safety
-        Private Sub OnRegisterClick(sender As Object, e As EventArgs)
-        End Sub
-
-        Private Sub OnModeToggleClick(sender As Object, e As EventArgs)
-            _isRegisterMode = Not _isRegisterMode
-            _txtMemberUser.Text     = ""
-            _txtMemberPass.Text     = ""
-            _txtMemberConf.Text     = ""
-            _lblInlineError.Visible = False
-            _lblInlineError.Text    = ""
-            _pnlMember.SuspendLayout()
-            LayoutMemberForm()
-            _pnlMember.ResumeLayout(True)
-            ' Keep the mode cache in sync so the next heartbeat doesn't re-run LayoutMemberForm
-            _lastMemberFormMode = If(_isRegisterMode, "register", "login")
-            _pnlMember.Invalidate()
-            CenterLabels()
+            RaiseEvent MemberLoginRequested(user, pass)
         End Sub
 
         Private Sub OnLogoutClick(sender As Object, e As EventArgs)
@@ -1375,7 +1311,7 @@ Namespace Forms
             Const Block   As Integer = 18    ' between field groups
 
             ' ── Header ─────────────────────────────────────────────────────────
-            _lblMemberTitle.Text      = If(_isRegisterMode, "Create Account", "Member Login")
+            _lblMemberTitle.Text      = "Member Login"
             _lblMemberTitle.AutoSize  = False
             _lblMemberTitle.Size      = New Size(PW - 80, 28)
             _lblMemberTitle.Font      = New Font("Segoe UI", 14, FontStyle.Bold)
@@ -1390,15 +1326,12 @@ Namespace Forms
             ' Larger input fonts for the modern look
             _txtMemberUser.Font = New Font("Segoe UI", 11)
             _txtMemberPass.Font = New Font("Segoe UI", 11)
-            _txtMemberConf.Font = New Font("Segoe UI", 11)
 
             ' Field labels — slightly larger and brighter than default
             _lblUsernameHint.Font     = New Font("Segoe UI", 9, FontStyle.Regular)
             _lblUsernameHint.ForeColor = Color.FromArgb(160, 180, 220)
             _lblPasswordHint.Font     = New Font("Segoe UI", 9, FontStyle.Regular)
             _lblPasswordHint.ForeColor = Color.FromArgb(160, 180, 220)
-            _lblConfirmHint.Font      = New Font("Segoe UI", 9, FontStyle.Regular)
-            _lblConfirmHint.ForeColor = Color.FromArgb(160, 180, 220)
 
             ' Username
             _lblUsernameHint.Location = New Point(PadX, y)
@@ -1418,20 +1351,6 @@ Namespace Forms
             _txtMemberPass.Visible  = True
             y += _txtMemberPass.Height + Block
 
-            ' Confirm (register mode only)
-            If _isRegisterMode Then
-                _lblConfirmHint.Location = New Point(PadX, y)
-                _lblConfirmHint.Visible  = True
-                y += LabelH + Gap
-                _txtMemberConf.Location = New Point(PadX, y)
-                _txtMemberConf.Width    = FldW
-                _txtMemberConf.Visible  = True
-                y += _txtMemberConf.Height + Block
-            Else
-                _lblConfirmHint.Visible = False
-                _txtMemberConf.Visible  = False
-            End If
-
             ' Inline error
             _lblInlineError.Location = New Point(PadX, y)
             _lblInlineError.Size     = New Size(FldW, 20)
@@ -1439,7 +1358,7 @@ Namespace Forms
             y += 24
 
             ' Action button — full width, rounded via Region
-            _btnLogin.Text      = If(_isRegisterMode, "Create Account", "Sign In")
+            _btnLogin.Text      = "Sign In"
             _btnLogin.Size      = New Size(FldW, 46)
             _btnLogin.Font      = New Font("Segoe UI", 11, FontStyle.Bold)
             _btnLogin.BackColor = Color.FromArgb(37, 99, 235)
@@ -1447,35 +1366,24 @@ Namespace Forms
             _btnLogin.Location  = New Point(PadX, y)
             _btnLogin.Visible   = True
             _btnLogin.Region    = RoundedRegion(_btnLogin.Width, _btnLogin.Height, 10)
-            y += 46 + 14
-
-            ' Mode toggle link — centered below button
-            _lblModeToggle.Text    = If(_isRegisterMode, "Back to Login", "Don't have an account? Register")
-            _lblModeToggle.Font    = New Font("Segoe UI", 9, FontStyle.Underline)
-            _lblModeToggle.Visible = True
-            Dim toggleW = _lblModeToggle.PreferredWidth
-            _lblModeToggle.Location = New Point((PW - toggleW) \ 2, y)
-            y += _lblModeToggle.PreferredHeight + 20
+            y += 46 + 20
 
             ' Finalize panel size
             _pnlMember.Size = New Size(PW, y)
         End Sub
 
         Private Sub HideMemberFormControls()
-            _lblModeToggle.Visible   = False
             _lblUsernameHint.Visible = False
             _txtMemberUser.Visible   = False
             _lblPasswordHint.Visible = False
             _txtMemberPass.Visible   = False
-            _lblConfirmHint.Visible  = False
-            _txtMemberConf.Visible   = False
             _lblInlineError.Visible  = False
         End Sub
 
         ''' <summary>
-        ''' Clears all login/register form fields and resets the inline error.
-        ''' Called after a successful login or registration to ensure stale
-        ''' credentials are not left in the text boxes when the form is next shown.
+        ''' Clears the login form fields and resets the inline error.
+        ''' Called after a successful login to ensure stale credentials are not
+        ''' left in the text boxes when the form is next shown.
         ''' </summary>
         Public Sub ClearMemberForm()
             If Me.InvokeRequired Then
@@ -1484,10 +1392,8 @@ Namespace Forms
             End If
             _txtMemberUser.Text     = ""
             _txtMemberPass.Text     = ""
-            _txtMemberConf.Text     = ""
             _lblInlineError.Visible = False
             _lblInlineError.Text    = ""
-            _isRegisterMode         = False
             ' Reset mode cache so next heartbeat rebuilds the login layout fresh
             _lastMemberFormMode = ""
         End Sub
@@ -1660,7 +1566,6 @@ Namespace Forms
                 If _lastMemberFormMode <> "member" Then
                     _pnlMember.SuspendLayout()
                     HideMemberFormControls()
-                    _btnRegister.Visible = False
                     _btnLogin.Visible    = False
 
                     ' Title in gradient header area
@@ -1732,7 +1637,7 @@ Namespace Forms
                 End If
 
             Else
-                ' ── Not logged in — inline login / register form ──────────────
+                ' ── Not logged in — inline login form ──────────────────────────
                 If _memberUsername <> "" Then
                     _memberUsername = ""
                     _pnlMemberTrigger.Invalidate()
@@ -1741,11 +1646,10 @@ Namespace Forms
                 If _lblMemberInfo.Visible  Then _lblMemberInfo.Visible  = False
                 If _lblMemberTime.Visible  Then _lblMemberTime.Visible  = False
                 If _btnLogout.Visible      Then _btnLogout.Visible      = False
-                If _btnRegister.Visible    Then _btnRegister.Visible    = False
 
                 ' Only re-run LayoutMemberForm() when the mode actually transitions
-                ' (login → register or first time). Static idle heartbeats skip it entirely.
-                Dim newMode = If(_isRegisterMode, "register", "login")
+                ' (first time showing the login form). Static idle heartbeats skip it entirely.
+                Dim newMode = "login"
                 If _lastMemberFormMode <> newMode Then
                     _pnlMember.SuspendLayout()
                     LayoutMemberForm()
@@ -1821,7 +1725,7 @@ Namespace Forms
                 text = _memberUsername
                 fore = Color.FromArgb(34, 197, 94)
             Else
-                text = "Login / Register"
+                text = "Member Login"
                 fore = Color.FromArgb(210, 190, 210, 240)
             End If
             Using fnt = New Font("Segoe UI", 9.5F, FontStyle.Bold)
@@ -1844,7 +1748,7 @@ Namespace Forms
                 _pnlMember.SuspendLayout()
                 LayoutMemberForm()
                 _pnlMember.ResumeLayout(True)
-                _lastMemberFormMode = If(_isRegisterMode, "register", "login")
+                _lastMemberFormMode = "login"
             End If
             _memberModalOpen = True
             _pnlModalBackdrop.Size    = Me.ClientSize
@@ -2338,8 +2242,10 @@ Namespace Forms
         ' ── Insert Coin button ────────────────────────────────────────────────
 
         Private Sub UpdateInsertCoinVisibility()
-            ' Show only when: slot enabled, not currently requesting/receiving, server reachable
-            _btnInsertCoin.Visible = _coinSlotEnabled AndAlso
+            ' Show only when: not Traditional Café Mode, slot enabled, not currently
+            ' requesting/receiving, server reachable
+            _btnInsertCoin.Visible = Not _traditionalModeEnabled AndAlso
+                                     _coinSlotEnabled AndAlso
                                      Not _isRequestingCoin AndAlso
                                      _isConnected AndAlso
                                      Not _pnlReceivingCoins.Visible
@@ -2359,6 +2265,25 @@ Namespace Forms
             If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
             If Me.InvokeRequired Then Me.Invoke(Sub() UpdateCoinSlot(enabled)) : Return
             _coinSlotEnabled = enabled
+            UpdateInsertCoinVisibility()
+            Dim lk = GetLayoutKey()
+            If lk <> _lastLayoutKey Then
+                _lastLayoutKey = lk
+                CenterLabels()
+            End If
+        End Sub
+
+        ''' <summary>
+        ''' Applies the persistent "Traditional Café Mode" business-model toggle.
+        ''' Unlike membership_enabled (see _membershipFalseCount above), this is
+        ''' an explicit, rarely-changed admin setting rather than transient
+        ''' per-heartbeat server state, so it is applied immediately with no
+        ''' debounce.
+        ''' </summary>
+        Public Sub UpdateTraditionalMode(enabled As Boolean)
+            If Me.IsDisposed OrElse Not Me.IsHandleCreated Then Return
+            If Me.InvokeRequired Then Me.Invoke(Sub() UpdateTraditionalMode(enabled)) : Return
+            _traditionalModeEnabled = enabled
             UpdateInsertCoinVisibility()
             Dim lk = GetLayoutKey()
             If lk <> _lastLayoutKey Then

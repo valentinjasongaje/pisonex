@@ -48,11 +48,11 @@
     <div class="pc-status-sub">remaining</div>
     {% elif state == "locked" %}
     <div class="pc-status-label">Idle</div>
-    <div class="pc-status-sub">Waiting for coins</div>
+    <div class="pc-status-sub">{% if traditional_mode_enabled %}Ask cashier for time{% else %}Waiting for coins{% endif %}</div>
     {% else %}
     <div class="pc-status-label">Offline</div>
     <div class="pc-status-sub">
-      {% if pc.last_seen %}Last seen {{ pc.last_seen.strftime('%H:%M') }}{% else %}Never connected{% endif %}
+      {% if pc.last_seen %}Last seen {{ pc.last_seen | localtime('%H:%M') }}{% else %}Never connected{% endif %}
     </div>
     {% endif %}
   </div>

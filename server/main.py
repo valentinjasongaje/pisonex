@@ -641,7 +641,7 @@ async def _hourly_status_ping_loop():
 
 app = FastAPI(
     title="Pisonex Server",
-    version="1.0.0",
+    version="1.0.4",
     lifespan=lifespan,
 )
 
@@ -762,7 +762,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.0.4"}
 
 
 # ── Dev entry point ───────────────────────────────────────────────────────────

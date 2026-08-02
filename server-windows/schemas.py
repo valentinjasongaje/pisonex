@@ -20,6 +20,11 @@ class PCHeartbeatResponse(BaseModel):
     admin_message:    Optional[str] = None   # per-PC message (popped on delivery)
     announcement:     Optional[str] = None   # shop-wide broadcast (persistent)
     coin_slot_enabled: bool = True           # combined global + per-PC coin slot state
+    # Business-model toggle (persistent, admin-set via Settings). True = this
+    # install runs as a traditional cashier-run cafe with no coin hardware —
+    # the client hides all Insert Coin / Add Time coin-flow UI. Distinct from
+    # coin_slot_enabled above, which is a transient runtime pause/resume flag.
+    traditional_mode_enabled: bool = False
     # Server-pushed wallpaper — optional, ignored by older clients
     wallpaper_url:  Optional[str] = None   # full URL to download wallpaper image
     wallpaper_hash: Optional[str] = None   # MD5 hex — client compares to cached hash
@@ -140,11 +145,6 @@ class LogResponse(BaseModel):
 
 # ── Member ────────────────────────────────────────────────────────
 
-class MemberRegisterRequest(BaseModel):
-    username: str
-    password: str
-    pc_number: int
-
 class MemberLoginRequest(BaseModel):
     pc_number: int
     username: str
@@ -153,17 +153,23 @@ class MemberLoginRequest(BaseModel):
 class MemberLogoutRequest(BaseModel):
     pc_number: int
 
-class MemberRegisterResponse(BaseModel):
-    success: bool
-    user_id: int = 0
-    username: str = ""
-    absorbed_seconds: int = 0
-    error: Optional[str] = None
-
 class MemberLoginResponse(BaseModel):
     success: bool
     balance_seconds: int = 0
     absorbed_seconds: int = 0
+    must_change_password: bool = False
+    error: Optional[str] = None
+
+class MemberChangePasswordRequest(BaseModel):
+    pc_number: int
+    new_password: str
+    # Required for a voluntary change (tray icon "Change Password" while
+    # already logged in) — not required for the forced first-login change,
+    # where the login that just happened already proved identity.
+    old_password: Optional[str] = None
+
+class MemberChangePasswordResponse(BaseModel):
+    success: bool
     error: Optional[str] = None
 
 class MemberLogoutResponse(BaseModel):
@@ -215,6 +221,7 @@ class MemberListResponse(BaseModel):
     logged_in_pc_id: Optional[int]
     last_login_at: Optional[datetime]
     created_at: datetime
+    must_change_password: bool = False
 
     class Config:
         from_attributes = True

@@ -33,6 +33,18 @@ Module Program
 
     <STAThread>
     Sub Main()
+        ' ── Crash logging ─────────────────────────────────────────────────────
+        ' Catches exceptions the watchdog would otherwise paper over silently
+        ' (it just relaunches a dead process with no record of why it died).
+        ' AppDomain.UnhandledException covers background-thread crashes (Timer
+        ' ticks, async void) — the process still terminates after this fires,
+        ' logging is all we can do. Application.ThreadException covers UI-thread
+        ' crashes (e.g. inside a button Click handler) and actually keeps the
+        ' app alive after logging, since WinForms swallows it once handled.
+        AddHandler AppDomain.CurrentDomain.UnhandledException, AddressOf OnUnhandledException
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException)
+        AddHandler Application.ThreadException, AddressOf OnThreadException
+
         ' ── Single-instance guard ─────────────────────────────────────────────
         ' Prevents a second copy from starting when both the Run-key entry and the
         ' pnxsystem watchdog service fire at boot before the process is visible in
@@ -118,6 +130,7 @@ Module Program
         AddHandler _session.ReceivingCoinsChanged, AddressOf OnReceivingCoinsChanged
         AddHandler _session.CoinProgressChanged, AddressOf OnCoinProgressChanged
         AddHandler _session.CoinSlotChanged, AddressOf OnCoinSlotChanged
+        AddHandler _session.TraditionalModeChanged, AddressOf OnTraditionalModeChanged
         AddHandler _session.MembershipUpdated, AddressOf OnMembershipUpdated
         AddHandler _session.CaptureIntervalChanged, AddressOf OnCaptureIntervalChanged
 
@@ -129,7 +142,6 @@ Module Program
 
         ' Membership events from lock form and overlay
         AddHandler _lockMgr.LockFormLoginRequested, AddressOf OnMemberLogin
-        AddHandler _lockMgr.LockFormRegisterRequested, AddressOf OnMemberRegister
         AddHandler _lockMgr.LockFormLogoutRequested, AddressOf OnMemberLogout
         AddHandler _overlay.MemberLogoutRequested, AddressOf OnMemberLogoutFromOverlay
 
@@ -137,9 +149,12 @@ Module Program
         AddHandler _lockMgr.LockFormAdminRequested, AddressOf OnAdminPanelRequested
         AddHandler _tray.AdminPanelRequested, AddressOf OnAdminPanelRequested
         AddHandler _tray.TimerToggleRequested, AddressOf OnTimerToggleRequested
+        AddHandler _tray.MemberLoginRequested, AddressOf OnTrayMemberLoginRequested
+        AddHandler _tray.MemberChangePasswordRequested, AddressOf OnTrayChangePasswordRequested
         AddHandler _overlay.TimerHiddenByUser, Sub() _tray.SetTimerVisible(False)
 
         ' ── Lock immediately on startup ──────────────────────────────────
+        DiagnosticLog.Write("Startup: initial lock, entering deferred session start")
         _lockMgr.LockPC()
 
         ' ── Defer session start until the message loop is running ────────
@@ -149,14 +164,18 @@ Module Program
         AddHandler startTimer.Tick, Sub(s, ev)
             startTimer.Stop()
             startTimer.Dispose()
+            DiagnosticLog.Write("Startup: deferred start timer fired, message loop is running")
 
             ' Register PC with server
             Task.Run(Async Function()
-                         Await _api.RegisterAsync()
+                         DiagnosticLog.Write("Startup: RegisterAsync send")
+                         Dim ok = Await _api.RegisterAsync()
+                         DiagnosticLog.Write($"Startup: RegisterAsync recv — ok={ok}")
                      End Function)
 
             ' Start heartbeat + local countdown
             _session.Start()
+            DiagnosticLog.Write("Startup: SessionManager.Start() returned — heartbeat loop now running")
 
             ' Start screen capture for remote monitoring (grid thumbnails)
             _capture = New ScreenCaptureService(_api, _session)
@@ -172,6 +191,28 @@ Module Program
         startTimer.Start()
 
         Application.Run()
+    End Sub
+
+    ' ── Crash logging ───────────────────────────────────────────────────────
+
+    Private Sub OnUnhandledException(sender As Object, e As UnhandledExceptionEventArgs)
+        LogCrash(TryCast(e.ExceptionObject, Exception), "AppDomain.UnhandledException (fatal — process will terminate)")
+    End Sub
+
+    Private Sub OnThreadException(sender As Object, e As System.Threading.ThreadExceptionEventArgs)
+        LogCrash(e.Exception, "Application.ThreadException (UI thread — app will continue)")
+    End Sub
+
+    Private Sub LogCrash(ex As Exception, source As String)
+        Try
+            Dim dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PisoNet")
+            Directory.CreateDirectory(dir)
+            Dim logPath = Path.Combine(dir, "crash.log")
+            Dim entry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {source}{Environment.NewLine}{If(ex?.ToString(), "(no exception object)")}{Environment.NewLine}{New String("-"c, 80)}{Environment.NewLine}"
+            File.AppendAllText(logPath, entry)
+        Catch
+            ' Logging must never itself throw out of a crash handler.
+        End Try
     End Sub
 
     ' ── Session event handlers ────────────────────────────────────────────
@@ -283,14 +324,30 @@ Module Program
     End Sub
 
     Private Sub FireTimeAddedNotification(seconds As Integer)
-        Dim mins = seconds \ 60
-        Dim secs = seconds Mod 60
-        Dim timeStr = If(mins > 0, $"{mins}m {secs}s", $"{secs}s")
+        Dim timeStr = FormatDuration(seconds)
         _notifs.Show(
             $"+{timeStr} Added",
             $"{timeStr} has been added to your session.",
             ToastType.Success)
     End Sub
+
+    ''' <summary>
+    ''' Formats a duration for display, switching to "Xh Ym" once it reaches
+    ''' an hour so large additions (e.g. 5 hours) don't show as "300m 0s".
+    ''' </summary>
+    Private Function FormatDuration(seconds As Integer) As String
+        Dim totalMins = seconds \ 60
+        Dim secs = seconds Mod 60
+        If totalMins >= 60 Then
+            Dim hrs = totalMins \ 60
+            Dim mins = totalMins Mod 60
+            Return If(mins > 0, $"{hrs}h {mins}m", $"{hrs}h")
+        ElseIf totalMins > 0 Then
+            Return $"{totalMins}m {secs}s"
+        Else
+            Return $"{secs}s"
+        End If
+    End Function
 
     Private Sub OnReceivingCoinsChanged(isReceiving As Boolean)
         _lockMgr.ShowReceivingCoins(isReceiving)
@@ -321,6 +378,18 @@ Module Program
     Private Sub OnCoinSlotChanged(enabled As Boolean)
         _lockMgr.UpdateCoinSlot(enabled)
         _overlay.ShowAddTimeButton(enabled)
+    End Sub
+
+    ''' <summary>
+    ''' Persistent "Traditional Café Mode" business-model toggle (admin-set via
+    ''' Settings). When enabled, hides the Insert Coin button on the lock
+    ''' screen and the "+ Add Time" CTA / receiving-coins card on the overlay
+    ''' entirely — distinct from OnCoinSlotChanged above, which is a transient
+    ''' runtime pause/resume flag.
+    ''' </summary>
+    Private Sub OnTraditionalModeChanged(enabled As Boolean)
+        _lockMgr.UpdateTraditionalMode(enabled)
+        _overlay.SetTraditionalMode(enabled)
     End Sub
 
     Private Sub OnCaptureIntervalChanged(intervalMs As Integer)
@@ -412,6 +481,7 @@ Module Program
             Case "lock"
                 ' Lock is already handled server-side via is_locked flag on next heartbeat,
                 ' but we also end locally for instant response.
+                DiagnosticLog.Write("LOCK — remote command from dashboard")
                 _lockMgr.LockPC()
 
             Case "shutdown"
@@ -487,40 +557,71 @@ Module Program
                                      canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
                                      minimumLogoutMinutes)
         _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout, minimumLogoutMinutes)
+        _tray.UpdateMemberMenuState(enabled, username)
+    End Sub
+
+    ''' <summary>
+    ''' "Member Login..." from the tray menu — independent of LockForm's own
+    ''' inline member panel, so this works whether the PC is currently locked
+    ''' or unlocked. Unlike OnMemberLogin (wired to the lock screen's own
+    ''' form), this owns its own dialog end to end and can be freely cancelled.
+    ''' </summary>
+    Private Sub OnTrayMemberLoginRequested()
+        Dim dlg = New Forms.MemberLoginForm(_memberSvc, AppConfig.PCNumber)
+        dlg.ShowDialog()
+        If Not dlg.LoginSucceeded Then Return
+
+        If dlg.MustChangePassword Then
+            _lockMgr.ShowChangePasswordDialog(_memberSvc, AppConfig.PCNumber, dlg.LoggedInUsername)
+            _notifs.Show("Password Updated", "Your new password has been saved.", ToastType.Success)
+        End If
+
+        Dim absMsg = ""
+        If dlg.AbsorbedSeconds > 0 Then
+            Dim aMins = dlg.AbsorbedSeconds \ 60
+            absMsg = $" (+{aMins}m absorbed from previous session)"
+        End If
+        _notifs.Show("Login Successful", $"Welcome back, {dlg.LoggedInUsername}!{absMsg}", ToastType.Success)
+    End Sub
+
+    ''' <summary>
+    ''' "Change Password" from the tray menu — shown instead of "Member Login..."
+    ''' once a member is already logged in on this PC (see UpdateMemberMenuState).
+    ''' Voluntary and cancelable, and requires the current password (forced:=False)
+    ''' since there's no just-completed login here to prove identity.
+    ''' </summary>
+    Private Sub OnTrayChangePasswordRequested(username As String)
+        Dim dlg = New Forms.ChangePasswordForm(_memberSvc, AppConfig.PCNumber, username, forced:=False)
+        Dim result = dlg.ShowDialog()
+        If result = DialogResult.OK Then
+            _notifs.Show("Password Updated", "Your password has been changed.", ToastType.Success)
+        End If
     End Sub
 
     Private Sub OnMemberLogin(username As String, password As String)
         Task.Run(Async Function()
             Dim result = Await _memberSvc.LoginAsync(AppConfig.PCNumber, username, password)
             If result.success Then
-                         ' Clear credentials from the form immediately — do not leave them in the text boxes
-                         _lockMgr.ClearMemberForm()
-                         Dim absMsg = ""
-                         If result.absorbed_seconds > 0 Then
-                             Dim aMins = result.absorbed_seconds \ 60
-                             absMsg = $" (+{aMins}m absorbed from previous session)"
-                         End If
-                         _notifs.Show("Login Successful", $"Welcome back, {username}!{absMsg}", ToastType.Success)
-                     Else
-                         _lockMgr.ShowMemberError(If(result.[error], "Login failed"))
-                     End If
-                 End Function)
-    End Sub
+                ' Clear credentials from the form immediately — do not leave them in the text boxes
+                _lockMgr.ClearMemberForm()
 
-    Private Sub OnMemberRegister(username As String, password As String)
-        Task.Run(Async Function()
-                     Dim result = Await _memberSvc.RegisterAsync(AppConfig.PCNumber, username, password)
-                     If result.success Then
-                         ' Clear credentials from the form immediately after successful registration
-                         _lockMgr.ClearMemberForm()
-                         Dim absMsg = ""
-                         If result.absorbed_seconds > 0 Then
-                    Dim aMins = result.absorbed_seconds \ 60
-                    absMsg = $" (+{aMins}m absorbed)"
+                ' Admin-issued temp password — force a change before anything else.
+                ' ShowChangePasswordDialog blocks this background thread until the
+                ' member successfully sets a new password (no cancel option), and
+                ' defers any pending PC unlock on the lock screen until it closes.
+                If result.must_change_password Then
+                    _lockMgr.ShowChangePasswordDialog(_memberSvc, AppConfig.PCNumber, username)
+                    _notifs.Show("Password Updated", "Your new password has been saved.", ToastType.Success)
                 End If
-                _notifs.Show("Registration Successful", $"Account created for {result.username}!{absMsg}", ToastType.Success)
+
+                Dim absMsg = ""
+                If result.absorbed_seconds > 0 Then
+                    Dim aMins = result.absorbed_seconds \ 60
+                    absMsg = $" (+{aMins}m absorbed from previous session)"
+                End If
+                _notifs.Show("Login Successful", $"Welcome back, {username}!{absMsg}", ToastType.Success)
             Else
-                _lockMgr.ShowMemberError(If(result.[error], "Registration failed"))
+                _lockMgr.ShowMemberError(If(result.[error], "Login failed"))
             End If
         End Function)
     End Sub
@@ -529,11 +630,10 @@ Module Program
         Task.Run(Async Function()
             Dim result = Await _memberSvc.LogoutAsync(AppConfig.PCNumber)
             If result.success Then
-                Dim mins = result.remaining_seconds \ 60
-                Dim secs = result.remaining_seconds Mod 60
-                Dim dedMins = result.deducted_seconds \ 60
+                Dim savedStr = FormatDuration(result.remaining_seconds)
+                Dim dedStr = FormatDuration(result.deducted_seconds)
                 _notifs.Show("Logged Out",
-                    $"Time saved: {mins}m {secs}s (deducted {dedMins}m)", ToastType.Success)
+                    $"Time saved: {savedStr} (deducted {dedStr})", ToastType.Success)
             Else
                 _lockMgr.ShowMemberError(If(result.[error], "Logout failed"))
             End If

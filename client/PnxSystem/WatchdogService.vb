@@ -134,13 +134,19 @@ Public Class WatchdogService
 
         If Not WTSQueryUserToken(sessionId, userToken) Then
             Dim err = Marshal.GetLastWin32Error()
-            Log($"WTSQueryUserToken failed (session={sessionId}, error={err}). Falling back to shell launch.")
-            ' Fallback — may not appear on desktop but won't crash
-            Try
-                Process.Start(New ProcessStartInfo(exePath) With {.UseShellExecute = True})
-            Catch ex As Exception
-                Log($"Fallback launch failed: {ex.Message}")
-            End Try
+            ' Deliberately NOT falling back to a plain Process.Start here. This
+            ' service runs as LocalSystem, so an unqualified Process.Start would
+            ' launch the client under the SYSTEM identity instead of the
+            ' interactive user's. That client instance's registry reads/writes
+            ' (ServerUrl, PCNumber, IsConfigured, ...) then go to SYSTEM's own
+            ' hidden profile hive, not the real user's -- so an Admin Panel save
+            ' during one of these launches "succeeds" but is invisible to every
+            ' normal launch afterward, which looks like the settings randomly
+            ' reverting. Skipping this cycle and retrying on the next 5 s tick
+            ' is safe: WTSQueryUserToken failures are typically transient (e.g.
+            ' the session isn't fully ready yet right after boot).
+            Log($"WTSQueryUserToken failed (session={sessionId}, error={err}). " &
+                "Skipping this cycle rather than launching under the wrong identity -- will retry.")
             Return
         End If
 
@@ -183,9 +189,25 @@ Public Class WatchdogService
     End Sub
 
     ' ── Graceful-shutdown grace period ───────────────────────────────────────
+    ' Read from the same %ProgramData% file PisoNetClient.AppConfig.SaveGracefulShutdown
+    ' writes to — NOT the registry. This service normally runs as SYSTEM (see
+    ' install-watchdog.bat), whose HKEY_CURRENT_USER is a different hive from
+    ' the logged-in café user's, so a registry flag written by the client was
+    ' never actually visible here. %ProgramData% is machine-wide and readable
+    ' by both regardless of which account each process runs as.
+
+    Private ReadOnly _shutdownFlagPath As String = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "PisoNet", "shutdown.flag")
 
     Private Function InGracePeriod() As Boolean
-        Dim raw = ReadReg("ShutdownAt")
+        Dim raw As String
+        Try
+            If Not File.Exists(_shutdownFlagPath) Then Return False
+            raw = File.ReadAllText(_shutdownFlagPath).Trim()
+        Catch
+            Return False
+        End Try
         If String.IsNullOrEmpty(raw) Then Return False
 
         Dim ts As Long
@@ -194,7 +216,10 @@ Public Class WatchdogService
         Dim elapsed = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ts
         If elapsed < GRACE_SECONDS Then Return True
 
-        WriteReg("ShutdownAt", "")
+        Try
+            File.Delete(_shutdownFlagPath)
+        Catch
+        End Try
         Return False
     End Function
 

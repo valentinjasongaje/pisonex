@@ -42,7 +42,19 @@ if exist "%CONFUSER_PROJ%" del "%CONFUSER_PROJ%"
 >>"%CONFUSER_PROJ%" echo       ^<argument name="renPublic" value="true" /^>
 >>"%CONFUSER_PROJ%" echo     ^</protection^>
 >>"%CONFUSER_PROJ%" echo   ^</rule^>
->>"%CONFUSER_PROJ%" echo   ^<module path="PisoNetClient.dll" /^>
+>>"%CONFUSER_PROJ%" echo   ^<module path="PisoNetClient.dll"^>
+REM JSON DTOs deserialized by System.Text.Json via reflection.  The VB
+REM <Obfuscation(Exclude:=True)> attribute on these classes is NOT honored
+REM by the "rename" protection above -- it still renames them, which breaks
+REM member login/logout/change-password/heartbeat deserialization at
+REM runtime. These explicit rules are the only thing that actually excludes
+REM them; keep in sync with client/PisoNetClient/Services/ApiService.vb and
+REM client/PisoNetClient/Services/MemberService.vb.
+>>"%CONFUSER_PROJ%" echo     ^<rule pattern="name() = 'HeartbeatResponse'" preset="none" inherit="false" /^>
+>>"%CONFUSER_PROJ%" echo     ^<rule pattern="name() = 'MemberLoginResponse'" preset="none" inherit="false" /^>
+>>"%CONFUSER_PROJ%" echo     ^<rule pattern="name() = 'MemberLogoutResponse'" preset="none" inherit="false" /^>
+>>"%CONFUSER_PROJ%" echo     ^<rule pattern="name() = 'MemberChangePasswordResponse'" preset="none" inherit="false" /^>
+>>"%CONFUSER_PROJ%" echo   ^</module^>
 >>"%CONFUSER_PROJ%" echo ^</project^>
 
 echo.

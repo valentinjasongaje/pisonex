@@ -80,7 +80,7 @@
           {% set _h = tx.seconds_added // 3600 %}{% set _m = (tx.seconds_added % 3600) // 60 %}{% set _s = tx.seconds_added % 60 %}
           {% if _h > 0 %}{{ _h }}h {{ _m }}m{% elif _m > 0 %}{{ _m }}m {{ _s }}s{% else %}{{ _s }}s{% endif %}
         </td>
-        <td class="tx-date">{{ tx.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td class="tx-date">{{ tx.created_at | localtime('%Y-%m-%d %I:%M:%S %p') }}</td>
       </tr>
       {% endfor %}
     </tbody>

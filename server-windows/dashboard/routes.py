@@ -1,13 +1,15 @@
+import asyncio
 import csv
 import hashlib
 import io
 import os
 import sys
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File
+from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -18,11 +20,41 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, RateProfile, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
+from services.rate_service import pesos_to_seconds, pesos_for_seconds
 from config import settings
 import command_store
+
+# Fixed amounts shown as quick-add presets in the "Add Time" modal. The modal
+# lets the admin switch between Amount (pesos) and Time (minutes) presets;
+# each side shows the other unit's equivalent underneath, using the Default
+# rate profile -- rates are configurable, so these aren't hardcoded elsewhere.
+_ADD_TIME_PRESET_PESOS = [1, 5, 10, 15, 20, 25]
+_ADD_TIME_PRESET_MINUTES = [30, 60, 120, 180, 300, 480]
+
+
+def _format_compact_duration(seconds: int) -> str:
+    mins = seconds // 60
+    if mins >= 60:
+        h, m = divmod(mins, 60)
+        return f"{h}h {m}m" if m else f"{h}h"
+    return f"{mins} min"
+
+
+def _preset_time_labels(db: Session) -> dict:
+    return {
+        amt: _format_compact_duration(pesos_to_seconds(amt, db))
+        for amt in _ADD_TIME_PRESET_PESOS
+    }
+
+
+def _preset_peso_labels(db: Session) -> dict:
+    return {
+        mins: f"₱{pesos_for_seconds(mins * 60, db)}"
+        for mins in _ADD_TIME_PRESET_MINUTES
+    }
 
 
 class RenamePcBody(BaseModel):
@@ -44,6 +76,26 @@ class CoinSlotBody(BaseModel):
 router = APIRouter(prefix="/dashboard")
 _BUNDLE_DIR = Path(os.environ.get('PISONEX_BUNDLE_DIR', Path(__file__).parent.parent))
 templates = Jinja2Templates(directory=str(_BUNDLE_DIR / "dashboard" / "templates"))
+
+# All timestamps are stored as naive UTC (datetime.utcnow()) -- that's correct
+# and unchanged. This filter only affects what the dashboard displays: convert
+# to settings.TIMEZONE before formatting, so admins see local time instead of
+# raw UTC. Falls back to UTC if the configured zone name is invalid, so a
+# typo in .env can't break every page that shows a timestamp.
+try:
+    _LOCAL_TZ = ZoneInfo(settings.TIMEZONE)
+except Exception:
+    _LOCAL_TZ = ZoneInfo("UTC")
+
+
+def _localtime_filter(dt, fmt: str = "%Y-%m-%d %H:%M:%S"):
+    if dt is None:
+        return ""
+    aware_utc = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return aware_utc.astimezone(_LOCAL_TZ).strftime(fmt)
+
+
+templates.env.filters["localtime"] = _localtime_filter
 
 _ALGORITHM = "HS256"
 _COOKIE_NAME = "pisonet_session"
@@ -223,6 +275,17 @@ def logout():
 
 # ── Shared data helper ────────────────────────────────────────────────────────
 
+def _get_traditional_mode_enabled(db: Session) -> bool:
+    """Returns the persistent "Traditional Café Mode" business-model toggle
+    (ServerConfig.traditional_mode_enabled). True = cashier-run cafe with no
+    coin acceptor hardware — Insert-Coin/coin-slot UI is hidden.
+
+    Defaults False (row is always seeded on startup by _seed_defaults()).
+    """
+    srv_cfg = db.query(ServerConfig).first()
+    return srv_cfg.traditional_mode_enabled if srv_cfg else False
+
+
 def _get_membership_info(db: Session) -> tuple[bool, dict[int, str]]:
     """Returns (membership_enabled, {pc_number: username}) for all logged-in members."""
     cfg = db.query(MembershipConfig).first()
@@ -306,6 +369,9 @@ def overview(
         "active_count": active_count,
         "today_pesos": today_pesos,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "preset_time_labels": _preset_time_labels(db),
+        "preset_peso_labels": _preset_peso_labels(db),
+        "traditional_mode_enabled": _get_traditional_mode_enabled(db),
     })
 
 
@@ -322,6 +388,7 @@ def pc_grid_partial(
     return templates.TemplateResponse("partials/pc_grid.html", {
         "request": request,
         "pcs": pcs,
+        "traditional_mode_enabled": _get_traditional_mode_enabled(db),
     })
 
 
@@ -345,6 +412,7 @@ def license_page(
 @router.get("/rates", response_class=HTMLResponse)
 def rates_page(
     request: Request,
+    profile: int = 1,
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(_validate_session),
 ):
@@ -352,15 +420,54 @@ def rates_page(
         return RedirectResponse("/dashboard/login", status_code=302)
     if current_user["role"] != "admin":
         return RedirectResponse("/dashboard", status_code=302)
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+
+    # Resolve the selected profile — fall back to the default if the id is unknown
+    selected_profile = db.query(RateProfile).filter(RateProfile.id == profile).first()
+    if not selected_profile and profiles:
+        selected_profile = next((p for p in profiles if p.is_default), profiles[0])
+
+    selected_id = selected_profile.id if selected_profile else 1
+
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == selected_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("rates.html", {
         "request": request,
         "rates": rates,
+        "profiles": profiles,
+        "selected_profile": selected_profile,
+        "selected_id": selected_id,
+    })
+
+
+@router.get("/partials/rates-table", response_class=HTMLResponse)
+def rates_table_partial(
+    request: Request,
+    profile_id: int = 1,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """HTMX partial — returns just the rates table for the selected profile."""
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+    rates = (
+        db.query(CoinRate)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
+        .order_by(CoinRate.pesos.asc())
+        .all()
+    )
+    return templates.TemplateResponse("partials/rates_table.html", {
+        "request": request,
+        "rates": rates,
+        "selected_id": profile_id,
     })
 
 
@@ -369,6 +476,7 @@ def save_rate(
     request: Request,
     pesos: int = Form(...),
     minutes: int = Form(...),
+    profile_id: int = Form(1),
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(_validate_session),
 ):
@@ -376,8 +484,16 @@ def save_rate(
         return HTMLResponse(status_code=401, content="")
     if current_user["role"] != "admin":
         return HTMLResponse(status_code=403, content="")
+
+    # Ensure the profile exists
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+
     existing = db.query(CoinRate).filter(
-        CoinRate.pesos == pesos, CoinRate.is_active == True
+        CoinRate.pesos == pesos,
+        CoinRate.is_active == True,
+        CoinRate.profile_id == profile_id,
     ).first()
     if existing:
         existing.is_active = False
@@ -387,19 +503,21 @@ def save_rate(
         pesos=pesos,
         seconds=seconds,
         label=f"₱{pesos} = {minutes} minutes",
+        profile_id=profile_id,
     )
     db.add(rate)
     db.commit()
 
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("partials/rates_table.html", {
         "request": request,
         "rates": rates,
+        "selected_id": profile_id,
     })
 
 
@@ -415,18 +533,186 @@ def delete_rate(
     if current_user["role"] != "admin":
         return HTMLResponse(status_code=403, content="")
     rate = db.query(CoinRate).filter(CoinRate.id == rate_id).first()
+    profile_id = rate.profile_id if rate else 1
     if rate:
         rate.is_active = False
         db.commit()
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("partials/rates_table.html", {
         "request": request,
         "rates": rates,
+        "selected_id": profile_id,
+    })
+
+
+# ── Rate Profile CRUD ────────────────────────────────────────────────────────
+
+@router.post("/rates/profiles", response_class=HTMLResponse)
+def create_profile(
+    request: Request,
+    name: str = Form(...),
+    color: str = Form("#4f8ef7"),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    name = name.strip()
+    if not name:
+        return HTMLResponse(status_code=422, content="Name cannot be empty")
+
+    existing = db.query(RateProfile).filter(RateProfile.name == name).first()
+    if existing:
+        return HTMLResponse(status_code=409, content="A profile with that name already exists")
+
+    profile = RateProfile(name=name, color=color, is_default=False)
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": profile.id,
+    })
+
+
+@router.delete("/rates/profiles/{profile_id}", response_class=HTMLResponse)
+def delete_profile(
+    profile_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+    if profile.is_default:
+        return HTMLResponse(status_code=400, content="Cannot delete the Default profile")
+
+    # Reassign PCs to Default profile
+    default_profile = db.query(RateProfile).filter(RateProfile.is_default == True).first()
+    default_id = default_profile.id if default_profile else 1
+    db.query(PC).filter(PC.rate_profile_id == profile_id).update(
+        {"rate_profile_id": None}, synchronize_session=False
+    )
+
+    # Soft-delete this profile's rates (mark inactive)
+    db.query(CoinRate).filter(CoinRate.profile_id == profile_id).update(
+        {"is_active": False}, synchronize_session=False
+    )
+
+    db.delete(profile)
+    db.commit()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": default_id,
+    })
+
+
+@router.post("/rates/profiles/{profile_id}/name", response_class=HTMLResponse)
+def rename_profile(
+    profile_id: int,
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+    if profile.is_default:
+        return HTMLResponse(status_code=400, content="Cannot rename the Default profile")
+
+    name = name.strip()
+    if not name:
+        return HTMLResponse(status_code=422, content="Name cannot be empty")
+
+    conflict = db.query(RateProfile).filter(
+        RateProfile.name == name, RateProfile.id != profile_id
+    ).first()
+    if conflict:
+        return HTMLResponse(status_code=409, content="A profile with that name already exists")
+
+    profile.name = name
+    db.commit()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": profile_id,
+    })
+
+
+# ── PC profile assignment ────────────────────────────────────────────────────
+
+@router.post("/pcs/{pc_number}/profile", response_class=HTMLResponse)
+def set_pc_profile(
+    pc_number: int,
+    request: Request,
+    profile_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Assign a rate profile to a PC.  Returns an updated profile-badge partial."""
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    pc = db.query(PC).filter(PC.pc_number == pc_number).first()
+    if not pc:
+        return HTMLResponse(status_code=404, content=f"PC {pc_number} not found")
+
+    # profile_id=0 means "clear assignment → Default"
+    if profile_id == 0:
+        pc.rate_profile_id = None
+    else:
+        profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+        if not profile:
+            return HTMLResponse(status_code=404, content="Profile not found")
+        pc.rate_profile_id = profile_id
+
+    db.commit()
+    db.refresh(pc)
+
+    # Determine the effective profile for display
+    effective_profile = None
+    if pc.rate_profile_id:
+        effective_profile = db.query(RateProfile).filter(RateProfile.id == pc.rate_profile_id).first()
+    if not effective_profile:
+        effective_profile = db.query(RateProfile).filter(RateProfile.is_default == True).first()
+
+    return templates.TemplateResponse("partials/pc_profile_badge.html", {
+        "request": request,
+        "pc_number": pc_number,
+        "profile": effective_profile,
     })
 
 
@@ -698,6 +984,92 @@ def serve_screenshot(
     )
 
 
+@router.post("/monitor/watch/{pc_number}")
+async def watch_pc(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Called by dashboard when admin opens fullscreen view of a PC.
+    Sets a 12-second TTL that tells the PC client to ramp up to ~30 fps.
+    The dashboard renews it every 8 s while the view is open."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_watched(pc_number)
+    return {"status": "ok"}
+
+
+@router.websocket("/ws/stream/{pc_number}/publish")
+async def ws_stream_publish(websocket: WebSocket, pc_number: int):
+    """PC client connects here and pushes raw MPEG-TS/MPEG1 bytes from FFmpeg.
+    The server broadcasts every chunk to all watching browser connections."""
+    import logging, stream_store
+    _log = logging.getLogger("stream.publish")
+
+    api_key = (
+        websocket.headers.get("x-api-key", "")
+        or websocket.query_params.get("api_key", "")
+    )
+    if settings.CLIENT_API_KEY and api_key != settings.CLIENT_API_KEY:
+        _log.warning("PC %d publish rejected — bad API key", pc_number)
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    stream_store.set_publisher(pc_number, websocket)
+    _log.info("PC %d publish connected (watchers: %d)",
+              pc_number, len(stream_store._watchers.get(pc_number, [])))
+    chunks = 0
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            chunks += 1
+            if chunks <= 3 or chunks % 30 == 0:
+                _log.info("PC %d chunk #%d  %d bytes  watchers: %d",
+                          pc_number, chunks, len(data),
+                          len(stream_store._watchers.get(pc_number, [])))
+            await stream_store.broadcast(pc_number, data)
+    except WebSocketDisconnect:
+        _log.info("PC %d publish disconnected after %d chunks", pc_number, chunks)
+    except Exception as exc:
+        _log.warning("PC %d publish error after %d chunks: %s", pc_number, chunks, exc)
+    finally:
+        stream_store.clear_publisher(pc_number)
+        await stream_store.close_all_watchers(pc_number)
+
+
+@router.websocket("/ws/stream/{pc_number}/watch")
+async def ws_stream_watch(websocket: WebSocket, pc_number: int):
+    """Admin browser connects here to receive the live MPEG1 video stream.
+    Authentication uses the pisonet_session JWT cookie (sent automatically)."""
+    import logging, stream_store
+    _log = logging.getLogger("stream.watch")
+
+    token = websocket.cookies.get("pisonet_session")
+    if not token:
+        _log.warning("PC %d watch rejected — no session cookie", pc_number)
+        await websocket.close(code=1008)
+        return
+    try:
+        _jwt_decode = jwt.decode(token, settings.SECRET_KEY, algorithms=[_ALGORITHM])
+    except Exception as exc:
+        _log.warning("PC %d watch rejected — bad JWT: %s", pc_number, exc)
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    stream_store.add_watcher(pc_number, websocket)
+    _log.info("PC %d watch connected (total watchers: %d)",
+              pc_number, len(stream_store._watchers.get(pc_number, [])))
+    try:
+        while True:
+            await asyncio.sleep(20)
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        stream_store.remove_watcher(pc_number, websocket)
+        _log.info("PC %d watch disconnected", pc_number)
+
+
 # ── Documentation pages ───────────────────────────────────────────────────────
 
 @router.get("/docs/api", response_class=HTMLResponse)
@@ -760,11 +1132,16 @@ def pcs_page(
     if not current_user:
         return RedirectResponse("/dashboard/login", status_code=302)
 
+    from services.rate_service import get_all_profiles
+
     svc = SessionService(db)
     pcs = svc.get_all_pcs()
     timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
     membership_enabled, pc_members = _get_membership_info(db)
     cfg = db.query(MembershipConfig).first()
+    profiles = get_all_profiles(db)
+    default_profile = next((p for p in profiles if p.is_default), None)
+    profile_map = {p.id: p for p in profiles}
 
     pc_data = []
     for pc in pcs:
@@ -772,6 +1149,8 @@ def pcs_page(
             pc.is_online = False
         session = svc.get_active_session(pc.pc_number)
         remaining_sec = svc.remaining_seconds(session)
+        # Effective profile: the one assigned, else the Default
+        eff_profile = profile_map.get(pc.rate_profile_id) if pc.rate_profile_id else default_profile
         pc_data.append({
             "pc_number": pc.pc_number,
             "name": pc.name,
@@ -783,6 +1162,8 @@ def pcs_page(
             "remaining_minutes": remaining_sec // 60,
             "remaining_seconds": remaining_sec % 60,
             "member_username": pc_members.get(pc.pc_number),
+            "rate_profile": eff_profile,
+            "rate_profile_id": pc.rate_profile_id,
         })
     db.commit()
 
@@ -792,6 +1173,10 @@ def pcs_page(
         "total": len(pc_data),
         "membership_enabled": membership_enabled,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "preset_time_labels": _preset_time_labels(db),
+        "preset_peso_labels": _preset_peso_labels(db),
+        "traditional_mode_enabled": _get_traditional_mode_enabled(db),
+        "profiles": profiles,
     })
 
 
@@ -1269,6 +1654,8 @@ def settings_page(
         "api_key_enabled": bool(api_key),
         "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
         "branch_name": settings.BRANCH_NAME,
+        "traditional_mode_enabled": srv_cfg.traditional_mode_enabled if srv_cfg else False,
+        "ffmpeg_streaming_enabled": getattr(srv_cfg, "ffmpeg_streaming_enabled", True) if srv_cfg else True,
     })
 
 
@@ -1309,6 +1696,59 @@ def save_branch_name(
     # Apply immediately without restart
     settings.BRANCH_NAME = name
     return {"status": "ok", "branch_name": name}
+
+
+class TraditionalModeBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/api/settings/traditional-mode")
+def save_traditional_mode(
+    body: TraditionalModeBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Toggle "Traditional Café Mode" (no coin hardware).
+
+    Applies immediately — the next heartbeat picks it up and the client
+    hides/shows Insert Coin + Add Time coin-flow UI accordingly. Manual
+    add-time / adjust-balance from the dashboard is unaffected either way.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    srv_cfg = db.query(ServerConfig).first()
+    if srv_cfg:
+        srv_cfg.traditional_mode_enabled = body.enabled
+    else:
+        db.add(ServerConfig(id=1, client_api_key="", traditional_mode_enabled=body.enabled))
+    db.commit()
+
+    return {"status": "ok", "traditional_mode_enabled": body.enabled}
+
+
+class FfmpegToggleBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/api/settings/ffmpeg-streaming")
+def save_ffmpeg_streaming(
+    body: FfmpegToggleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Enable or disable FFmpeg live streaming for the fullscreen monitor view."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1, client_api_key="")
+        db.add(srv_cfg)
+    srv_cfg.ffmpeg_streaming_enabled = body.enabled
+    db.commit()
+    return {"status": "ok", "ffmpeg_streaming_enabled": body.enabled}
 
 
 @router.post("/api/security/generate-key")
@@ -1376,6 +1816,25 @@ def membership_page(
         .all()
     )
 
+    # Lifetime totals per member — one aggregate query for all members rather
+    # than a query per row. Pulled from CoinTransaction, which already covers
+    # every way a member's balance grows: real coin inserts, admin peso-mode
+    # adds, and (in Traditional Café Mode) minutes-mode adds too, since those
+    # all write a CoinTransaction row (see SessionService.add_time_seconds /
+    # add_time_by_pesos). This is monitoring-only — it doesn't affect balance
+    # or session logic at all.
+    totals_rows = (
+        db.query(
+            CoinTransaction.user_id,
+            func.coalesce(func.sum(CoinTransaction.amount_php), 0).label("total_pesos"),
+            func.coalesce(func.sum(CoinTransaction.seconds_added), 0).label("total_seconds"),
+        )
+        .filter(CoinTransaction.user_id.isnot(None))
+        .group_by(CoinTransaction.user_id)
+        .all()
+    )
+    totals_by_user = {row.user_id: (row.total_pesos, row.total_seconds) for row in totals_rows}
+
     member_data = []
     svc = SessionService(db)
     for m in members:
@@ -1388,6 +1847,8 @@ def membership_page(
                 session = svc.get_active_session(pc.pc_number)
                 remaining_sec = svc.remaining_seconds(session) if session else 0
 
+        total_pesos, total_seconds = totals_by_user.get(m.id, (0, 0))
+
         member_data.append({
             "id": m.id,
             "username": m.username,
@@ -1397,6 +1858,9 @@ def membership_page(
             "remaining_seconds": remaining_sec,
             "last_login_at": m.last_login_at,
             "created_at": m.created_at,
+            "must_change_password": m.must_change_password,
+            "total_pesos": total_pesos,
+            "total_seconds": total_seconds,
         })
 
     return templates.TemplateResponse("membership.html", {
@@ -1404,6 +1868,53 @@ def membership_page(
         "config": cfg,
         "members": member_data,
     })
+
+
+class CreateMemberBody(BaseModel):
+    username: str
+    initial_minutes: int = 0  # optional time to seed at creation (e.g. membership sold with time included)
+
+
+@router.post("/api/membership/create-member", dependencies=[Depends(_require_active_license)])
+def create_member(
+    body: CreateMemberBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: create a member account with an auto-generated temp password.
+
+    Self-service registration from the client lock screen has been removed
+    (see api/member.py) — this is now the only way to create a member
+    account. The temp password is returned once in the JSON response for
+    the admin to copy; it is never stored in plaintext or logged.
+
+    initial_minutes seeds User.balance_seconds at creation (converted to
+    seconds here, same underlying unit as AdjustBalanceBody.seconds used by
+    POST .../members/{id}/adjust-balance) — used when a membership is sold
+    with time already included.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username cannot be empty")
+    if body.initial_minutes < 0:
+        raise HTTPException(status_code=422, detail="Initial time cannot be negative")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_create_member(username, initial_minutes=body.initial_minutes)
+    if not result["success"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+
+    return {
+        "status": "created",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+        "balance_seconds": result["balance_seconds"],
+    }
 
 
 @router.post("/api/membership/config", dependencies=[Depends(_require_active_license)])
@@ -1502,6 +2013,74 @@ def force_logout_member(
     if not ok:
         raise HTTPException(status_code=404, detail="Member not found or not logged in")
     return {"status": "logged_out", "member_id": member_id}
+
+
+@router.delete("/api/membership/members/{member_id}", dependencies=[Depends(_require_active_license)])
+def delete_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: permanently delete a member account.
+
+    Historical Sessions/CoinTransactions are preserved (their user_id is
+    cleared, not the rows themselves) so past earnings/reports stay
+    accurate. If the member is currently logged in, they are
+    force-logged-out first — same behavior as deactivate_member above.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    user = db.query(User).filter(User.id == member_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if user.logged_in_pc_id:
+        msvc = MembershipService(db)
+        msvc.force_logout_member(member_id)
+        db.refresh(user)
+
+    db.query(SessionModel).filter(SessionModel.user_id == member_id).update(
+        {"user_id": None}, synchronize_session=False
+    )
+    db.query(CoinTransaction).filter(CoinTransaction.user_id == member_id).update(
+        {"user_id": None}, synchronize_session=False
+    )
+
+    username = user.username
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted", "member_id": member_id, "username": username}
+
+
+@router.post("/api/membership/members/{member_id}/reset-password", dependencies=[Depends(_require_active_license)])
+def reset_member_password(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: generate a new temp password for a member who forgot
+    theirs. They'll be required to set their own password on next login,
+    same as a freshly created account. Does not disturb an already-active
+    session — only their next login is affected.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_reset_password(member_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return {
+        "status": "reset",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+    }
 
 
 # ── Staff management (admin only) ────────────────────────────────────────────

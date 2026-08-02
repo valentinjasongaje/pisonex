@@ -48,6 +48,48 @@
     <button class="btn btn-primary" onclick="saveIdleShutdown()">Save</button>
     <span id="idle-status" style="font-size:.85rem;"></span>
   </div>
+
+  <div class="form-group" style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border);">
+    <label class="toggle-label">
+      <input type="checkbox" id="cfg-traditional-mode"
+        {% if traditional_mode_enabled %}checked{% endif %}
+        onchange="saveTraditionalMode()" />
+      <span>Traditional Café Mode</span>
+    </label>
+    <p style="font-size:.8rem;color:var(--gray);margin:.5rem 0 0 24px;">
+      Hide coin-slot features and manage all PC time manually from the
+      dashboard. Turn this on if this location has no coin acceptor and a
+      cashier handles all sessions. Adding time or adjusting a member's
+      balance manually from the dashboard keeps working either way.
+    </p>
+    <span id="traditional-mode-status" style="font-size:.85rem;margin-left:24px;"></span>
+  </div>
+</div>
+
+<!-- Monitoring -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Monitoring</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Controls how PC screens are streamed to the admin dashboard.
+  </p>
+
+  <div class="form-group">
+    <label class="toggle-label" for="cfg-ffmpeg-enabled">
+      <input type="checkbox" id="cfg-ffmpeg-enabled"
+        {% if ffmpeg_streaming_enabled %}checked{% endif %}
+        onchange="saveFfmpegSetting()" />
+      <span>Enable FFmpeg Live Streaming</span>
+    </label>
+    <p style="font-size:.8rem;color:var(--gray);margin:.5rem 0 0 24px;">
+      When enabled, opening a PC in fullscreen starts an FFmpeg process on the
+      client PC and streams real-time MPEG1 video to the dashboard — smooth,
+      high-quality live video with readable text. Requires <code>ffmpeg.exe</code>
+      to be present beside the client executable.<br><br>
+      When <em>disabled</em>, the fullscreen view falls back to the normal
+      1-second JPEG snapshot stream — lower quality but works without FFmpeg.
+    </p>
+    <span id="ffmpeg-status" style="font-size:.85rem;margin-left:24px;"></span>
+  </div>
 </div>
 
 <!-- PC Management Presets -->
@@ -204,6 +246,42 @@ function saveIdleShutdown() {
 function savePresetAmounts() {
   const val = document.getElementById('cfg-preset-amounts').checked;
   _saveConfig({ preset_amounts_enabled: val }, 'preset-status');
+}
+
+async function saveTraditionalMode() {
+  const val = document.getElementById('cfg-traditional-mode').checked;
+  const el = document.getElementById('traditional-mode-status');
+  const res = await fetch('/dashboard/api/settings/traditional-mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: val }),
+  });
+  if (res.ok) {
+    el.textContent = val ? 'Traditional Café Mode enabled.' : 'Traditional Café Mode disabled — coins enabled.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 4000);
+}
+
+async function saveFfmpegSetting() {
+  const enabled = document.getElementById('cfg-ffmpeg-enabled').checked;
+  const el = document.getElementById('ffmpeg-status');
+  const res = await fetch('/dashboard/api/settings/ffmpeg-streaming', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (res.ok) {
+    el.textContent = enabled ? 'Live streaming enabled.' : 'Fallback to JPEG snapshots.';
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save.';
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 4000);
 }
 
 async function generateKey() {

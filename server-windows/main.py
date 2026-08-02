@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base, SessionLocal
-from models import AdminUser, CoinRate, MembershipConfig, ServerConfig
+from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig
 from api import auth, pc, sessions, admin
 from api.license import router as license_router
 from api.member import router as member_router
@@ -47,6 +47,12 @@ logger = logging.getLogger(__name__)
 # ── App lifespan (startup / shutdown) ─────────────────────────────────────────────
 
 license_service: LicenseService = None
+
+# server-windows has no physical coin-slot hardware (no GPIO on a Windows PC).
+# Always None — api/pc.py's `from main import hw_controller` + `is None` check
+# relies on this name existing so it can return a clean 503 instead of an
+# ImportError when a client hits the coin-flow endpoints.
+hw_controller = None
 
 
 def _ensure_firewall_rule():
@@ -240,6 +246,15 @@ def _migrate_schema():
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
             migrated.append(f"users.{col_name} (added)")
 
+    # Admin-only membership: members created via the dashboard get a temp
+    # password and must change it on first login. Defaults to 0 (False) for
+    # existing self-registered accounts.
+    if not has_column("users", "must_change_password"):
+        cursor.execute(
+            "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
+        )
+        migrated.append("users.must_change_password (added)")
+
     # Add role column to admin_users if missing
     if not has_column("admin_users", "role"):
         cursor.execute("ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'")
@@ -253,6 +268,44 @@ def _migrate_schema():
         if not has_column("membership_config", col_name):
             cursor.execute(f"ALTER TABLE membership_config ADD COLUMN {col_name} {col_type} DEFAULT 0")
             migrated.append(f"membership_config.{col_name} (added)")
+
+    # Traditional Café Mode toggle (formerly "coins_enabled", inverted).
+    # Defaults to 0 (False) so existing installs keep coin-slot UI visible
+    # until an admin explicitly opts in to cashier-managed mode.
+    if not has_column("server_config", "traditional_mode_enabled"):
+        cursor.execute(
+            "ALTER TABLE server_config ADD COLUMN traditional_mode_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+        migrated.append("server_config.traditional_mode_enabled (added)")
+        # Best-effort backfill from the old coins_enabled column (this session's
+        # local dev DB may already have it) — old True ("coins on") means normal
+        # mode, i.e. traditional_mode_enabled = False, and vice versa.
+        if has_column("server_config", "coins_enabled"):
+            cursor.execute(
+                "UPDATE server_config SET traditional_mode_enabled = "
+                "CASE WHEN coins_enabled = 0 THEN 1 ELSE 0 END"
+            )
+            migrated.append("server_config.traditional_mode_enabled (backfilled from coins_enabled)")
+
+    # FFmpeg live streaming toggle for the fullscreen monitor view. Defaults to
+    # 1 (True) so existing installs keep live streaming until an admin opts out.
+    if not has_column("server_config", "ffmpeg_streaming_enabled"):
+        cursor.execute(
+            "ALTER TABLE server_config ADD COLUMN ffmpeg_streaming_enabled BOOLEAN DEFAULT 1"
+        )
+        migrated.append("server_config.ffmpeg_streaming_enabled (added)")
+
+    # Rate Profiles: add profile_id FK to coin_rates and pcs if missing.
+    # NULL profile_id on an existing row is backfilled to the Default profile's
+    # id by _seed_defaults() (which runs after create_all, once the
+    # rate_profiles table is guaranteed to exist).
+    if not has_column("coin_rates", "profile_id"):
+        cursor.execute("ALTER TABLE coin_rates ADD COLUMN profile_id INTEGER")
+        migrated.append("coin_rates.profile_id (added)")
+
+    if not has_column("pcs", "rate_profile_id"):
+        cursor.execute("ALTER TABLE pcs ADD COLUMN rate_profile_id INTEGER")
+        migrated.append("pcs.rate_profile_id (added)")
 
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
@@ -292,11 +345,29 @@ def _seed_defaults(db):
         db.add(admin_user)
         logger.info("Created default admin user: %s", settings.ADMIN_USERNAME)
 
+    # Ensure the Default rate profile exists (id=1, is_default=True).
+    # On fresh installs this runs right after create_all so the table always
+    # exists by this point.
+    default_profile = db.query(RateProfile).filter_by(is_default=True).first()
+    if not default_profile:
+        default_profile = RateProfile(name="Default", color="#4f8ef7", is_default=True)
+        db.add(default_profile)
+        db.flush()   # get the id assigned before we reference it below
+        logger.info("Created Default rate profile (id=%d)", default_profile.id)
+
+    # Any CoinRate rows with profile_id=None (pre-existing installs, from
+    # before Rate Profiles existed) are owned by the Default profile.
+    if default_profile.id:
+        db.query(CoinRate).filter(CoinRate.profile_id == None).update(  # noqa: E711
+            {"profile_id": default_profile.id}, synchronize_session=False
+        )
+
     if not db.query(CoinRate).first():
         rate = CoinRate(
             pesos=settings.DEFAULT_RATE_PESOS,
             seconds=settings.DEFAULT_RATE_SECONDS,
             label=f"₱{settings.DEFAULT_RATE_PESOS} = {settings.DEFAULT_RATE_SECONDS // 60} minutes",
+            profile_id=default_profile.id,
         )
         db.add(rate)
         logger.info(
@@ -569,7 +640,7 @@ async def _hourly_status_ping_loop():
 
 app = FastAPI(
     title="Pisonex Server",
-    version="1.0.0",
+    version="1.0.4",
     lifespan=lifespan,
 )
 
@@ -690,7 +761,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.0.4"}
 
 
 # ── Dev entry point ───────────────────────────────────────────────────────────────────────

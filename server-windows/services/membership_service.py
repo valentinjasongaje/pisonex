@@ -1,11 +1,14 @@
 """
-Membership business logic — registration, login, logout, absorption,
-auto-expiry (heartbeat timeout, zero-time, idle shutdown).
+Membership business logic — admin-issued account creation, login, logout,
+change-password, absorption, auto-expiry (heartbeat timeout, zero-time,
+idle shutdown).
 """
 
 import re
 import time
 import uuid
+import string
+import secrets
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session as DBSession
@@ -22,6 +25,22 @@ logger = logging.getLogger(__name__)
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9]{3,20}$")
 _PASSWORD_MIN = 4
 _PASSWORD_MAX = 128
+
+# Admin-issued temp passwords: kept easy to read/type since the admin hands
+# this to the member verbally or on paper — lowercase letters + digits only
+# (no symbols, no ambiguous punctuation), with 1-2 letters capitalized.
+_TEMP_PASSWORD_LENGTH = 8
+_rng = secrets.SystemRandom()
+
+
+def _generate_temp_password(length: int = _TEMP_PASSWORD_LENGTH) -> str:
+    pool = string.ascii_lowercase + string.digits
+    chars = [_rng.choice(pool) for _ in range(length)]
+    letter_positions = [i for i, c in enumerate(chars) if c.isalpha()]
+    num_caps = min(_rng.choice((1, 2)), len(letter_positions))
+    for i in _rng.sample(letter_positions, num_caps):
+        chars[i] = chars[i].upper()
+    return "".join(chars)
 
 
 class MembershipService:
@@ -53,85 +72,123 @@ class MembershipService:
 
         return cfg
 
-    # ── Registration ──────────────────────────────────────────────
+    # ── Admin-issued account creation ───────────────────────────────
+    # Self-service registration from the client lock screen was removed
+    # (customers were creating multiple accounts to abuse absorption /
+    # zero-time login). Accounts are now created only from the dashboard
+    # by an admin, who receives a one-time temp password to hand to the
+    # member. See docs/admin-only-membership-migration.md.
 
-    def register_member(self, username: str, password: str, pc_number: int) -> dict:
-        cfg = self.get_config()
-        if not cfg.membership_enabled:
-            return {"success": False, "error": "Membership is not enabled"}
+    def admin_create_member(self, username: str, initial_minutes: int = 0) -> dict:
+        """Admin-only: create a member account with an auto-generated temp
+        password. Returns the plaintext temp password ONCE — it is never
+        stored, only its bcrypt hash. The member must change it via
+        POST /api/member/change-password before the account is otherwise
+        usable in the normal sense (login still works with the temp
+        password, but must_change_password gates the client-side flow).
 
+        initial_minutes: optional time to seed on the account (e.g. a
+        membership sold with time already included). Converted to seconds —
+        same unit as User.balance_seconds / AdjustBalanceBody.seconds.
+        """
+        username = username.strip().lower()
         if not _USERNAME_RE.match(username):
             return {"success": False, "error": "Username must be 3-20 alphanumeric characters"}
-
-        if len(password) < _PASSWORD_MIN or len(password) > _PASSWORD_MAX:
-            return {"success": False, "error": f"Password must be {_PASSWORD_MIN}-{_PASSWORD_MAX} characters"}
 
         existing = self._db.query(User).filter(User.username == username).first()
         if existing:
             return {"success": False, "error": "Username already taken"}
 
-        svc = SessionService(self._db)
-        pc = svc.get_pc(pc_number)
-        if not pc:
-            return {"success": False, "error": f"PC {pc_number} not found"}
+        initial_seconds = max(0, initial_minutes) * 60
+        temp_password = _generate_temp_password()
 
-        # Check anonymous session + absorption policy
-        session = svc.get_active_session(pc_number)
-        absorbed_seconds = 0
-
-        if session and session.user_id is not None:
-            return {"success": False, "error": "Session already owned by a member"}
-
-        if session and not cfg.absorption_enabled:
-            return {"success": False, "error": "Cannot register during active anonymous session"}
-
-        # Create user
         user = User(
             username=username,
-            password_hash=hash_password(password),
-            balance_seconds=0,
+            password_hash=hash_password(temp_password),
+            balance_seconds=initial_seconds,
             is_active=True,
+            must_change_password=True,
         )
         self._db.add(user)
-        self._db.flush()  # get user.id
-
-        # Absorb anonymous session if applicable
-        if session and cfg.absorption_enabled:
-            absorbed_seconds = svc.remaining_seconds(session)
-            session.is_active = False
-            session.ended_at = datetime.utcnow()
-
-            new_session = Session(
-                pc_id=pc.id,
-                user_id=user.id,
-                granted_seconds=absorbed_seconds,
-                session_token=str(uuid.uuid4()),
-                started_at=datetime.utcnow(),
-            )
-            self._db.add(new_session)
-            pc.is_locked = False
-            self._log("INFO", "membership",
-                       f"Absorbed {absorbed_seconds}s from anonymous session on PC {pc_number:02d} for new member {username}")
-        else:
-            # Zero-time login
-            command_store.set_zero_time_since(pc_number, time.time())
-
-        # Bind member to PC
-        user.logged_in_pc_id = pc.id
-        user.last_login_at = datetime.utcnow()
-        user.last_activity_at = datetime.utcnow()
-        command_store.bind_member(pc_number, user.id)
-        command_store.clear_idle_since(pc_number)
-
         self._db.commit()
         self._db.refresh(user)
+
+        self._log("INFO", "membership",
+                   f"Admin created member account '{username}' (id={user.id}, "
+                   f"initial_balance={initial_seconds}s)")
 
         return {
             "success": True,
             "user_id": user.id,
             "username": user.username,
-            "absorbed_seconds": absorbed_seconds,
+            "temp_password": temp_password,
+            "balance_seconds": user.balance_seconds,
         }
+
+    def admin_reset_password(self, user_id: int) -> dict:
+        """Admin-only: generate a new temp password for an existing member who
+        forgot theirs. Same one-time-reveal semantics as admin_create_member —
+        the plaintext temp password is returned exactly once, never stored,
+        only its bcrypt hash. Does not touch an already-active session or
+        force a logout; this only affects their NEXT login attempt, since the
+        old password stops verifying immediately but the PC binding is
+        untouched.
+        """
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return {"success": False, "error": "Member not found"}
+
+        temp_password = _generate_temp_password()
+        user.password_hash = hash_password(temp_password)
+        user.must_change_password = True
+        self._db.commit()
+
+        self._log("INFO", "membership",
+                   f"Admin reset password for member '{user.username}' (id={user.id})")
+
+        return {
+            "success": True,
+            "username": user.username,
+            "temp_password": temp_password,
+        }
+
+    # ── Change password (forced on first login, or voluntary from the tray) ──
+
+    def change_password(self, pc_number: int, new_password: str, old_password: str = None) -> dict:
+        """Identifies the member via the PC binding set by login_member().
+
+        old_password is None/empty for the forced first-login flow — that
+        login already proved identity, so no re-check is needed. It's
+        required and verified here for a voluntary change (tray icon
+        "Change Password" while already logged in), since an already-open
+        session sitting at the PC doesn't by itself prove the person at the
+        keyboard right now is the account owner.
+        """
+        cfg = self.get_config()
+        if not cfg.membership_enabled:
+            return {"success": False, "error": "Membership is not enabled"}
+
+        if len(new_password) < 6 or len(new_password) > _PASSWORD_MAX:
+            return {"success": False, "error": f"Password must be 6-{_PASSWORD_MAX} characters"}
+
+        user_id = command_store.get_member_for_pc(pc_number)
+        if user_id is None:
+            return {"success": False, "error": "No member logged in on this PC"}
+
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return {"success": False, "error": "Member not found"}
+
+        if old_password:
+            if not verify_password(old_password, user.password_hash):
+                return {"success": False, "error": "Current password is incorrect"}
+
+        user.password_hash = hash_password(new_password)
+        user.must_change_password = False
+        self._db.commit()
+
+        self._log("INFO", "membership", f"Member {user.username} changed their password")
+        return {"success": True}
 
     # ── Login ─────────────────────────────────────────────────────
 
@@ -139,6 +196,8 @@ class MembershipService:
         cfg = self.get_config()
         if not cfg.membership_enabled:
             return {"success": False, "error": "Membership is not enabled"}
+
+        username = username.strip().lower()
 
         # Rate limiting
         if not command_store.check_login_rate(username):
@@ -220,6 +279,7 @@ class MembershipService:
             "success": True,
             "balance_seconds": user.balance_seconds,
             "absorbed_seconds": absorbed_seconds,
+            "must_change_password": user.must_change_password,
         }
 
     # ── Logout ────────────────────────────────────────────────────

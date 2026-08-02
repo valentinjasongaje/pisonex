@@ -152,7 +152,7 @@ class LicenseService:
                 "device_id": device_id,
                 "device_type": "server",
                 "license_status": status_info["status"],
-                "app_version": "1.0.0",
+                "app_version": "1.0.4",
                 "machine_name": platform.node(),
                 "trial_days_remaining": status_info["trial_days_remaining"],
             }
@@ -292,7 +292,7 @@ class LicenseService:
                         "device_id": device_id,
                         "device_type": "server",
                         "license_status": status_info["status"],
-                        "app_version": "1.0.0",
+                        "app_version": "1.0.4",
                         "machine_name": platform.node(),
                         "trial_days_remaining": status_info["trial_days_remaining"],
                     },

@@ -39,7 +39,7 @@
   <div class="sidebar-footer">
     <a href="/dashboard/logout" class="logout-link">⏏ Logout</a>
     <div class="sidebar-footer-row">
-      <span class="version">v1.0.0</span>
+      <span class="version">v1.0.4</span>
       <button class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle light/dark mode">☀</button>
     </div>
   </div>
@@ -51,7 +51,8 @@
      /dashboard/license so the activation page itself stays clean. #}
   {% if request.state.show_license_banner %}
   {% set _lic_status = request.state.license_status %}
-  <a href="/dashboard/license" class="license-banner license-banner-{{ _lic_status }}">
+  {% set _trial_expired = _lic_status == "expired" and request.state.license_trial_days <= 0 and not request.state.license_status == "activated" %}
+  <div class="license-banner license-banner-{{ _lic_status }}">
     <span class="license-banner-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="22" height="22">
         <path d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
@@ -63,7 +64,7 @@
         {% if _lic_status == "offline_locked" %}
           Activation cannot be confirmed
         {% elif _lic_status == "expired" %}
-          {% if request.state.license_trial_days <= 0 and not request.state.license_status == "activated" %}
+          {% if _trial_expired %}
             Trial expired — activation required
           {% else %}
             License expired
@@ -82,13 +83,21 @@
         {% endif %}
       </span>
     </span>
-    <span class="license-banner-cta">
-      Activate now
-      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
-        <path d="M5 12h14M13 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+    <span class="license-banner-ctas">
+      {% if _trial_expired %}
+      <a href="https://www.pisonex.com/pricing" target="_blank" rel="noopener noreferrer"
+         class="license-banner-cta license-banner-cta-secondary">
+        Buy License
+      </a>
+      {% endif %}
+      <a href="/dashboard/license" class="license-banner-cta">
+        Activate now
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+          <path d="M5 12h14M13 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </a>
     </span>
-  </a>
+  </div>
   {% endif %}
 
   {% block content %}{% endblock %}

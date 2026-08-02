@@ -29,7 +29,7 @@ Namespace Forms
         Private _countdownTimer  As System.Timers.Timer
         Private _secondsLeft     As Integer = 30
         Private ReadOnly _isCountdown As Boolean
-        Private ReadOnly _shutdownCmd As String
+        Private ReadOnly _shutdownArgs As String
         Private ReadOnly _isRestart As Boolean
 
         ' ── Colors ────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ Namespace Forms
         Public Sub New(shutdownType As String)
             _isCountdown = True
             _isRestart = (shutdownType = "restart")
-            _shutdownCmd = If(_isRestart, "shutdown /r /f /t 0", "shutdown /s /f /t 0")
+            _shutdownArgs = If(_isRestart, "/r /f /t 0", "/s /f /t 0")
             BuildCountdownLayout()
         End Sub
 
@@ -419,9 +419,14 @@ Namespace Forms
             If _secondsLeft <= 0 Then
                 _countdownTimer?.Stop()
                 Try
+                    ' Call shutdown.exe directly rather than via cmd.exe — the
+                    ' "Command Prompt has been disabled by your administrator"
+                    ' Group Policy (DisableCMD) blocks any invocation of cmd.exe,
+                    ' including /c, silently killing this shutdown/restart call.
+                    ' DisableCMD only restricts cmd.exe, not other executables.
                     System.Diagnostics.Process.Start(New System.Diagnostics.ProcessStartInfo() With {
-                        .FileName = "cmd.exe",
-                        .Arguments = $"/c {_shutdownCmd}",
+                        .FileName = "shutdown.exe",
+                        .Arguments = _shutdownArgs,
                         .CreateNoWindow = True,
                         .UseShellExecute = False
                     })

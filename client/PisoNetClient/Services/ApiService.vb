@@ -21,6 +21,12 @@ Namespace Services
         Public Property admin_message As String     ' per-PC message, shown once
         Public Property announcement As String      ' shop-wide broadcast (persistent)
         Public Property coin_slot_enabled As Boolean = True
+        ' Persistent "Traditional Café Mode" business-model toggle (admin-set
+        ' via Settings). Distinct from coin_slot_enabled above, which is a
+        ' transient runtime pause/resume flag. Defaults False so
+        ' cached/pre-first-heartbeat state never accidentally hides the
+        ' Insert Coin / Add Time UI.
+        Public Property traditional_mode_enabled As Boolean = False
         ' Server-pushed wallpaper
         Public Property wallpaper_url As String
         Public Property wallpaper_hash As String

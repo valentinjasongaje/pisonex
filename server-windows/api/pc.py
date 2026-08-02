@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import PC, Session as SessionModel, User, MembershipConfig
+from models import PC, Session as SessionModel, User, MembershipConfig, ServerConfig
 from schemas import PCHeartbeatResponse, PCStatusResponse
 from services.session_service import SessionService
 from config import settings
@@ -161,6 +161,11 @@ def heartbeat(
     # Is the hardware controller currently accepting coins for this PC?
     receiving_coins = command_store.is_receiving_coins(pc_number)
 
+    # Business-model toggle: "Traditional Café Mode" hides all coin-flow UI
+    # client-side. Defaults False (row is always seeded by _seed_defaults()).
+    srv_cfg = db.query(ServerConfig).first()
+    traditional_mode_enabled = srv_cfg.traditional_mode_enabled if srv_cfg else False
+
     # Minimum logout minutes (from membership config, 0 if not configured)
     minimum_logout_minutes = cfg.minimum_logout_minutes if cfg else 0
 
@@ -174,6 +179,7 @@ def heartbeat(
         admin_message=msg,
         announcement=ann,
         coin_slot_enabled=coins_ok,
+        traditional_mode_enabled=traditional_mode_enabled,
         wallpaper_url=wp_url,
         wallpaper_hash=wp_hash,
         membership_enabled=membership_enabled,
@@ -190,9 +196,14 @@ def heartbeat(
         coin_progress_pesos=0,
         coin_progress_seconds=0,
         minimum_logout_minutes=minimum_logout_minutes,
-        # Live-stream hint kept at 0 — admin "watch PC" feature lives only
-        # in server-orangepi/.  Field included for client-API parity.
-        capture_interval_ms=0,
+        # When an admin is watching this PC AND FFmpeg streaming is enabled,
+        # tell the client to ramp up; 0 = use own config (1 s JPEG snapshots).
+        capture_interval_ms=(
+            33
+            if command_store.is_watched(pc_number)
+            and getattr(srv_cfg, "ffmpeg_streaming_enabled", True)
+            else 0
+        ),
     )
 
 
@@ -270,12 +281,23 @@ def lock_pc(pc_number: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{pc_number}/request-coins", dependencies=[_ClientAuth])
-def request_coins(pc_number: int):
+def request_coins(pc_number: int, db: Session = Depends(get_db)):
     """
     Called by a PC client when the user presses 'Insert Coin'.
     Signals the server's hardware controller to open the coin slot for this PC.
     Returns 503 on Windows/no-hardware deployments where the controller is absent.
     """
+    srv_cfg = db.query(ServerConfig).first()
+    if srv_cfg and srv_cfg.traditional_mode_enabled:
+        # Defense in depth: the client hides this button when
+        # traditional_mode_enabled is True, but reject here too in case a
+        # stale/cached client UI still shows it (e.g. Traditional Café Mode
+        # was just turned on).
+        raise HTTPException(
+            status_code=403,
+            detail="Coins are disabled on this server. This café uses cashier-managed time only.",
+        )
+
     from main import hw_controller
     if hw_controller is None:
         raise HTTPException(

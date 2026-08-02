@@ -1,3 +1,4 @@
+Imports System.Diagnostics
 Imports System.Timers
 
 Namespace Services
@@ -14,12 +15,17 @@ Namespace Services
         ' Local session state — authoritative while server is unreachable
         Private _remainingSeconds As Integer = 0
         Private _isLocked As Boolean = True
-        ' Start False so the FIRST successful heartbeat fires ServerConnectionRestored,
-        ' which drives HideOfflineStatus → UpdateInsertCoinVisibility so the Insert Coin
-        ' button is shown once connectivity + coin-slot state are known. (If left True,
-        ' an instantly-reachable server never fires the reconnect path and the button
-        ' would stay hidden.)
-        Private _serverReachable As Boolean = False
+        ' Nothing = not yet determined, so BOTH edges fire exactly once: the first
+        ' successful heartbeat fires ServerConnectionRestored (drives HideOfflineStatus
+        ' → UpdateInsertCoinVisibility, so Insert Coin shows once connectivity + coin-slot
+        ' state are known), and the first FAILED heartbeat fires ServerConnectionLost.
+        ' A plain Boolean defaulting to False broke the latter: if the server is
+        ' unreachable from the very first heartbeat (e.g. a bad ServerUrl), the "already
+        ' False" guard below never saw a True→False transition, so ServerConnectionLost
+        ' never fired and the lock screen's offline indicator (which itself defaults to
+        ' "connected") was never corrected — showing "Connected to server" indefinitely
+        ' even though no connection was ever established.
+        Private _serverReachable As Boolean? = Nothing
         Private _sessionToken As String = Nothing
 
         ' Low-time warning flags — reset each time a new session starts
@@ -40,6 +46,10 @@ Namespace Services
 
         ' Coin-slot-enabled dedup — only fire event when state changes
         Private _lastCoinSlotEnabled As Boolean = True
+
+        ' Traditional-mode dedup — only fire event when the persistent
+        ' business-model toggle changes (default False, matches the wire default).
+        Private _lastTraditionalModeEnabled As Boolean = False
 
         ' Capture-interval dedup — only fire event when server-requested interval changes
         Private _lastCaptureIntervalMs As Integer = 0
@@ -71,6 +81,8 @@ Namespace Services
         Public Event CoinProgressChanged(pesos As Integer, seconds As Integer)
         ''' <summary>Fired when the server's coin_slot_enabled flag changes (global or per-PC).</summary>
         Public Event CoinSlotChanged(enabled As Boolean)
+        ''' <summary>Fired when the server's persistent traditional_mode_enabled (Traditional Café Mode) toggle changes.</summary>
+        Public Event TraditionalModeChanged(enabled As Boolean)
         ''' <summary>Fired when membership state changes in heartbeat (enabled, username, balance, etc.).</summary>
         Public Event MembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                         balanceSeconds As Integer, canLogout As Boolean,
@@ -93,6 +105,7 @@ Namespace Services
         End Sub
 
         Public Sub Start()
+            DiagnosticLog.Write("SessionManager.Start — heartbeat/countdown timers starting")
             ' 1-second local countdown — independent of network
             _countdownTimer = New Timer(1_000)
             AddHandler _countdownTimer.Elapsed, AddressOf OnLocalTick
@@ -134,6 +147,7 @@ Namespace Services
 
                 ' Time ran out locally — lock regardless of server state
                 If _remainingSeconds = 0 Then
+                    DiagnosticLog.Write("LOCK — local countdown reached 0 (was isLocked=False)")
                     _isLocked = True
                     _lock.LockPC()
                     RaiseEvent SessionEnded()
@@ -148,13 +162,19 @@ Namespace Services
         End Sub
 
         Private Async Function SendHeartbeat() As Task
+            Dim sw = Stopwatch.StartNew()
+            DiagnosticLog.Write("Heartbeat: send")
             Dim response = Await _api.HeartbeatAsync()
+            DiagnosticLog.Write($"Heartbeat: recv after {sw.ElapsedMilliseconds}ms — " &
+                If(response Is Nothing, "unreachable (null response)",
+                   $"is_locked={response.is_locked} remaining={response.remaining_seconds} token={If(response.session_token, "null")}"))
 
             If response Is Nothing Then
                 ' ── Server unreachable ──────────────────────────────
                 ' Local countdown continues uninterrupted.
                 ' Do NOT lock. Do NOT change lock state.
-                If _serverReachable Then
+                If Not _serverReachable.HasValue OrElse _serverReachable.Value Then
+                    DiagnosticLog.Write("OFFLINE — server unreachable")
                     _serverReachable = False
                     RaiseEvent ServerConnectionLost()
                 End If
@@ -162,7 +182,8 @@ Namespace Services
             End If
 
             ' ── Server reachable ────────────────────────────────────
-            If Not _serverReachable Then
+            If Not _serverReachable.HasValue OrElse Not _serverReachable.Value Then
+                DiagnosticLog.Write("ONLINE — server reachable")
                 _serverReachable = True
                 RaiseEvent ServerConnectionRestored()
             End If
@@ -178,17 +199,29 @@ Namespace Services
 
                 If serverSaysLocked AndAlso Not _isLocked Then
                     ' Server locked us (time expired server-side, admin locked, etc.)
+                    DiagnosticLog.Write($"LOCK — heartbeat: server is_locked=true (was unlocked, remaining was {_remainingSeconds})")
                     _isLocked = True
                     _lock.LockPC()
                     RaiseEvent SessionEnded()
 
                 ElseIf Not serverSaysLocked AndAlso _isLocked Then
                     ' Server unlocked us (coins inserted) — reset warning flags for the new session
+                    DiagnosticLog.Write($"UNLOCK — heartbeat: server is_locked=false (remaining={response.remaining_seconds}, token={If(response.session_token, "null")})")
                     _isLocked   = False
                     _warned5Min = False
                     _warned1Min = False
                     _lock.UnlockPC()
                     RaiseEvent SessionStarted()
+
+                ElseIf Not serverSaysLocked AndAlso Not _isLocked AndAlso _remainingSeconds <= 0 Then
+                    ' Session has genuinely run out of granted time, but the server's
+                    ' background expiry sweep (runs every 30 s) hasn't flipped is_locked
+                    ' yet. Waiting for it would leave the TimerOverlay stuck showing no
+                    ' time until the sweep catches up — lock immediately instead.
+                    DiagnosticLog.Write("LOCK — heartbeat: server is_locked=false but remaining<=0 (pre-empting expiry sweep)")
+                    _isLocked = True
+                    _lock.LockPC()
+                    RaiseEvent SessionEnded()
                 End If
 
                 lockedNow = _isLocked
@@ -254,6 +287,12 @@ Namespace Services
                 RaiseEvent CoinSlotChanged(response.coin_slot_enabled)
             End If
 
+            ' Traditional Café Mode toggle — only fire when it changes
+            If response.traditional_mode_enabled <> _lastTraditionalModeEnabled Then
+                _lastTraditionalModeEnabled = response.traditional_mode_enabled
+                RaiseEvent TraditionalModeChanged(response.traditional_mode_enabled)
+            End If
+
             ' Membership state — always fire so the UI can update
             RaiseEvent MembershipUpdated(
                 response.membership_enabled,
@@ -293,7 +332,7 @@ Namespace Services
 
         Public ReadOnly Property ServerReachable As Boolean
             Get
-                Return _serverReachable
+                Return _serverReachable.GetValueOrDefault(False)
             End Get
         End Property
 

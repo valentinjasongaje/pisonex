@@ -60,6 +60,7 @@ class MembershipService:
         if not cfg.membership_enabled:
             return {"success": False, "error": "Membership is not enabled"}
 
+        username = username.strip().lower()
         if not _USERNAME_RE.match(username):
             return {"success": False, "error": "Username must be 3-20 alphanumeric characters"}
 
@@ -139,6 +140,8 @@ class MembershipService:
         cfg = self.get_config()
         if not cfg.membership_enabled:
             return {"success": False, "error": "Membership is not enabled"}
+
+        username = username.strip().lower()
 
         # Rate limiting
         if not command_store.check_login_rate(username):

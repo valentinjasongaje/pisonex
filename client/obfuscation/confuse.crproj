@@ -27,12 +27,20 @@
                        public members (this is an app, not a library, so no
                        external code consumes the public API). IsActive,
                        LicenseService, GetDeviceId etc. become single-letter
-                       names. The 4 JSON DTO classes are excluded at the
-                       source via <Obfuscation(Exclude:=True,
-                       ApplyToMembers:=True)> attributes (HeartbeatResponse,
-                       MemberRegisterResponse, MemberLoginResponse,
-                       MemberLogoutResponse) so System.Text.Json
-                       deserialisation keeps working.
+                       names. The JSON DTO classes (HeartbeatResponse,
+                       MemberLoginResponse, MemberLogoutResponse,
+                       MemberChangePasswordResponse) carry a VB
+                       <Obfuscation(Exclude:=True, ApplyToMembers:=True)>
+                       attribute, but this build's ConfuserEx does NOT honor
+                       that attribute for the rename protection -- it
+                       renames them anyway, which silently breaks
+                       System.Text.Json deserialization at runtime (member
+                       login/logout/change-password/heartbeat all fail with
+                       a "deserialization constructor ... parameter names"
+                       error). The explicit <rule> entries in the <module>
+                       block below are what actually excludes them -- the
+                       source attribute alone is not sufficient. Keep both
+                       in sync if a new JSON DTO class is added.
 
   DISABLED (intentionally):
     - anti tamper    : refuses to run if the assembly hash doesn't match
@@ -81,6 +89,16 @@
       claims, exclude it like this:
         <rule pattern="name() = 'TokenClaims'" preset="none" inherit="false" />
     -->
+
+    <!-- JSON DTOs deserialized by System.Text.Json via reflection. Must stay
+         excluded from ALL protections (preset="none"), not just renaming --
+         see the note above. Keep in sync with
+         PisoNetClient/Services/ApiService.vb and
+         PisoNetClient/Services/MemberService.vb. -->
+    <rule pattern="name() = 'HeartbeatResponse'" preset="none" inherit="false" />
+    <rule pattern="name() = 'MemberLoginResponse'" preset="none" inherit="false" />
+    <rule pattern="name() = 'MemberLogoutResponse'" preset="none" inherit="false" />
+    <rule pattern="name() = 'MemberChangePasswordResponse'" preset="none" inherit="false" />
   </module>
 
 </project>

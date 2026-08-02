@@ -5,9 +5,101 @@
   <h1>Coin Rates</h1>
 </div>
 
+<!-- ── Profile tabs ──────────────────────────────────────────────── -->
+<div class="card" style="padding-bottom: 0;">
+  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+    <span style="color:var(--text-dim);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Profile:</span>
+    <div id="profile-tabs" style="display:flex;gap:6px;flex-wrap:wrap;">
+      {% for p in profiles %}
+      <a
+        href="/dashboard/rates?profile={{ p.id }}"
+        class="profile-tab {% if p.id == selected_id %}profile-tab-active{% endif %}"
+        style="--tab-color: {{ p.color }};"
+      >
+        <span class="profile-dot" style="background:{{ p.color }};"></span>
+        {{ p.name }}
+        {% if p.is_default %}<span style="font-size:10px;opacity:.6;margin-left:2px;">(default)</span>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+
+    <!-- New profile inline form -->
+    <button
+      class="btn btn-sm btn-default"
+      onclick="document.getElementById('new-profile-form').classList.toggle('hidden')"
+      style="margin-left:auto;"
+    >+ New Profile</button>
+  </div>
+
+  <!-- New profile form (hidden by default) -->
+  <div id="new-profile-form" class="hidden" style="border-top:1px solid var(--border);padding-top:14px;margin-bottom:4px;">
+    <form
+      hx-post="/dashboard/rates/profiles"
+      hx-target="#profile-tabs"
+      hx-swap="outerHTML"
+      hx-on::after-request="document.getElementById('new-profile-form').classList.add('hidden');
+                              document.getElementById('np-name').value='';
+                              if(event.detail.successful){
+                                var tabs=document.querySelectorAll('.profile-tab');
+                                var last=tabs[tabs.length-1];
+                                if(last){window.location.href=last.href;}
+                              }"
+      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"
+    >
+      <input
+        type="text"
+        id="np-name"
+        name="name"
+        placeholder="Profile name (e.g. Gaming)"
+        maxlength="50"
+        required
+        style="flex:1;min-width:160px;"
+      />
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label style="font-size:13px;color:var(--text-dim);">Color</label>
+        <input type="color" name="color" value="#4f8ef7" style="width:36px;height:30px;padding:2px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer;" />
+      </div>
+      <button type="submit" class="btn btn-sm btn-primary">Create</button>
+      <button type="button" class="btn btn-sm btn-default"
+        onclick="document.getElementById('new-profile-form').classList.add('hidden')">Cancel</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Profile actions (rename / delete) — shown only for non-default profiles ── -->
+{% if selected_profile and not selected_profile.is_default %}
+<div class="card" style="padding:12px 16px;">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <span style="font-size:13px;color:var(--text-dim);">Profile actions:</span>
+    <!-- Rename -->
+    <form
+      hx-post="/dashboard/rates/profiles/{{ selected_id }}/name"
+      hx-target="#profile-tabs"
+      hx-swap="outerHTML"
+      hx-on::after-request="if(event.detail.successful){location.reload();}"
+      style="display:flex;gap:6px;align-items:center;"
+    >
+      <input type="text" name="name" value="{{ selected_profile.name }}" maxlength="50" required style="width:180px;" />
+      <button type="submit" class="btn btn-sm btn-default">Rename</button>
+    </form>
+    <!-- Delete -->
+    <button
+      class="btn btn-sm btn-danger"
+      hx-delete="/dashboard/rates/profiles/{{ selected_id }}"
+      hx-target="#profile-tabs"
+      hx-swap="outerHTML"
+      hx-confirm="Delete the '{{ selected_profile.name }}' profile? Its rates will be removed and its PCs will revert to Default."
+      hx-on::after-request="if(event.detail.successful){window.location.href='/dashboard/rates';}"
+    >Delete Profile</button>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Add rate form ─────────────────────────────────────────────── -->
 <div class="card">
-  <h2>Add / Update Rate</h2>
+  <h2>Add Rate — {{ selected_profile.name if selected_profile else "Default" }}</h2>
   <form hx-post="/dashboard/rates" hx-target="#rates-table" hx-swap="outerHTML">
+    <input type="hidden" name="profile_id" value="{{ selected_id }}" />
     <div class="form-row">
       <div class="form-group">
         <label>Pesos (&#8369;)</label>
@@ -22,31 +114,39 @@
   </form>
 </div>
 
-<div id="rates-table" class="card">
-  <h2>Active Rates</h2>
-  <table class="data-table">
-    <thead>
-      <tr><th>Pesos</th><th>Time</th><th>Rate/hr</th><th>Action</th></tr>
-    </thead>
-    <tbody>
-      {% for rate in rates %}
-      <tr>
-        <td>&#8369;{{ rate.pesos }}</td>
-        <td>{{ rate.seconds // 60 }} min</td>
-        <td>&#8369;{{ ((3600 / rate.seconds) * rate.pesos) | round(1) }}/hr</td>
-        <td>
-          <button
-            class="btn btn-sm btn-danger"
-            hx-delete="/dashboard/rates/{{ rate.id }}"
-            hx-target="#rates-table"
-            hx-swap="outerHTML"
-            hx-confirm="Delete this rate?"
-          >Delete</button>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<!-- ── Rates table ────────────────────────────────────────────────── -->
+{% include "partials/rates_table.html" %}
+
+<style>
+.profile-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.profile-tab:hover {
+  border-color: var(--tab-color, #4f8ef7);
+  color: var(--text);
+}
+.profile-tab-active {
+  border-color: var(--tab-color, #4f8ef7);
+  color: var(--text);
+  background: color-mix(in srgb, var(--tab-color, #4f8ef7) 12%, transparent);
+}
+.profile-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+</style>
 
 {% endblock %}

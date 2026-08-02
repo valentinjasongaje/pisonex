@@ -13,6 +13,7 @@ pisonet.log.*
 backups/
 dist/
 service_error.log
+data/
 
 # ── VB.NET / .NET (client) ───────────────────────────────────────
 bin/

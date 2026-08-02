@@ -1,0 +1,13 @@
+<div id="profile-tabs" style="display:flex;gap:6px;flex-wrap:wrap;">
+  {% for p in profiles %}
+  <a
+    href="/dashboard/rates?profile={{ p.id }}"
+    class="profile-tab {% if p.id == selected_id %}profile-tab-active{% endif %}"
+    style="--tab-color: {{ p.color }};"
+  >
+    <span class="profile-dot" style="background:{{ p.color }};"></span>
+    {{ p.name }}
+    {% if p.is_default %}<span style="font-size:10px;opacity:.6;margin-left:2px;">(default)</span>{% endif %}
+  </a>
+  {% endfor %}
+</div>

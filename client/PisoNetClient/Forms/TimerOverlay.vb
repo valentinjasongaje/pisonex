@@ -77,6 +77,12 @@ Namespace Forms
 
         ' ── Add Time state ────────────────────────────────────────────
         Private _coinSlotEnabled    As Boolean = False
+        ' Persistent "Traditional Café Mode" business-model toggle (admin-set
+        ' via Settings). Distinct from _coinSlotEnabled above, which is a
+        ' transient runtime pause/resume flag. When True, the "+ Add Time" CTA
+        ' and the receiving-coins mini card are hidden entirely — no coin
+        ' hardware is used or implied. Defaults False to match the wire default.
+        Private _traditionalModeEnabled As Boolean = False
         Private _isReceivingCoins   As Boolean = False
         Private _isRequestingCoin   As Boolean = False
         Private _addTimeSepY        As Integer = -1   ' separator Y painted in OnPaint
@@ -466,6 +472,9 @@ Namespace Forms
         ''' COIN_RECV_ROW_H if receiving, ADD_TIME_ROW_H if slot enabled but idle.
         ''' </summary>
         Private Function GetAddTimeRowH(Sv As Func(Of Integer, Integer)) As Integer
+            If _traditionalModeEnabled Then
+                Return 0
+            End If
             If _isReceivingCoins Then
                 Return Sv(COIN_RECV_ROW_H)
             End If
@@ -790,6 +799,25 @@ Namespace Forms
                 _btnAddTime.Enabled   = True
             End If
             UpdateAddTimeState()
+            ApplyConfig()
+        End Sub
+
+        ''' <summary>
+        ''' Applies the persistent "Traditional Café Mode" business-model toggle.
+        ''' When enabled, the "+ Add Time" CTA and receiving-coins mini card are
+        ''' hidden entirely regardless of _coinSlotEnabled/_isReceivingCoins. This
+        ''' is an explicit, rarely-changed admin setting rather than transient
+        ''' per-heartbeat server state, so — like ShowAddTimeButton above — it is
+        ''' applied immediately with no debounce.
+        ''' Safe to call from any thread.
+        ''' </summary>
+        Public Sub SetTraditionalMode(enabled As Boolean)
+            If Me.InvokeRequired Then
+                Me.Invoke(Sub() SetTraditionalMode(enabled))
+                Return
+            End If
+            If _traditionalModeEnabled = enabled Then Return
+            _traditionalModeEnabled = enabled
             ApplyConfig()
         End Sub
 
