@@ -24,18 +24,18 @@ from services.license_service import LicenseService
 from services.membership_service import MembershipService
 
 # ── Logging setup ───────────────────────────────────────────────────────────────
+# Just a StreamHandler: windows_service.py redirects sys.stdout/stderr to a
+# self-rotating pisonet.log before importing this module (so this handler's
+# output — and anything printed directly, bypassing `logging` — lands in
+# that one bounded file). A separate RotatingFileHandler pointed at the same
+# "pisonet.log" path used to run alongside it: two independent handles to
+# one file, and the raw stdout/stderr redirect (unbounded) dwarfed whatever
+# cap this handler enforced, growing to tens of GB over months of uptime.
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.handlers.RotatingFileHandler(
-            "pisonet.log",
-            maxBytes=5 * 1024 * 1024,  # 5 MB
-            backupCount=3,
-        ),
-    ],
+    handlers=[logging.StreamHandler()],
 )
 # Resolve the directory that contains bundled assets (templates, static files).
 # When frozen by PyInstaller onedir, assets are in sys._MEIPASS (_internal/),

@@ -54,6 +54,48 @@ os.environ['PISONEX_BUNDLE_DIR'] = str(_BUNDLE_DIR)
 _NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — suppress console popups when service is running
 
 
+class _RotatingStream:
+    """File-like stdout/stderr replacement that caps pisonet.log by size.
+
+    A service run stays up for months (delayed auto-start + crash
+    auto-restart), so anything written here accumulates for the whole
+    uptime. A plain open(path, "a") with no cap grows without bound —
+    that's how pisonet.log has reached tens of GB in the field. Rotate on
+    write instead, the same way DiagnosticLog.vb caps the client log.
+    """
+
+    MAX_BYTES = 5 * 1024 * 1024
+    BACKUP_COUNT = 3
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._file = open(path, "a", encoding="utf-8", buffering=1)
+
+    def write(self, data):
+        if data and self._file.tell() >= self.MAX_BYTES:
+            self._rotate()
+        return self._file.write(data)
+
+    def flush(self):
+        self._file.flush()
+
+    def isatty(self):
+        return False
+
+    def _rotate(self):
+        self._file.close()
+        for i in range(self.BACKUP_COUNT - 1, 0, -1):
+            src = self._path.with_name(f"{self._path.name}.{i}")
+            dst = self._path.with_name(f"{self._path.name}.{i + 1}")
+            if src.exists():
+                dst.unlink(missing_ok=True)
+                src.rename(dst)
+        backup1 = self._path.with_name(f"{self._path.name}.1")
+        backup1.unlink(missing_ok=True)
+        self._path.rename(backup1)
+        self._file = open(self._path, "a", encoding="utf-8", buffering=1)
+
+
 def _ensure_env():
     """Create .env with secure defaults on first install if it doesn't exist.
     Also migrates SERVER_PORT from the old default (8000) to the current default (80)
@@ -146,17 +188,23 @@ class PisoNetService(win32serviceutil.ServiceFramework):
         """Runs in a background thread — starts the FastAPI/uvicorn server."""
         try:
             import asyncio
+
+            # Windows services have no console — sys.stdout/stderr are None.
+            # Redirect them to a self-rotating log file *before* importing
+            # uvicorn/main, so every logging handler set up at import time
+            # (main.py's logging.basicConfig) — and any raw print() or
+            # unhandled-exception traceback that bypasses `logging`
+            # entirely — targets the same bounded stream instead of a
+            # None object (which crashes on isatty()) or an ever-growing
+            # plain file.
+            if sys.stdout is None:
+                log_path = _BASE_DIR / "pisonet.log"
+                sys.stdout = _RotatingStream(log_path)
+                sys.stderr = sys.stdout
+
             import uvicorn
             from config import settings
             from main import app
-
-            # Windows services have no console — sys.stdout/stderr are None.
-            # Redirect them to the log file so uvicorn's logger doesn't crash
-            # calling isatty() on NoneType.
-            log_path = _BASE_DIR / "pisonet.log"
-            _log_file = open(log_path, "a", encoding="utf-8", buffering=1)
-            sys.stdout = _log_file
-            sys.stderr = _log_file
 
             # Use SelectorEventLoop — ProactorEventLoop can cause issues in
             # Windows service threads.
