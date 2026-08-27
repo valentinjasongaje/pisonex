@@ -1,0 +1,8 @@
+<span
+  id="pc-profile-badge-{{ pc_number }}"
+  class="profile-badge-pill"
+  style="--badge-color: {{ profile.color if profile else '#6b7280' }};"
+>
+  <span class="profile-dot" style="background:{{ profile.color if profile else '#6b7280' }};"></span>
+  {{ profile.name if profile else "Default" }}
+</span>

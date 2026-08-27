@@ -40,56 +40,64 @@
     <h2>Add Time to <span id="modal-pc-label"></span></h2>
     <form id="add-time-form">
       <input type="hidden" id="modal-pc-number" name="pc_number" />
+
+      <div class="mode-switch" role="tablist">
+        <button type="button" class="mode-switch-btn {% if preset_amounts_enabled %}active{% endif %}"
+          data-mode="pesos" onclick="setAddTimeMode('pesos')">Amount</button>
+        <button type="button" class="mode-switch-btn {% if not preset_amounts_enabled %}active{% endif %}"
+          data-mode="minutes" onclick="setAddTimeMode('minutes')">Time</button>
+      </div>
+
       <label>Quick presets</label>
-      {% if preset_amounts_enabled %}
-      <div class="preset-grid">
+
+      <div class="preset-grid" id="preset-grid-pesos" {% if not preset_amounts_enabled %}style="display:none;"{% endif %}>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 1, 'pesos')">
-          <span class="preset-min">₱1</span><span class="preset-label">peso</span>
+          <span class="preset-min">₱1</span><span class="preset-label">{{ preset_time_labels[1] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 5, 'pesos')">
-          <span class="preset-min">₱5</span><span class="preset-label">pesos</span>
+          <span class="preset-min">₱5</span><span class="preset-label">{{ preset_time_labels[5] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 10, 'pesos')">
-          <span class="preset-min">₱10</span><span class="preset-label">pesos</span>
+          <span class="preset-min">₱10</span><span class="preset-label">{{ preset_time_labels[10] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 15, 'pesos')">
-          <span class="preset-min">₱15</span><span class="preset-label">pesos</span>
+          <span class="preset-min">₱15</span><span class="preset-label">{{ preset_time_labels[15] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 20, 'pesos')">
-          <span class="preset-min">₱20</span><span class="preset-label">pesos</span>
+          <span class="preset-min">₱20</span><span class="preset-label">{{ preset_time_labels[20] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 25, 'pesos')">
-          <span class="preset-min">₱25</span><span class="preset-label">pesos</span>
+          <span class="preset-min">₱25</span><span class="preset-label">{{ preset_time_labels[25] }}</span>
         </button>
       </div>
-      <input type="hidden" id="preset-mode" value="pesos" />
-      <div class="time-divider">or enter custom pesos</div>
-      <input type="number" id="add-time-input" name="amount" min="1" max="9999" placeholder="Pesos (₱)" required />
-      {% else %}
-      <div class="preset-grid">
+
+      <div class="preset-grid" id="preset-grid-minutes" {% if preset_amounts_enabled %}style="display:none;"{% endif %}>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 30, 'minutes')">
-          <span class="preset-min">30</span><span class="preset-label">minutes</span>
+          <span class="preset-min">30</span><span class="preset-label">{{ preset_peso_labels[30] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 60, 'minutes')">
-          <span class="preset-min">1h</span><span class="preset-label">60 min</span>
+          <span class="preset-min">1h</span><span class="preset-label">{{ preset_peso_labels[60] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 120, 'minutes')">
-          <span class="preset-min">2h</span><span class="preset-label">120 min</span>
+          <span class="preset-min">2h</span><span class="preset-label">{{ preset_peso_labels[120] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 180, 'minutes')">
-          <span class="preset-min">3h</span><span class="preset-label">180 min</span>
+          <span class="preset-min">3h</span><span class="preset-label">{{ preset_peso_labels[180] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 300, 'minutes')">
-          <span class="preset-min">5h</span><span class="preset-label">300 min</span>
+          <span class="preset-min">5h</span><span class="preset-label">{{ preset_peso_labels[300] }}</span>
         </button>
         <button type="button" class="preset-btn" onclick="selectPreset(this, 480, 'minutes')">
-          <span class="preset-min">8h</span><span class="preset-label">480 min</span>
+          <span class="preset-min">8h</span><span class="preset-label">{{ preset_peso_labels[480] }}</span>
         </button>
       </div>
-      <input type="hidden" id="preset-mode" value="minutes" />
-      <div class="time-divider">or enter custom</div>
-      <input type="number" id="add-time-input" name="amount" min="1" max="999" placeholder="Minutes" required />
-      {% endif %}
+
+      <input type="hidden" id="preset-mode" value="{% if preset_amounts_enabled %}pesos{% else %}minutes{% endif %}" />
+      <div class="time-divider" id="custom-amount-divider">or enter custom {% if preset_amounts_enabled %}pesos{% else %}minutes{% endif %}</div>
+      <input type="number" id="add-time-input" name="amount" min="1"
+        max="{% if preset_amounts_enabled %}9999{% else %}999{% endif %}"
+        placeholder="{% if preset_amounts_enabled %}Pesos (₱){% else %}Minutes{% endif %}" required />
+
       <div class="modal-actions">
         <button type="button" class="btn btn-default" onclick="closeModal()">Cancel</button>
         <button type="submit" class="btn btn-primary">Add Time</button>

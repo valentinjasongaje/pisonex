@@ -41,7 +41,7 @@
           {% endif %}
         </td>
         <td style="color:var(--text-dim);font-size:13px">
-          {{ user.created_at.strftime("%b %d, %Y") if user.created_at else "—" }}
+          {{ user.created_at | localtime("%b %d, %Y") if user.created_at else "—" }}
         </td>
         <td>
           {% if user.username != current_username %}

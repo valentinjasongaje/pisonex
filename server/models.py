@@ -6,6 +6,23 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
+class RateProfile(Base):
+    """A named set of coin rates.  All CoinRate rows belong to exactly one profile.
+    The profile with is_default=True is used as a fallback when a PC has no
+    profile assigned, or when the assigned profile has no active rates.
+    """
+    __tablename__ = "rate_profiles"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String(50), nullable=False, unique=True)
+    color      = Column(String(20), default="#4f8ef7")   # hex color for badge in dashboard
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    rates = relationship("CoinRate", back_populates="profile")
+    pcs   = relationship("PC",       back_populates="rate_profile")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -20,6 +37,11 @@ class User(Base):
     logged_in_pc_id  = Column(Integer, ForeignKey("pcs.id"), nullable=True)
     last_login_at    = Column(DateTime, nullable=True)
     last_activity_at = Column(DateTime, nullable=True)
+
+    # True for admin-issued accounts until the member sets their own password.
+    # Set on creation by the dashboard "Create Member" flow; cleared by
+    # POST /api/member/change-password on first successful password change.
+    must_change_password = Column(Boolean, default=False, nullable=False)
 
     sessions     = relationship("Session", back_populates="user")
     transactions = relationship("CoinTransaction", back_populates="user")
@@ -38,9 +60,11 @@ class PC(Base):
     is_locked     = Column(Boolean, default=True)
     last_seen     = Column(DateTime, nullable=True)
     registered_at = Column(DateTime, default=datetime.utcnow)
+    rate_profile_id = Column(Integer, ForeignKey("rate_profiles.id"), nullable=True)
 
     sessions     = relationship("Session", back_populates="pc")
     transactions = relationship("CoinTransaction", back_populates="pc")
+    rate_profile = relationship("RateProfile", back_populates="pcs")
 
 
 class Session(Base):
@@ -83,6 +107,10 @@ class CoinRate(Base):
     label      = Column(String(100))            # e.g. "₱5 = 30 minutes"
     is_active  = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # NULL profile_id means "belongs to Default profile (id=1)"
+    profile_id = Column(Integer, ForeignKey("rate_profiles.id"), nullable=True)
+
+    profile = relationship("RateProfile", back_populates="rates")
 
 
 class MembershipConfig(Base):
@@ -142,3 +170,35 @@ class ServerConfig(Base):
     coin_edge          = Column(String(10), nullable=True)  # "RISING" | "FALLING"
     coin_debounce_ms   = Column(Integer, nullable=True)   # software debounce window (ms)
     coin_pulse_timeout = Column(String(16), nullable=True)  # seconds of silence to finalize (stored as text to allow decimals)
+
+    # ── Monitoring ────────────────────────────────────────────────────────────
+    # When True (default), the server requests FFmpeg live-streaming when admin
+    # opens fullscreen.  Set False to fall back to 1-second JPEG snapshots.
+    ffmpeg_streaming_enabled = Column(Boolean, default=True, nullable=False)
+
+
+class CoinSchedule(Base):
+    """Time ranges when the coin slot is automatically blocked."""
+    __tablename__ = "coin_schedules"
+
+    id           = Column(Integer, primary_key=True)
+    label        = Column(String(120), default="")        # human name e.g. "Night block"
+    start_time   = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    end_time     = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    days_of_week = Column(String(7),  default="0123456")  # subset of "0123456" (Mon=0…Sun=6)
+    is_active    = Column(Boolean, default=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class ScheduledAnnouncement(Base):
+    """Announcements that fire automatically at a set time each day."""
+    __tablename__ = "scheduled_announcements"
+
+    id              = Column(Integer, primary_key=True)
+    label           = Column(String(120), default="")
+    fire_time       = Column(String(5),   nullable=False)  # "HH:MM" 24h
+    message         = Column(String(500), nullable=False)
+    days_of_week    = Column(String(7),   default="0123456")
+    is_active       = Column(Boolean, default=True)
+    last_fired_date = Column(String(10),  nullable=True)   # "YYYY-MM-DD", prevents double-fire
+    created_at      = Column(DateTime, default=datetime.utcnow)

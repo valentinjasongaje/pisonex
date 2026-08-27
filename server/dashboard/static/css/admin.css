@@ -764,8 +764,22 @@ html[data-theme="light"] .metrics-proc-row {
   font-size: 13px; padding: 4px 10px;
 }
 .fullscreen-stats-btn:hover { background: var(--border); }
-.fullscreen-content { display: flex; flex-direction: row; flex: 1; overflow: hidden; min-height: 0; }
-#fullscreen-img { flex: 1; max-height: calc(92vh - 44px); object-fit: contain; display: block; min-width: 0; }
+#fullscreen-live-badge {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  color: #22c55e;
+  padding: 3px 10px; border-radius: 20px;
+  border: 1px solid rgba(34,197,94,0.35);
+  background: rgba(34,197,94,0.1);
+  animation: live-pulse 2s ease-in-out infinite;
+  user-select: none;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+.fullscreen-content { display: flex; flex-direction: row; flex: 1; overflow: hidden; min-height: 0; align-items: center; justify-content: center; }
+#fullscreen-img    { flex: 1; max-height: calc(92vh - 44px); object-fit: contain; display: block; min-width: 0; }
+#fullscreen-canvas { display: block; /* width/height set by JS to preserve aspect ratio */ }
 .fullscreen-stats-panel {
   width: 280px; flex-shrink: 0; overflow-y: auto;
   background: var(--surface); border-left: 1px solid var(--border);
@@ -953,6 +967,34 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
   height: 1px;
   background: var(--border);
 }
+/* ── Amount / Time preset switch (Add Time modal) ────────────── */
+.mode-switch {
+  display: flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 14px;
+}
+.mode-switch-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 0;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mode-switch-btn:hover {
+  color: var(--text);
+}
+.mode-switch-btn.active {
+  background: var(--gradient);
+  color: #fff;
+}
 
 .title-text {
   display: block;           /* block */
@@ -990,11 +1032,6 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
       color-mix(in srgb, var(--banner-accent, #ef4444) 22%, transparent),
       transparent 55%);
   pointer-events: none;
-}
-.license-banner:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--banner-accent, #ef4444) 60%, transparent);
-  filter: brightness(1.05);
 }
 
 /* Expired or trial-expired → red urgency */
@@ -1068,6 +1105,13 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
   line-height: 1.4;
 }
 
+.license-banner-ctas {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .license-banner-cta {
   flex: 0 0 auto;
   display: inline-flex;
@@ -1081,8 +1125,32 @@ html[data-theme="light"] .inline-bar { background: rgba(0,0,0,0.08); }
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
+  text-decoration: none;
   box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--banner-accent, #ef4444) 60%, transparent);
   position: relative;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.15s ease;
+}
+.license-banner-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--banner-accent, #ef4444) 60%, transparent);
+  filter: brightness(1.05);
+}
+
+/* Secondary CTA ("Buy License") — filled in the brand blue (matches the
+   logo), sits beside the primary gradient "Activate now" pill. Selector is
+   doubled up (.license-banner-cta.license-banner-cta-secondary) so it beats
+   the per-state ".license-banner-expired/offline_locked/trial .license-banner-cta"
+   background rules above, which otherwise win on specificity and leave the
+   red/amber/purple background showing through. */
+.license-banner-cta.license-banner-cta-secondary {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  border: 1px solid transparent;
+  color: #fff;
+  box-shadow: 0 4px 12px -4px color-mix(in srgb, #0ea5e9 60%, transparent);
+}
+.license-banner-cta.license-banner-cta-secondary:hover {
+  box-shadow: 0 8px 24px -10px color-mix(in srgb, #0ea5e9 60%, transparent);
+  filter: brightness(1.1);
 }
 
 /* Compact on narrow screens — drop the CTA pill and the subtext, but keep

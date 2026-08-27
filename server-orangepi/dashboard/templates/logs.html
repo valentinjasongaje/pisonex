@@ -23,7 +23,7 @@
   {% for log in logs %}
   {% set lvl = log.level | upper %}
   <div class="log-row log-{{ lvl | lower }}">
-    <span class="log-row-time">{{ log.created_at.strftime('%H:%M:%S') }}</span>
+    <span class="log-row-time">{{ log.created_at | localtime('%H:%M:%S') }}</span>
     <span class="log-row-level">
       <span class="log-row-level-dot"></span>
       {{ lvl }}

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base, SessionLocal
-from models import AdminUser, CoinRate, MembershipConfig, ServerConfig
+from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig, CoinSchedule, ScheduledAnnouncement
 from api import auth, pc, sessions, admin
 from api.license import router as license_router
 from api.member import router as member_router
@@ -169,6 +169,9 @@ async def lifespan(app: FastAPI):
     # Background task: hourly status ping to pisonex.com (live branch totals)
     status_task = asyncio.create_task(_hourly_status_ping_loop())
 
+    # Background task: enforce coin block schedules and fire timed announcements
+    schedule_task = asyncio.create_task(_schedule_loop())
+
     yield
 
     # Shutdown
@@ -177,6 +180,7 @@ async def lifespan(app: FastAPI):
     membership_task.cancel()
     status_task.cancel()
     earnings_task.cancel()
+    schedule_task.cancel()
     if hw_controller:
         hw_controller.cleanup()
     logger.info("Pisonex server shut down")
@@ -230,6 +234,12 @@ def _migrate_schema():
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
             migrated.append(f"users.{col_name} (added)")
 
+    if not has_column("users", "must_change_password"):
+        cursor.execute(
+            "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
+        )
+        migrated.append("users.must_change_password (added)")
+
     # Add role column to admin_users if missing
     if not has_column("admin_users", "role"):
         cursor.execute("ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'")
@@ -243,6 +253,14 @@ def _migrate_schema():
         if not has_column("membership_config", col_name):
             cursor.execute(f"ALTER TABLE membership_config ADD COLUMN {col_name} {col_type} DEFAULT 0")
             migrated.append(f"membership_config.{col_name} (added)")
+
+    if not has_column("coin_rates", "profile_id"):
+        cursor.execute("ALTER TABLE coin_rates ADD COLUMN profile_id INTEGER")
+        migrated.append("coin_rates.profile_id (added)")
+
+    if not has_column("pcs", "rate_profile_id"):
+        cursor.execute("ALTER TABLE pcs ADD COLUMN rate_profile_id INTEGER")
+        migrated.append("pcs.rate_profile_id (added)")
 
     # Add coin-slot GPIO config columns to server_config if missing
     # (only applies to installs that already have a server_config table — fresh
@@ -260,6 +278,7 @@ def _migrate_schema():
             ("coin_edge", "VARCHAR(10)"),
             ("coin_debounce_ms", "INTEGER"),
             ("coin_pulse_timeout", "VARCHAR(16)"),
+            ("ffmpeg_streaming_enabled", "BOOLEAN DEFAULT 1"),
         ]
         for col_name, col_type in new_server_columns:
             if not has_column("server_config", col_name):
@@ -304,11 +323,26 @@ def _seed_defaults(db):
         db.add(admin_user)
         logger.info("Created default admin user: %s", settings.ADMIN_USERNAME)
 
+    default_profile = db.query(RateProfile).filter_by(is_default=True).first()
+    if not default_profile:
+        default_profile = RateProfile(name="Default", color="#4f8ef7", is_default=True)
+        db.add(default_profile)
+        db.flush()   # get the id assigned before we reference it below
+        logger.info("Created Default rate profile (id=%d)", default_profile.id)
+
+    # Any CoinRate rows with profile_id=None (pre-existing installs, from
+    # before Rate Profiles existed) are owned by the Default profile.
+    if default_profile.id:
+        db.query(CoinRate).filter(CoinRate.profile_id == None).update(  # noqa: E711
+            {"profile_id": default_profile.id}, synchronize_session=False
+        )
+
     if not db.query(CoinRate).first():
         rate = CoinRate(
             pesos=settings.DEFAULT_RATE_PESOS,
             seconds=settings.DEFAULT_RATE_SECONDS,
             label=f"₱{settings.DEFAULT_RATE_PESOS} = {settings.DEFAULT_RATE_SECONDS // 60} minutes",
+            profile_id=default_profile.id,
         )
         db.add(rate)
         logger.info(
@@ -478,6 +512,88 @@ async def _membership_expiry_loop():
                 db.close()
         except Exception as e:
             logger.error("Membership expiry error: %s", e)
+
+
+def _time_in_range(start: str, end: str, current: str) -> bool:
+    """Return True if current HH:MM falls within [start, end]. Handles midnight crossings."""
+    if start <= end:
+        return start <= current <= end
+    # Crosses midnight e.g. "22:00" to "06:00"
+    return current >= start or current <= end
+
+
+def _next_minute(t: str) -> str:
+    """Return HH:MM for t + 1 minute (used to build a 1-minute fire window)."""
+    h, m = map(int, t.split(":"))
+    m += 1
+    if m >= 60:
+        m, h = 0, (h + 1) % 24
+    return f"{h:02d}:{m:02d}"
+
+
+def _run_schedule_tick():
+    """
+    Called every 30 s from _schedule_loop.
+
+    1. Evaluates all active CoinSchedule rows → sets command_store._schedule_blocked.
+    2. Fires any ScheduledAnnouncement whose fire_time window is now and hasn't
+       fired today yet.
+
+    Uses local server time (datetime.now()), NOT UTC, so schedules match the
+    café's timezone.
+    """
+    import command_store
+    from datetime import datetime as _dt
+    now      = _dt.now()
+    cur_time = now.strftime("%H:%M")
+    cur_date = now.strftime("%Y-%m-%d")
+    cur_dow  = str(now.weekday())   # "0"=Mon … "6"=Sun
+
+    with SessionLocal() as db:
+        # ── Coin block ────────────────────────────────────────────────────────
+        schedules = db.query(CoinSchedule).filter(CoinSchedule.is_active == True).all()
+        blocked = any(
+            cur_dow in s.days_of_week
+            and _time_in_range(s.start_time, s.end_time, cur_time)
+            for s in schedules
+        )
+        old_blocked = command_store.is_schedule_blocked()
+        if blocked != old_blocked:
+            command_store.set_schedule_blocked(blocked)
+            logger.info(
+                "Coin slot %s by schedule at %s",
+                "BLOCKED" if blocked else "UNBLOCKED",
+                cur_time,
+            )
+
+        # ── Announcements ─────────────────────────────────────────────────────
+        announcements = db.query(ScheduledAnnouncement).filter(
+            ScheduledAnnouncement.is_active == True
+        ).all()
+        for ann in announcements:
+            if cur_dow not in ann.days_of_week:
+                continue
+            if ann.last_fired_date == cur_date:
+                continue   # already fired today
+            # Fire if we're within the 1-minute window of fire_time
+            if ann.fire_time <= cur_time < _next_minute(ann.fire_time):
+                command_store.set_announcement(ann.message)
+                ann.last_fired_date = cur_date
+                db.commit()
+                logger.info(
+                    "Scheduled announcement fired: %s",
+                    ann.label or ann.message[:50],
+                )
+
+
+async def _schedule_loop():
+    """Background task: enforce coin schedules and fire timed announcements."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            _run_schedule_tick()
+        except Exception as exc:
+            logger.error("_schedule_loop error: %s", exc)
 
 
 async def _nightly_earnings_sync_loop():

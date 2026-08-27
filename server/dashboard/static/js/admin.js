@@ -43,6 +43,38 @@ function selectPreset(btn, value, mode) {
   if (input) input.value = value;
 }
 
+// Switches the Add Time modal between Amount (pesos) and Time (minutes)
+// presets. Both preset grids are always in the DOM -- this just toggles
+// which one is visible and keeps the hidden #preset-mode / custom input
+// in sync so the existing submit handler doesn't need to know about it.
+function setAddTimeMode(mode) {
+  const isPesos = mode === 'pesos';
+
+  const pesoGrid = document.getElementById('preset-grid-pesos');
+  const minuteGrid = document.getElementById('preset-grid-minutes');
+  if (pesoGrid) pesoGrid.style.display = isPesos ? '' : 'none';
+  if (minuteGrid) minuteGrid.style.display = isPesos ? 'none' : '';
+
+  const presetMode = document.getElementById('preset-mode');
+  if (presetMode) presetMode.value = mode;
+
+  const input = document.getElementById('add-time-input');
+  if (input) {
+    input.value = '';
+    input.placeholder = isPesos ? 'Pesos (₱)' : 'Minutes';
+    input.max = isPesos ? 9999 : 999;
+  }
+
+  const divider = document.getElementById('custom-amount-divider');
+  if (divider) divider.textContent = isPesos ? 'or enter custom pesos' : 'or enter custom minutes';
+
+  document.querySelectorAll('.mode-switch-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  // Clear any preset highlight left over from the other mode
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('preset-active'));
+}
+
 // ── Shared auth-aware fetch ───────────────────────────────────────────────────
 async function apiPost(url, body) {
   const res = await fetch(url, {

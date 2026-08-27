@@ -234,6 +234,12 @@ def _migrate_schema():
             cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
             migrated.append(f"users.{col_name} (added)")
 
+    if not has_column("users", "must_change_password"):
+        cursor.execute(
+            "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
+        )
+        migrated.append("users.must_change_password (added)")
+
     # Add role column to admin_users if missing
     if not has_column("admin_users", "role"):
         cursor.execute("ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'")

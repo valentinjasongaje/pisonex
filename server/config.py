@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     # Defaults to "My Internet Cafe" so fresh installs have a usable identifier.
     BRANCH_NAME: str = "My Internet Cafe"
 
+    # IANA timezone used ONLY for displaying timestamps in the dashboard
+    # (transactions, logs, last-seen, etc.). All timestamps are still stored
+    # in the database as naive UTC (datetime.utcnow()) — that never changes —
+    # this just controls what the admin sees on screen. Defaults to the
+    # Philippines, where PisoNet cafes are based.
+    TIMEZONE: str = "Asia/Manila"
+
     # PC client API key — shared secret sent in X-API-Key header by all clients.
     # Leave empty ("") to disable auth (default, backward-compatible).
     # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here

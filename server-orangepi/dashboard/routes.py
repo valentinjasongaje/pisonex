@@ -7,9 +7,10 @@ import socket as _socket
 import subprocess
 import sys
 import time
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import asyncio
 
@@ -27,8 +28,38 @@ from database import get_db
 from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, RateProfile, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
+from services.rate_service import pesos_to_seconds, pesos_for_seconds
 from config import settings
 import command_store
+
+# Fixed amounts shown as quick-add presets in the "Add Time" modal. The modal
+# lets the admin switch between Amount (pesos) and Time (minutes) presets;
+# each side shows the other unit's equivalent underneath, using the Default
+# rate profile -- rates are configurable, so these aren't hardcoded elsewhere.
+_ADD_TIME_PRESET_PESOS = [1, 5, 10, 15, 20, 25]
+_ADD_TIME_PRESET_MINUTES = [30, 60, 120, 180, 300, 480]
+
+
+def _format_compact_duration(seconds: int) -> str:
+    mins = seconds // 60
+    if mins >= 60:
+        h, m = divmod(mins, 60)
+        return f"{h}h {m}m" if m else f"{h}h"
+    return f"{mins} min"
+
+
+def _preset_time_labels(db: Session) -> dict:
+    return {
+        amt: _format_compact_duration(pesos_to_seconds(amt, db))
+        for amt in _ADD_TIME_PRESET_PESOS
+    }
+
+
+def _preset_peso_labels(db: Session) -> dict:
+    return {
+        mins: f"₱{pesos_for_seconds(mins * 60, db)}"
+        for mins in _ADD_TIME_PRESET_MINUTES
+    }
 
 
 class RenamePcBody(BaseModel):
@@ -50,6 +81,26 @@ class CoinSlotBody(BaseModel):
 router = APIRouter(prefix="/dashboard")
 _BUNDLE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(_BUNDLE_DIR / "dashboard" / "templates"))
+
+# All timestamps are stored as naive UTC (datetime.utcnow()) -- that's correct
+# and unchanged. This filter only affects what the dashboard displays: convert
+# to settings.TIMEZONE before formatting, so admins see local time instead of
+# raw UTC. Falls back to UTC if the configured zone name is invalid, so a
+# typo in .env can't break every page that shows a timestamp.
+try:
+    _LOCAL_TZ = ZoneInfo(settings.TIMEZONE)
+except Exception:
+    _LOCAL_TZ = ZoneInfo("UTC")
+
+
+def _localtime_filter(dt, fmt: str = "%Y-%m-%d %H:%M:%S"):
+    if dt is None:
+        return ""
+    aware_utc = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return aware_utc.astimezone(_LOCAL_TZ).strftime(fmt)
+
+
+templates.env.filters["localtime"] = _localtime_filter
 
 _ALGORITHM = "HS256"
 _COOKIE_NAME = "pisonet_session"
@@ -312,6 +363,8 @@ def overview(
         "active_count": active_count,
         "today_pesos": today_pesos,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "preset_time_labels": _preset_time_labels(db),
+        "preset_peso_labels": _preset_peso_labels(db),
     })
 
 
@@ -1166,6 +1219,8 @@ def pcs_page(
         "total": len(pc_data),
         "membership_enabled": membership_enabled,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "preset_time_labels": _preset_time_labels(db),
+        "preset_peso_labels": _preset_peso_labels(db),
         "profiles": profiles,
     })
 
@@ -1913,6 +1968,7 @@ def membership_page(
             "remaining_seconds": remaining_sec,
             "last_login_at": m.last_login_at,
             "created_at": m.created_at,
+            "must_change_password": m.must_change_password,
         })
 
     return templates.TemplateResponse("membership.html", {
@@ -1920,6 +1976,53 @@ def membership_page(
         "config": cfg,
         "members": member_data,
     })
+
+
+class CreateMemberBody(BaseModel):
+    username: str
+    initial_minutes: int = 0  # optional time to seed at creation (e.g. membership sold with time included)
+
+
+@router.post("/api/membership/create-member", dependencies=[Depends(_require_active_license)])
+def create_member(
+    body: CreateMemberBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: create a member account with an auto-generated temp password.
+
+    Self-service registration from the client lock screen has been removed
+    (see api/member.py) — this is now the only way to create a member
+    account. The temp password is returned once in the JSON response for
+    the admin to copy; it is never stored in plaintext or logged.
+
+    initial_minutes seeds User.balance_seconds at creation (converted to
+    seconds here, same underlying unit as AdjustBalanceBody.seconds used by
+    POST .../members/{id}/adjust-balance) — used when a membership is sold
+    with time already included.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username cannot be empty")
+    if body.initial_minutes < 0:
+        raise HTTPException(status_code=422, detail="Initial time cannot be negative")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_create_member(username, initial_minutes=body.initial_minutes)
+    if not result["success"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+
+    return {
+        "status": "created",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+        "balance_seconds": result["balance_seconds"],
+    }
 
 
 @router.post("/api/membership/config", dependencies=[Depends(_require_active_license)])
@@ -2018,6 +2121,34 @@ def force_logout_member(
     if not ok:
         raise HTTPException(status_code=404, detail="Member not found or not logged in")
     return {"status": "logged_out", "member_id": member_id}
+
+
+@router.post("/api/membership/members/{member_id}/reset-password", dependencies=[Depends(_require_active_license)])
+def reset_member_password(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: generate a new temp password for a member who forgot
+    theirs. They'll be required to set their own password on next login,
+    same as a freshly created account. Does not disturb an already-active
+    session — only their next login is affected.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_reset_password(member_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return {
+        "status": "reset",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+    }
 
 
 # ── Staff management (admin only) ────────────────────────────────────────────

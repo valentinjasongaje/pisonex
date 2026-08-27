@@ -52,7 +52,7 @@
     {% else %}
     <div class="pc-status-label">Offline</div>
     <div class="pc-status-sub">
-      {% if pc.last_seen %}Last seen {{ pc.last_seen.strftime('%H:%M') }}{% else %}Never connected{% endif %}
+      {% if pc.last_seen %}Last seen {{ pc.last_seen | localtime('%H:%M') }}{% else %}Never connected{% endif %}
     </div>
     {% endif %}
   </div>

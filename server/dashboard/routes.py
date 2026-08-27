@@ -1,13 +1,16 @@
+import asyncio
 import csv
 import hashlib
 import io
 import os
+import re
 import sys
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File
+from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -18,11 +21,41 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, RateProfile, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
+from services.rate_service import pesos_to_seconds, pesos_for_seconds
 from config import settings
 import command_store
+
+# Fixed amounts shown as quick-add presets in the "Add Time" modal. The modal
+# lets the admin switch between Amount (pesos) and Time (minutes) presets;
+# each side shows the other unit's equivalent underneath, using the Default
+# rate profile -- rates are configurable, so these aren't hardcoded elsewhere.
+_ADD_TIME_PRESET_PESOS = [1, 5, 10, 15, 20, 25]
+_ADD_TIME_PRESET_MINUTES = [30, 60, 120, 180, 300, 480]
+
+
+def _format_compact_duration(seconds: int) -> str:
+    mins = seconds // 60
+    if mins >= 60:
+        h, m = divmod(mins, 60)
+        return f"{h}h {m}m" if m else f"{h}h"
+    return f"{mins} min"
+
+
+def _preset_time_labels(db: Session) -> dict:
+    return {
+        amt: _format_compact_duration(pesos_to_seconds(amt, db))
+        for amt in _ADD_TIME_PRESET_PESOS
+    }
+
+
+def _preset_peso_labels(db: Session) -> dict:
+    return {
+        mins: f"₱{pesos_for_seconds(mins * 60, db)}"
+        for mins in _ADD_TIME_PRESET_MINUTES
+    }
 
 
 class RenamePcBody(BaseModel):
@@ -44,6 +77,26 @@ class CoinSlotBody(BaseModel):
 router = APIRouter(prefix="/dashboard")
 _BUNDLE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(_BUNDLE_DIR / "dashboard" / "templates"))
+
+# All timestamps are stored as naive UTC (datetime.utcnow()) -- that's correct
+# and unchanged. This filter only affects what the dashboard displays: convert
+# to settings.TIMEZONE before formatting, so admins see local time instead of
+# raw UTC. Falls back to UTC if the configured zone name is invalid, so a
+# typo in .env can't break every page that shows a timestamp.
+try:
+    _LOCAL_TZ = ZoneInfo(settings.TIMEZONE)
+except Exception:
+    _LOCAL_TZ = ZoneInfo("UTC")
+
+
+def _localtime_filter(dt, fmt: str = "%Y-%m-%d %H:%M:%S"):
+    if dt is None:
+        return ""
+    aware_utc = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return aware_utc.astimezone(_LOCAL_TZ).strftime(fmt)
+
+
+templates.env.filters["localtime"] = _localtime_filter
 
 _ALGORITHM = "HS256"
 _COOKIE_NAME = "pisonet_session"
@@ -306,6 +359,8 @@ def overview(
         "active_count": active_count,
         "today_pesos": today_pesos,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "preset_time_labels": _preset_time_labels(db),
+        "preset_peso_labels": _preset_peso_labels(db),
     })
 
 
@@ -345,6 +400,7 @@ def license_page(
 @router.get("/rates", response_class=HTMLResponse)
 def rates_page(
     request: Request,
+    profile: int = 1,
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(_validate_session),
 ):
@@ -352,15 +408,54 @@ def rates_page(
         return RedirectResponse("/dashboard/login", status_code=302)
     if current_user["role"] != "admin":
         return RedirectResponse("/dashboard", status_code=302)
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+
+    # Resolve the selected profile — fall back to the default if the id is unknown
+    selected_profile = db.query(RateProfile).filter(RateProfile.id == profile).first()
+    if not selected_profile and profiles:
+        selected_profile = next((p for p in profiles if p.is_default), profiles[0])
+
+    selected_id = selected_profile.id if selected_profile else 1
+
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == selected_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("rates.html", {
         "request": request,
         "rates": rates,
+        "profiles": profiles,
+        "selected_profile": selected_profile,
+        "selected_id": selected_id,
+    })
+
+
+@router.get("/partials/rates-table", response_class=HTMLResponse)
+def rates_table_partial(
+    request: Request,
+    profile_id: int = 1,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """HTMX partial — returns just the rates table for the selected profile."""
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+    rates = (
+        db.query(CoinRate)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
+        .order_by(CoinRate.pesos.asc())
+        .all()
+    )
+    return templates.TemplateResponse("partials/rates_table.html", {
+        "request": request,
+        "rates": rates,
+        "selected_id": profile_id,
     })
 
 
@@ -369,6 +464,7 @@ def save_rate(
     request: Request,
     pesos: int = Form(...),
     minutes: int = Form(...),
+    profile_id: int = Form(1),
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(_validate_session),
 ):
@@ -376,8 +472,16 @@ def save_rate(
         return HTMLResponse(status_code=401, content="")
     if current_user["role"] != "admin":
         return HTMLResponse(status_code=403, content="")
+
+    # Ensure the profile exists
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+
     existing = db.query(CoinRate).filter(
-        CoinRate.pesos == pesos, CoinRate.is_active == True
+        CoinRate.pesos == pesos,
+        CoinRate.is_active == True,
+        CoinRate.profile_id == profile_id,
     ).first()
     if existing:
         existing.is_active = False
@@ -387,19 +491,21 @@ def save_rate(
         pesos=pesos,
         seconds=seconds,
         label=f"₱{pesos} = {minutes} minutes",
+        profile_id=profile_id,
     )
     db.add(rate)
     db.commit()
 
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("partials/rates_table.html", {
         "request": request,
         "rates": rates,
+        "selected_id": profile_id,
     })
 
 
@@ -415,18 +521,191 @@ def delete_rate(
     if current_user["role"] != "admin":
         return HTMLResponse(status_code=403, content="")
     rate = db.query(CoinRate).filter(CoinRate.id == rate_id).first()
+    profile_id = rate.profile_id if rate else 1
     if rate:
         rate.is_active = False
         db.commit()
     rates = (
         db.query(CoinRate)
-        .filter(CoinRate.is_active == True)
+        .filter(CoinRate.is_active == True, CoinRate.profile_id == profile_id)
         .order_by(CoinRate.pesos.asc())
         .all()
     )
     return templates.TemplateResponse("partials/rates_table.html", {
         "request": request,
         "rates": rates,
+        "selected_id": profile_id,
+    })
+
+
+# ── Rate Profile CRUD ────────────────────────────────────────────────────────
+
+class ProfileCreateBody(BaseModel):
+    name: str
+    color: str = "#4f8ef7"
+
+
+@router.post("/rates/profiles", response_class=HTMLResponse)
+def create_profile(
+    request: Request,
+    name: str = Form(...),
+    color: str = Form("#4f8ef7"),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    name = name.strip()
+    if not name:
+        return HTMLResponse(status_code=422, content="Name cannot be empty")
+
+    existing = db.query(RateProfile).filter(RateProfile.name == name).first()
+    if existing:
+        return HTMLResponse(status_code=409, content="A profile with that name already exists")
+
+    profile = RateProfile(name=name, color=color, is_default=False)
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": profile.id,
+    })
+
+
+@router.delete("/rates/profiles/{profile_id}", response_class=HTMLResponse)
+def delete_profile(
+    profile_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+    if profile.is_default:
+        return HTMLResponse(status_code=400, content="Cannot delete the Default profile")
+
+    # Reassign PCs to Default profile
+    default_profile = db.query(RateProfile).filter(RateProfile.is_default == True).first()
+    default_id = default_profile.id if default_profile else 1
+    db.query(PC).filter(PC.rate_profile_id == profile_id).update(
+        {"rate_profile_id": None}, synchronize_session=False
+    )
+
+    # Soft-delete this profile's rates (mark inactive)
+    db.query(CoinRate).filter(CoinRate.profile_id == profile_id).update(
+        {"is_active": False}, synchronize_session=False
+    )
+
+    db.delete(profile)
+    db.commit()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": default_id,
+    })
+
+
+@router.post("/rates/profiles/{profile_id}/name", response_class=HTMLResponse)
+def rename_profile(
+    profile_id: int,
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+    if not profile:
+        return HTMLResponse(status_code=404, content="Profile not found")
+    if profile.is_default:
+        return HTMLResponse(status_code=400, content="Cannot rename the Default profile")
+
+    name = name.strip()
+    if not name:
+        return HTMLResponse(status_code=422, content="Name cannot be empty")
+
+    conflict = db.query(RateProfile).filter(
+        RateProfile.name == name, RateProfile.id != profile_id
+    ).first()
+    if conflict:
+        return HTMLResponse(status_code=409, content="A profile with that name already exists")
+
+    profile.name = name
+    db.commit()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    return templates.TemplateResponse("partials/profile_tabs.html", {
+        "request": request,
+        "profiles": profiles,
+        "selected_id": profile_id,
+    })
+
+
+# ── PC profile assignment ────────────────────────────────────────────────────
+
+@router.post("/pcs/{pc_number}/profile", response_class=HTMLResponse)
+def set_pc_profile(
+    pc_number: int,
+    request: Request,
+    profile_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Assign a rate profile to a PC.  Returns an updated profile-badge partial."""
+    if not current_user:
+        return HTMLResponse(status_code=401, content="")
+    if current_user["role"] != "admin":
+        return HTMLResponse(status_code=403, content="")
+
+    pc = db.query(PC).filter(PC.pc_number == pc_number).first()
+    if not pc:
+        return HTMLResponse(status_code=404, content=f"PC {pc_number} not found")
+
+    # profile_id=0 means "clear assignment → Default"
+    if profile_id == 0:
+        pc.rate_profile_id = None
+    else:
+        profile = db.query(RateProfile).filter(RateProfile.id == profile_id).first()
+        if not profile:
+            return HTMLResponse(status_code=404, content="Profile not found")
+        pc.rate_profile_id = profile_id
+
+    db.commit()
+    db.refresh(pc)
+
+    # Determine the effective profile for display
+    effective_profile = None
+    if pc.rate_profile_id:
+        effective_profile = db.query(RateProfile).filter(RateProfile.id == pc.rate_profile_id).first()
+    if not effective_profile:
+        effective_profile = db.query(RateProfile).filter(RateProfile.is_default == True).first()
+
+    return templates.TemplateResponse("partials/pc_profile_badge.html", {
+        "request": request,
+        "pc_number": pc_number,
+        "profile": effective_profile,
     })
 
 
@@ -698,6 +977,74 @@ def serve_screenshot(
     )
 
 
+@router.post("/monitor/watch/{pc_number}")
+async def watch_pc(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_watched(pc_number)
+    return {"status": "ok"}
+
+
+@router.websocket("/ws/stream/{pc_number}/publish")
+async def ws_stream_publish(websocket: WebSocket, pc_number: int):
+    import logging, stream_store
+    _log = logging.getLogger("stream.publish")
+
+    api_key = (
+        websocket.headers.get("x-api-key", "")
+        or websocket.query_params.get("api_key", "")
+    )
+    if settings.CLIENT_API_KEY and api_key != settings.CLIENT_API_KEY:
+        _log.warning("PC %d publish rejected — bad API key", pc_number)
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    stream_store.set_publisher(pc_number, websocket)
+    chunks = 0
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            chunks += 1
+            await stream_store.broadcast(pc_number, data)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        _log.warning("PC %d publish error after %d chunks: %s", pc_number, chunks, exc)
+    finally:
+        stream_store.clear_publisher(pc_number)
+        await stream_store.close_all_watchers(pc_number)
+
+
+@router.websocket("/ws/stream/{pc_number}/watch")
+async def ws_stream_watch(websocket: WebSocket, pc_number: int):
+    import logging, stream_store
+    _log = logging.getLogger("stream.watch")
+
+    token = websocket.cookies.get("pisonet_session")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        jwt.decode(token, settings.SECRET_KEY, algorithms=[_ALGORITHM])
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    stream_store.add_watcher(pc_number, websocket)
+    try:
+        while True:
+            await asyncio.sleep(20)
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        stream_store.remove_watcher(pc_number, websocket)
+
+
 # ── Documentation pages ───────────────────────────────────────────────────────
 
 @router.get("/docs/api", response_class=HTMLResponse)
@@ -766,12 +1113,19 @@ def pcs_page(
     membership_enabled, pc_members = _get_membership_info(db)
     cfg = db.query(MembershipConfig).first()
 
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+    default_profile = next((p for p in profiles if p.is_default), None)
+    profile_map = {p.id: p for p in profiles}
+
     pc_data = []
     for pc in pcs:
         if pc.last_seen and pc.last_seen < timeout:
             pc.is_online = False
         session = svc.get_active_session(pc.pc_number)
         remaining_sec = svc.remaining_seconds(session)
+        # Effective profile: the one assigned, else the Default
+        eff_profile = profile_map.get(pc.rate_profile_id) if pc.rate_profile_id else default_profile
         pc_data.append({
             "pc_number": pc.pc_number,
             "name": pc.name,
@@ -783,6 +1137,8 @@ def pcs_page(
             "remaining_minutes": remaining_sec // 60,
             "remaining_seconds": remaining_sec % 60,
             "member_username": pc_members.get(pc.pc_number),
+            "rate_profile": eff_profile,
+            "rate_profile_id": pc.rate_profile_id,
         })
     db.commit()
 
@@ -792,6 +1148,9 @@ def pcs_page(
         "total": len(pc_data),
         "membership_enabled": membership_enabled,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "preset_time_labels": _preset_time_labels(db),
+        "preset_peso_labels": _preset_peso_labels(db),
+        "profiles": profiles,
     })
 
 
@@ -1282,7 +1641,29 @@ def settings_page(
             "coin_debounce_ms": _cfg("coin_debounce_ms", settings.COIN_DEBOUNCE_MS),
             "coin_pulse_timeout": _cfg("coin_pulse_timeout", settings.COIN_PULSE_TIMEOUT),
         },
+        "ffmpeg_streaming_enabled": getattr(srv_cfg, "ffmpeg_streaming_enabled", True) if srv_cfg else True,
     })
+
+
+class FfmpegToggleBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/api/settings/ffmpeg-streaming")
+def save_ffmpeg_streaming(
+    body: FfmpegToggleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1, client_api_key="")
+        db.add(srv_cfg)
+    srv_cfg.ffmpeg_streaming_enabled = body.enabled
+    db.commit()
+    return {"status": "ok", "ffmpeg_streaming_enabled": body.enabled}
 
 
 class BranchNameBody(BaseModel):
@@ -1514,6 +1895,7 @@ def membership_page(
             "remaining_seconds": remaining_sec,
             "last_login_at": m.last_login_at,
             "created_at": m.created_at,
+            "must_change_password": m.must_change_password,
         })
 
     return templates.TemplateResponse("membership.html", {
@@ -1521,6 +1903,53 @@ def membership_page(
         "config": cfg,
         "members": member_data,
     })
+
+
+class CreateMemberBody(BaseModel):
+    username: str
+    initial_minutes: int = 0  # optional time to seed at creation (e.g. membership sold with time included)
+
+
+@router.post("/api/membership/create-member", dependencies=[Depends(_require_active_license)])
+def create_member(
+    body: CreateMemberBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: create a member account with an auto-generated temp password.
+
+    Self-service registration from the client lock screen has been removed
+    (see api/member.py) — this is now the only way to create a member
+    account. The temp password is returned once in the JSON response for
+    the admin to copy; it is never stored in plaintext or logged.
+
+    initial_minutes seeds User.balance_seconds at creation (converted to
+    seconds here, same underlying unit as AdjustBalanceBody.seconds used by
+    POST .../members/{id}/adjust-balance) — used when a membership is sold
+    with time already included.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username cannot be empty")
+    if body.initial_minutes < 0:
+        raise HTTPException(status_code=422, detail="Initial time cannot be negative")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_create_member(username, initial_minutes=body.initial_minutes)
+    if not result["success"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+
+    return {
+        "status": "created",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+        "balance_seconds": result["balance_seconds"],
+    }
 
 
 @router.post("/api/membership/config", dependencies=[Depends(_require_active_license)])
@@ -1621,6 +2050,34 @@ def force_logout_member(
     return {"status": "logged_out", "member_id": member_id}
 
 
+@router.post("/api/membership/members/{member_id}/reset-password", dependencies=[Depends(_require_active_license)])
+def reset_member_password(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: generate a new temp password for a member who forgot
+    theirs. They'll be required to set their own on next login, same as a
+    freshly created account. Does not disturb an already-active session —
+    only their next login is affected.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_reset_password(member_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return {
+        "status": "reset",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+    }
+
+
 # ── Staff management (admin only) ────────────────────────────────────────────
 
 class CreateStaffBody(BaseModel):
@@ -1701,3 +2158,227 @@ def delete_staff_user(
     db.delete(target)
     db.commit()
     return {"status": "deleted", "user_id": user_id}
+
+
+# ── Schedule management ───────────────────────────────────────────────────────
+
+_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+_DOW_RE  = re.compile(r"^[0-6]+$")
+
+
+def _validate_time(t: str, field: str):
+    if not _TIME_RE.match(t):
+        raise HTTPException(status_code=400, detail=f"{field} must be in HH:MM format")
+
+
+def _validate_dow(dow: str):
+    if not dow or not _DOW_RE.match(dow):
+        raise HTTPException(status_code=400, detail="days_of_week must contain only digits 0-6")
+
+
+class CoinScheduleBody(BaseModel):
+    label:        str = ""
+    start_time:   str          # "HH:MM"
+    end_time:     str          # "HH:MM"
+    days_of_week: str = "0123456"
+
+
+class ScheduledAnnouncementBody(BaseModel):
+    label:        str = ""
+    fire_time:    str          # "HH:MM"
+    message:      str
+    days_of_week: str = "0123456"
+
+
+@router.get("/schedule", response_class=HTMLResponse)
+def schedule_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
+
+    coin_schedules = db.query(CoinSchedule).order_by(CoinSchedule.created_at).all()
+    announcements  = db.query(ScheduledAnnouncement).order_by(ScheduledAnnouncement.fire_time).all()
+    return templates.TemplateResponse("schedule.html", {
+        "request": request,
+        "coin_schedules": coin_schedules,
+        "announcements": announcements,
+        "schedule_blocked_now": command_store.is_schedule_blocked(),
+    })
+
+
+# ── Coin block CRUD ───────────────────────────────────────────────────────────
+
+@router.post("/api/schedule/coin-blocks")
+def create_coin_block(
+    body: CoinScheduleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.start_time, "start_time")
+    _validate_time(body.end_time, "end_time")
+    _validate_dow(body.days_of_week)
+
+    sched = CoinSchedule(
+        label=body.label.strip(),
+        start_time=body.start_time,
+        end_time=body.end_time,
+        days_of_week=body.days_of_week,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return {
+        "id": sched.id,
+        "label": sched.label,
+        "start_time": sched.start_time,
+        "end_time": sched.end_time,
+        "days_of_week": sched.days_of_week,
+        "is_active": sched.is_active,
+    }
+
+
+@router.delete("/api/schedule/coin-blocks/{sched_id}")
+def delete_coin_block(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(CoinSchedule).filter(CoinSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    db.delete(sched)
+    db.commit()
+    return {"status": "deleted", "id": sched_id}
+
+
+@router.post("/api/schedule/coin-blocks/{sched_id}/toggle")
+def toggle_coin_block(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(CoinSchedule).filter(CoinSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    sched.is_active = not sched.is_active
+    db.commit()
+    return {"id": sched_id, "is_active": sched.is_active}
+
+
+# ── Scheduled announcement CRUD ───────────────────────────────────────────────
+
+@router.post("/api/schedule/announcements")
+def create_scheduled_announcement(
+    body: ScheduledAnnouncementBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.fire_time, "fire_time")
+    _validate_dow(body.days_of_week)
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+
+    ann = ScheduledAnnouncement(
+        label=body.label.strip(),
+        fire_time=body.fire_time,
+        message=body.message.strip(),
+        days_of_week=body.days_of_week,
+    )
+    db.add(ann)
+    db.commit()
+    db.refresh(ann)
+    return {
+        "id": ann.id,
+        "label": ann.label,
+        "fire_time": ann.fire_time,
+        "message": ann.message,
+        "days_of_week": ann.days_of_week,
+        "is_active": ann.is_active,
+    }
+
+
+@router.delete("/api/schedule/announcements/{ann_id}")
+def delete_scheduled_announcement(
+    ann_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    ann = db.query(ScheduledAnnouncement).filter(ScheduledAnnouncement.id == ann_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    db.delete(ann)
+    db.commit()
+    return {"status": "deleted", "id": ann_id}
+
+
+@router.post("/api/schedule/announcements/{ann_id}/toggle")
+def toggle_scheduled_announcement(
+    ann_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    ann = db.query(ScheduledAnnouncement).filter(ScheduledAnnouncement.id == ann_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    ann.is_active = not ann.is_active
+    db.commit()
+    return {"id": ann_id, "is_active": ann.is_active}
+
+
+@router.get("/api/schedule/status")
+def get_schedule_status(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Return current schedule-blocked state and the label of the active block, if any."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    from datetime import datetime as _dt
+    now      = _dt.now()
+    cur_time = now.strftime("%H:%M")
+    cur_dow  = str(now.weekday())
+
+    active_label = None
+    if command_store.is_schedule_blocked():
+        # Find the label of the matching schedule
+        from main import _time_in_range
+        schedules = db.query(CoinSchedule).filter(CoinSchedule.is_active == True).all()
+        for s in schedules:
+            if cur_dow in s.days_of_week and _time_in_range(s.start_time, s.end_time, cur_time):
+                active_label = s.label or f"{s.start_time}–{s.end_time}"
+                break
+
+    return {
+        "schedule_blocked": command_store.is_schedule_blocked(),
+        "active_block_label": active_label,
+    }
