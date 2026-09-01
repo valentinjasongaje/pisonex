@@ -1603,6 +1603,11 @@ def settings_page(
             "coin_debounce_ms": _cfg("coin_debounce_ms", settings.COIN_DEBOUNCE_MS),
             "coin_pulse_timeout": _cfg("coin_pulse_timeout", settings.COIN_PULSE_TIMEOUT),
         },
+        "keypad": {
+            "enabled": bool(srv_cfg.keypad_enabled) if srv_cfg else False,
+            "row_pins": _cfg("keypad_row_pins", ",".join(str(p) for p in settings.KEYPAD_ROWS)),
+            "col_pins": _cfg("keypad_col_pins", ",".join(str(p) for p in settings.KEYPAD_COLS)),
+        },
     })
 
 
@@ -1792,6 +1797,99 @@ def save_coin_config(
         "coin_edge": edge,
         "coin_debounce_ms": body.coin_debounce_ms,
         "coin_pulse_timeout": pulse_timeout,
+    }
+
+
+class KeypadConfigBody(BaseModel):
+    enabled: bool
+    row_pins: str
+    col_pins: str
+
+
+@router.post("/api/settings/keypad-config")
+def save_keypad_config(
+    body: KeypadConfigBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Persist the standalone kiosk keypad settings (DB + .env), apply them to
+    the live `settings`, and rebuild the hardware controller so the change
+    takes effect immediately — no server restart required."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    # ── Validate ─────────────────────────────────────────────────────────────
+    try:
+        row_pins = [int(p.strip()) for p in body.row_pins.split(",") if p.strip() != ""]
+        col_pins = [int(p.strip()) for p in body.col_pins.split(",") if p.strip() != ""]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Pins must be comma-separated integers")
+    if len(row_pins) != 4:
+        raise HTTPException(status_code=400, detail="Exactly 4 row pins are required")
+    if len(col_pins) != 3:
+        raise HTTPException(status_code=400, detail="Exactly 3 column pins are required")
+    if any(not (0 <= p <= 255) for p in row_pins + col_pins):
+        raise HTTPException(status_code=400, detail="Pins out of range (0-255)")
+    if len(set(row_pins) | set(col_pins)) != 7:
+        raise HTTPException(status_code=400, detail="Row and column pins must all be different")
+
+    row_str = ",".join(str(p) for p in row_pins)
+    col_str = ",".join(str(p) for p in col_pins)
+
+    # ── Persist to DB ──────────────────────────────────────────────────────────
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1, client_api_key="")
+        db.add(srv_cfg)
+    srv_cfg.keypad_enabled = body.enabled
+    srv_cfg.keypad_row_pins = row_str
+    srv_cfg.keypad_col_pins = col_str
+    db.commit()
+
+    # ── Persist to .env (so it survives a DB reset / matches config.py defaults) ─
+    env_path = Path(__file__).parent.parent / ".env"
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    def _set_env(key: str, value: str):
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith(f"{key}="):
+                lines[i] = f"{key}={value}\n"
+                return
+        lines.append(f"{key}={value}\n")
+
+    _set_env("KEYPAD_ENABLED", "true" if body.enabled else "false")
+    _set_env("KEYPAD_ROWS", "[" + ",".join(str(p) for p in row_pins) + "]")
+    _set_env("KEYPAD_COLS", "[" + ",".join(str(p) for p in col_pins) + "]")
+    env_path.write_text("".join(lines), encoding="utf-8")
+
+    # ── Apply to live settings + rebuild hardware ────────────────────────────────
+    settings.KEYPAD_ENABLED = body.enabled
+    settings.KEYPAD_ROWS = row_pins
+    settings.KEYPAD_COLS = col_pins
+
+    hardware_active = False
+    try:
+        import main
+        hardware_active = main.rebuild_hardware_controller()
+    except Exception as e:
+        # Settings are saved even if the rebuild fails (e.g. running off-Pi).
+        # The next restart will apply them. Surface the detail to the admin.
+        return {
+            "status": "saved",
+            "hardware_active": False,
+            "detail": f"Settings saved but hardware reload failed: {e}",
+        }
+
+    return {
+        "status": "ok",
+        "hardware_active": hardware_active,
+        "keypad_enabled": body.enabled,
+        "row_pins": row_str,
+        "col_pins": col_str,
     }
 
 

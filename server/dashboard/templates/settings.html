@@ -138,6 +138,42 @@
   </div>
 </div>
 
+<!-- Keypad — standalone kiosk box, off by default -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Keypad</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Optional standalone kiosk unit — a 3x4 keypad + LCD that lets a customer
+    type which PC they're paying for and insert coins directly, without a
+    client running "Insert Coin". Off by default.
+  </p>
+
+  <div class="form-group" style="margin-top:.5rem;">
+    <label class="toggle-label">
+      <input type="checkbox" id="cfg-keypad-enabled" {% if keypad.enabled %}checked{% endif %} />
+      <span>Enable Keypad + LCD</span>
+    </label>
+  </div>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-keypad-rows" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Row Pins</label>
+    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">4 pins, comma-separated.</p>
+    <input type="text" id="cfg-keypad-rows" placeholder="17,27,22,5"
+      value="{{ keypad.row_pins }}" style="max-width:200px;width:100%;" />
+  </div>
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-keypad-cols" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Column Pins</label>
+    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">3 pins, comma-separated.</p>
+    <input type="text" id="cfg-keypad-cols" placeholder="9,11,10"
+      value="{{ keypad.col_pins }}" style="max-width:200px;width:100%;" />
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="saveKeypadConfig()">Save</button>
+    <span id="keypad-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
 <!-- Security -->
 <div class="card" style="max-width:480px;margin-bottom:1.25rem;">
   <h2>Security</h2>
@@ -295,6 +331,37 @@ async function saveCoinConfig() {
       el.textContent = data.detail;
     } else {
       el.textContent = 'Saved (no coin hardware detected on this server).';
+    }
+    el.style.color = 'var(--green, #22c55e)';
+  } else {
+    let msg = 'Failed to save.';
+    try { const d = await res.json(); if (d.detail) msg = d.detail; } catch (e) {}
+    el.textContent = msg;
+    el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 5000);
+}
+
+async function saveKeypadConfig() {
+  const el = document.getElementById('keypad-status');
+  const body = {
+    enabled:  document.getElementById('cfg-keypad-enabled').checked,
+    row_pins: document.getElementById('cfg-keypad-rows').value.trim(),
+    col_pins: document.getElementById('cfg-keypad-cols').value.trim(),
+  };
+  const res = await fetch('/dashboard/api/settings/keypad-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) {
+    const data = await res.json();
+    if (data.hardware_active) {
+      el.textContent = 'Saved — hardware reloaded.';
+    } else if (data.detail) {
+      el.textContent = data.detail;
+    } else {
+      el.textContent = 'Saved (no hardware detected on this server).';
     }
     el.style.color = 'var(--green, #22c55e)';
   } else {

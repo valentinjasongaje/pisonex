@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # GPIO pins (BCM numbering)
     COIN_PIN: int = 4
     RELAY_PIN: int = 6          # BCM 6 (Physical Pin 31) — relay that powers the coin acceptor
+    KEYPAD_ENABLED: bool = False   # standalone kiosk keypad+LCD, off by default
     KEYPAD_ROWS: list[int] = [17, 27, 22, 5]   # R1, R2, R3, R4
     KEYPAD_COLS: list[int] = [9, 11, 10]        # C1, C2, C3
     LCD_I2C_ADDRESS: int = 0x27
