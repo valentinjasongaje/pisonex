@@ -310,6 +310,12 @@ def _migrate_schema():
                 cursor.execute(f"ALTER TABLE server_config ADD COLUMN {col_name} {col_type}")
                 migrated.append(f"server_config.{col_name} (added)")
 
+        if not has_column("server_config", "ffmpeg_streaming_enabled"):
+            cursor.execute(
+                "ALTER TABLE server_config ADD COLUMN ffmpeg_streaming_enabled BOOLEAN DEFAULT 1"
+            )
+            migrated.append("server_config.ffmpeg_streaming_enabled (added)")
+
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
         cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")

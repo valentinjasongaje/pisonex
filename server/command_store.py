@@ -300,6 +300,32 @@ def clear_zero_time_since(pc_number: int) -> None:
         _zero_time_since.pop(pc_number, None)
 
 
+# ── Watched PCs (MJPEG live stream) ──────────────────────────────────────────
+
+_WATCHED_TTL = 12  # seconds
+
+# {pc_number: expire_timestamp}
+_watched: dict[int, float] = {}
+
+
+def set_watched(pc_number: int) -> None:
+    """Mark a PC as actively watched by admin (TTL = 12 s). Renewed by dashboard keepalive."""
+    with _lock:
+        _watched[pc_number] = _time.time() + _WATCHED_TTL
+
+
+def is_watched(pc_number: int) -> bool:
+    """Return True if an admin is currently viewing the MJPEG stream for this PC."""
+    with _lock:
+        expire = _watched.get(pc_number)
+        if expire is None:
+            return False
+        if _time.time() > expire:
+            _watched.pop(pc_number, None)
+            return False
+        return True
+
+
 # ── Purge (called when a PC is deleted) ──────────────────────────────────────
 
 def purge_pc(pc_number: int) -> None:
@@ -315,6 +341,7 @@ def purge_pc(pc_number: int) -> None:
         _pc_idle_since.pop(pc_number, None)
         _pc_had_session.pop(pc_number, None)
         _zero_time_since.pop(pc_number, None)
+        _watched.pop(pc_number, None)
 
 
 # ── Login rate limiting ───────────────────────────────────────────────────────

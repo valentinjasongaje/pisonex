@@ -37,9 +37,8 @@ class PCHeartbeatResponse(BaseModel):
     minimum_logout_minutes: int = 0
     # Live-stream hint for monitoring: >0 means server wants client to capture
     # screenshots at this rate (ms); 0 means client uses its own configured
-    # interval.  Not actively driven by this server variant (no admin
-    # "watch PC" feature wired up) — always returns 0 — but present so the
-    # heartbeat response schema stays identical to server-orangepi/.
+    # interval. Set to 33ms while an admin is watching this PC's fullscreen
+    # monitor view (FFmpeg streaming) and back to 0 once they close it.
     capture_interval_ms: int = 0
 
 class PCStatusResponse(BaseModel):

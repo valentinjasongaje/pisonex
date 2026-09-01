@@ -160,24 +160,31 @@
   <div class="fullscreen-box" onclick="event.stopPropagation()">
     <div class="fullscreen-header">
       <span id="fullscreen-label"></span>
+      <span id="fullscreen-live-badge" style="display:none;">● LIVE</span>
       <div class="fullscreen-actions">
         <button id="fs-stats-btn" class="fullscreen-stats-btn" onclick="toggleFullscreenStats()" title="Toggle stats">📊 Stats</button>
         <button class="fullscreen-close" onclick="closeFullscreen()">✕</button>
       </div>
     </div>
     <div class="fullscreen-content">
+      {# jsmpeg canvas — shown once FFmpeg stream delivers first frame #}
+      <canvas id="fullscreen-canvas" style="display:none;background:#000"></canvas>
+      {# MJPEG img — visible immediately and until canvas takes over #}
       <img id="fullscreen-img" src="" alt="Full screen view" />
       <div id="fullscreen-stats-panel" class="fullscreen-stats-panel hidden"></div>
     </div>
   </div>
 </div>
 
+<script src="/static/js/jsmpeg.min.js"></script>
 <script>
 const PC_NUMBERS = [{% for pc in pcs %}{{ pc.pc_number }}{% if not loop.last %},{% endif %}{% endfor %}];
 let _fullscreenPc = null;
 let _fullscreenStatsOpen = false;
 let _fullscreenStatsTimer = null;
-let _fullscreenImgTimer = null;
+let _watchKeepalive = null;
+let _jsmpegPlayer = null;
+let _streamSwitched = false;
 
 function fmtHMS(sec) {
   const h = Math.floor(sec / 3600);
@@ -196,10 +203,7 @@ function refreshScreenshots() {
       img.src = `/dashboard/api/pc/${n}/screenshot?t=${t}`;
     }
   });
-  if (_fullscreenPc !== null) {
-    document.getElementById('fullscreen-img').src =
-      `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${t}`;
-  }
+  // Fullscreen view uses a persistent MJPEG stream — do NOT overwrite its src here.
 }
 
 // ── Status refresh ──────────────────────────────────────────────────────────
@@ -292,13 +296,25 @@ function toggleMetrics(pcNumber) {
 
 // ── Fullscreen modal ─────────────────────────────────────────────────────────
 
+function _setLiveBadge(on) {
+  const b = document.getElementById('fullscreen-live-badge');
+  if (b) b.style.display = on ? '' : 'none';
+}
+
+function _markWatched(pcNumber) {
+  fetch(`/dashboard/monitor/watch/${pcNumber}`, {method: 'POST'}).catch(() => {});
+}
+
 function openFullscreen(pcNumber) {
   _fullscreenPc = pcNumber;
-  const modal = document.getElementById('fullscreen-modal');
-  const img   = document.getElementById('fullscreen-img');
+  _streamSwitched = false;
+
+  const modal   = document.getElementById('fullscreen-modal');
+  const canvas  = document.getElementById('fullscreen-canvas');
+  const img     = document.getElementById('fullscreen-img');
+
   document.getElementById('fullscreen-label').textContent =
     `PC ${String(pcNumber).padStart(2, '0')}`;
-  img.src = `/dashboard/api/pc/${pcNumber}/screenshot?t=${Date.now()}`;
   modal.classList.remove('hidden');
 
   // Reset stats panel
@@ -314,27 +330,126 @@ function openFullscreen(pcNumber) {
     screen.orientation.lock('landscape').catch(() => {});
   }
 
-  // Refresh fullscreen screenshot every 1 second for near-live view
-  if (_fullscreenImgTimer) clearInterval(_fullscreenImgTimer);
-  _fullscreenImgTimer = setInterval(() => {
-    if (_fullscreenPc !== null) {
-      document.getElementById('fullscreen-img').src =
-        `/dashboard/api/pc/${_fullscreenPc}/screenshot?t=${Date.now()}`;
-    }
-  }, 1000);
+  // Tell server to ramp up capture rate; renew every 8 s while open
+  _markWatched(pcNumber);
+  if (_watchKeepalive) clearInterval(_watchKeepalive);
+  _watchKeepalive = setInterval(() => _markWatched(pcNumber), 8000);
+
+  // ── Show MJPEG immediately as fallback while FFmpeg stream warms up ──
+  _setLiveBadge(false);
+  canvas.style.display = 'none';
+  img.style.display = '';
+  img.onload = function() { _setLiveBadge(true); };   // badge on first frame
+  img.src = `/dashboard/api/pc/${pcNumber}/stream`;
+
+  // ── Start jsmpeg WebSocket stream in parallel ────────────────────────
+  // When the first video frame decodes, swap from MJPEG → canvas.
+  if (_jsmpegPlayer) { _jsmpegPlayer.destroy(); _jsmpegPlayer = null; }
+
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl   = `${wsProto}//${location.host}/dashboard/ws/stream/${pcNumber}/watch`;
+
+  _jsmpegPlayer = new JSMpeg.Player(wsUrl, {
+    canvas:   canvas,
+    autoplay: true,
+    audio:    false,
+    onSourceEstablished: function() {
+      console.log('[jsmpeg] WebSocket connected — waiting for first frame');
+    },
+    onVideoDecode: function() {
+      if (_streamSwitched) return;
+      _streamSwitched = true;
+      console.log('[jsmpeg] First frame decoded — switching to canvas');
+      img.src = '';
+      img.style.display  = 'none';
+      canvas.style.display = '';
+      _resizeStreamCanvas();
+      _setLiveBadge(true);
+    },
+    onStalled: function() {
+      console.warn('[jsmpeg] Stream stalled');
+    },
+    onEnded: function() {
+      console.warn('[jsmpeg] Stream ended — restoring MJPEG fallback');
+      _fallbackToMjpeg();
+    },
+    onSourceCompleted: function() {
+      console.warn('[jsmpeg] Source completed — restoring MJPEG fallback');
+      _fallbackToMjpeg();
+    },
+  });
+}
+
+// ── Canvas aspect-ratio fit ──────────────────────────────────────────────────
+// CSS aspect-ratio/max-width/max-height conflict on <canvas> so we size it
+// via JS: largest rect that fits the content area at the video's actual ratio.
+function _resizeStreamCanvas() {
+  const canvas  = document.getElementById('fullscreen-canvas');
+  const content = document.querySelector('.fullscreen-content');
+  if (!canvas || !content || canvas.style.display === 'none') return;
+
+  const cw = content.clientWidth;
+  const ch = content.clientHeight;
+  if (!cw || !ch) return;
+
+  // Use the video's real pixel ratio (set by jsmpeg on canvas attributes)
+  const vidW = canvas.width  || 1280;
+  const vidH = canvas.height || 720;
+  const ratio = vidW / vidH;
+
+  let w, h;
+  if (cw / ch > ratio) {
+    // Container wider than video — height is the constraint
+    h = ch; w = Math.round(h * ratio);
+  } else {
+    // Container taller than video — width is the constraint
+    w = cw; h = Math.round(w / ratio);
+  }
+
+  canvas.style.width  = w + 'px';
+  canvas.style.height = h + 'px';
+}
+
+window.addEventListener('resize', function() {
+  if (_streamSwitched) _resizeStreamCanvas();
+});
+
+function _fallbackToMjpeg() {
+  if (_fullscreenPc === null) return;
+  _streamSwitched = false;
+  const canvas = document.getElementById('fullscreen-canvas');
+  const img    = document.getElementById('fullscreen-img');
+  canvas.style.display = 'none';
+  img.style.display    = '';
+  _setLiveBadge(false);                              // hide until first MJPEG frame
+  img.onload = function() { _setLiveBadge(true); };
+  img.src = `/dashboard/api/pc/${_fullscreenPc}/stream`;
 }
 
 function closeFullscreen() {
+  _setLiveBadge(false);
+
+  // Destroy jsmpeg player (closes WebSocket, frees decoder)
+  if (_jsmpegPlayer) { _jsmpegPlayer.destroy(); _jsmpegPlayer = null; }
+  _streamSwitched = false;
+
+  // Stop MJPEG fallback
+  const img = document.getElementById('fullscreen-img');
+  img.src = '';
+  img.style.display = '';
+
+  const _fc = document.getElementById('fullscreen-canvas');
+  _fc.style.display = 'none';
+  _fc.style.width = ''; _fc.style.height = '';   // reset JS sizing
   document.getElementById('fullscreen-modal').classList.add('hidden');
-  document.getElementById('fullscreen-img').src = '';
-  clearInterval(_fullscreenImgTimer);
-  _fullscreenImgTimer = null;
+
+  clearInterval(_watchKeepalive);
+  _watchKeepalive = null;
   _fullscreenPc = null;
   _fullscreenStatsOpen = false;
   clearInterval(_fullscreenStatsTimer);
   document.getElementById('fullscreen-stats-panel').classList.add('hidden');
 
-  // Unlock orientation
   if (screen.orientation?.unlock) {
     try { screen.orientation.unlock(); } catch(e) {}
   }

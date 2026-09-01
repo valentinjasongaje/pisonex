@@ -185,3 +185,8 @@ class ServerConfig(Base):
     # back to the .env/config.py LCD_I2C_ADDRESS/LCD_I2C_PORT defaults.
     lcd_i2c_address  = Column(Integer, nullable=True)
     lcd_i2c_port     = Column(Integer, nullable=True)
+
+    # ── Monitoring ────────────────────────────────────────────────────────────
+    # When True (default), the server requests FFmpeg live-streaming when admin
+    # opens fullscreen.  Set False to fall back to 1-second JPEG snapshots.
+    ffmpeg_streaming_enabled = Column(Boolean, default=True, nullable=False)

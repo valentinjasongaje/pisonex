@@ -232,6 +232,36 @@
   </div>
 </div>
 
+<!-- Monitoring -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Monitoring</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Controls how PC screens are streamed to the admin dashboard.
+  </p>
+
+  <div style="display:flex;flex-direction:column;gap:1rem;">
+    <div>
+      <label class="toggle-label" for="cfg-ffmpeg-enabled">
+        <input type="checkbox" id="cfg-ffmpeg-enabled"
+          {% if ffmpeg_streaming_enabled %}checked{% endif %} />
+        Enable FFmpeg Live Streaming
+      </label>
+      <p style="font-size:.8rem;color:var(--gray);margin:.5rem 0 0 24px;">
+        When enabled, opening a PC in fullscreen starts an FFmpeg process on the
+        Windows PC and streams real-time MPEG1 video to the dashboard — giving
+        smooth, high-quality live video with readable text.<br><br>
+        When <em>disabled</em>, the fullscreen view falls back to the normal
+        1-second JPEG snapshot stream — lower quality but works without FFmpeg.
+      </p>
+    </div>
+  </div>
+
+  <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary" onclick="saveFfmpegSetting()">Save</button>
+    <span id="ffmpeg-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
 <!-- Security -->
 <div class="card" style="max-width:480px;margin-bottom:1.25rem;">
   <h2>Security</h2>
@@ -440,6 +470,23 @@ async function saveKeypadConfig() {
     el.style.color = 'var(--red, #ef4444)';
   }
   setTimeout(() => el.textContent = '', 5000);
+}
+
+async function saveFfmpegSetting() {
+  const enabled = document.getElementById('cfg-ffmpeg-enabled').checked;
+  const el = document.getElementById('ffmpeg-status');
+  const res = await fetch('/dashboard/api/settings/ffmpeg-streaming', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ enabled }),
+  });
+  if (res.ok) {
+    el.textContent = enabled ? '✓ Live streaming enabled' : '✓ Fallback to JPEG snapshots';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = '✗ Save failed';
+    el.style.color = 'var(--red)';
+  }
 }
 
 async function generateKey() {

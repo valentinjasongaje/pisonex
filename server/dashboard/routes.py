@@ -7,7 +7,9 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File
+import asyncio
+
+from fastapi import APIRouter, Request, Depends, Form, Cookie, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -990,6 +992,142 @@ def serve_screenshot(
     )
 
 
+@router.post("/monitor/watch/{pc_number}")
+async def watch_pc(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """Called by dashboard when admin opens fullscreen view of a PC.
+    Sets a 12-second TTL that tells the PC client to ramp up to ~5 fps.
+    The dashboard renews it every 8 s while the view is open."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    command_store.set_watched(pc_number)
+    return {"status": "ok"}
+
+
+@router.websocket("/ws/stream/{pc_number}/publish")
+async def ws_stream_publish(websocket: WebSocket, pc_number: int):
+    """PC client connects here and pushes raw MPEG-TS/MPEG1 bytes from FFmpeg.
+    The server broadcasts every chunk to all watching browser connections."""
+    import logging, stream_store
+    _log = logging.getLogger("stream.publish")
+
+    api_key = (
+        websocket.headers.get("x-api-key", "")
+        or websocket.query_params.get("api_key", "")
+    )
+    if settings.CLIENT_API_KEY and api_key != settings.CLIENT_API_KEY:
+        _log.warning("PC %d publish rejected — bad API key", pc_number)
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    stream_store.set_publisher(pc_number, websocket)
+    _log.info("PC %d publish connected (watchers: %d)",
+              pc_number, len(stream_store._watchers.get(pc_number, [])))
+    chunks = 0
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            chunks += 1
+            if chunks <= 3 or chunks % 30 == 0:
+                _log.info("PC %d chunk #%d  %d bytes  watchers: %d",
+                          pc_number, chunks, len(data),
+                          len(stream_store._watchers.get(pc_number, [])))
+            await stream_store.broadcast(pc_number, data)
+    except WebSocketDisconnect:
+        _log.info("PC %d publish disconnected after %d chunks", pc_number, chunks)
+    except Exception as exc:
+        _log.warning("PC %d publish error after %d chunks: %s", pc_number, chunks, exc)
+    finally:
+        stream_store.clear_publisher(pc_number)
+        await stream_store.close_all_watchers(pc_number)
+
+
+@router.websocket("/ws/stream/{pc_number}/watch")
+async def ws_stream_watch(websocket: WebSocket, pc_number: int):
+    """Admin browser connects here to receive the live MPEG1 video stream.
+    Authentication uses the pisonet_session JWT cookie (sent automatically)."""
+    import logging, stream_store
+    _log = logging.getLogger("stream.watch")
+
+    token = websocket.cookies.get("pisonet_session")
+    if not token:
+        _log.warning("PC %d watch rejected — no session cookie", pc_number)
+        await websocket.close(code=1008)
+        return
+    try:
+        from jose import jwt as _jwt
+        _jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    except Exception as exc:
+        _log.warning("PC %d watch rejected — bad JWT: %s", pc_number, exc)
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    stream_store.add_watcher(pc_number, websocket)
+    _log.info("PC %d watch connected (total watchers: %d)",
+              pc_number, len(stream_store._watchers.get(pc_number, [])))
+    try:
+        while True:
+            await asyncio.sleep(20)
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        stream_store.remove_watcher(pc_number, websocket)
+        _log.info("PC %d watch disconnected", pc_number)
+
+
+@router.get("/api/pc/{pc_number}/stream")
+async def stream_screenshot(
+    pc_number: int,
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    """MJPEG stream for a single PC — one frame per new screenshot upload.
+    The browser <img> keeps this connection open and renders each frame,
+    giving a near-live view at whatever rate the client is capturing."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    import asyncio
+    import screenshot_store
+
+    async def _mjpeg():
+        def _frame(data: bytes) -> bytes:
+            return (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(data)).encode() + b"\r\n"
+                b"\r\n" + data + b"\r\n"
+            )
+
+        # Yield the last cached frame immediately (< 100 ms) so the browser
+        # shows something as soon as the modal opens, without waiting for the
+        # next scheduled upload.
+        cached = screenshot_store.get(pc_number)
+        if cached:
+            yield _frame(cached)
+
+        while True:
+            ev = screenshot_store.get_event(pc_number)
+            ev.clear()
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                # No new frame in 10 s — PC offline or stream abandoned; stop.
+                break
+            data = screenshot_store.get(pc_number)
+            if data:
+                yield _frame(data)
+
+    return StreamingResponse(
+        _mjpeg(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 # ── Documentation pages ───────────────────────────────────────────────────────
 
 @router.get("/docs/api", response_class=HTMLResponse)
@@ -1596,6 +1734,7 @@ def settings_page(
         "api_key_enabled": bool(api_key),
         "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
         "branch_name": settings.BRANCH_NAME,
+        "ffmpeg_streaming_enabled": getattr(srv_cfg, "ffmpeg_streaming_enabled", True) if srv_cfg else True,
         "coin": {
             "coin_pin": _cfg("coin_pin", settings.COIN_PIN),
             "relay_pin": _cfg("relay_pin", settings.RELAY_PIN),
@@ -1615,6 +1754,28 @@ def settings_page(
 
 class BranchNameBody(BaseModel):
     branch_name: str
+
+
+class FfmpegToggleBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/api/settings/ffmpeg-streaming")
+def save_ffmpeg_streaming(
+    body: FfmpegToggleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Enable or disable FFmpeg live streaming for the fullscreen monitor view."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1, client_api_key="")
+        db.add(srv_cfg)
+    srv_cfg.ffmpeg_streaming_enabled = body.enabled
+    db.commit()
+    return {"status": "ok", "ffmpeg_streaming_enabled": body.enabled}
 
 
 @router.post("/api/settings/branch-name")
