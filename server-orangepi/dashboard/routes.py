@@ -2138,6 +2138,7 @@ def membership_page(
             "remaining_seconds": remaining_sec,
             "last_login_at": m.last_login_at,
             "created_at": m.created_at,
+            "must_change_password": m.must_change_password,
         })
 
     return templates.TemplateResponse("membership.html", {
@@ -2145,6 +2146,48 @@ def membership_page(
         "config": cfg,
         "members": member_data,
     })
+
+
+class CreateMemberBody(BaseModel):
+    username: str
+    initial_minutes: int = 0  # optional time to seed at creation (e.g. membership sold with time included)
+
+
+@router.post("/api/membership/create-member", dependencies=[Depends(_require_active_license)])
+def create_member(
+    body: CreateMemberBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: create a member account with an auto-generated temp password.
+
+    Self-service registration from the client lock screen has been removed
+    (see api/member.py) — this is now the only way to create a member
+    account. The temp password is returned once in the JSON response for
+    the admin to copy; it is never stored in plaintext or logged.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username cannot be empty")
+    if body.initial_minutes < 0:
+        raise HTTPException(status_code=422, detail="Initial time cannot be negative")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_create_member(username, initial_minutes=body.initial_minutes)
+    if not result["success"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+
+    return {
+        "status": "created",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+        "balance_seconds": result["balance_seconds"],
+    }
 
 
 @router.post("/api/membership/config", dependencies=[Depends(_require_active_license)])
@@ -2243,6 +2286,34 @@ def force_logout_member(
     if not ok:
         raise HTTPException(status_code=404, detail="Member not found or not logged in")
     return {"status": "logged_out", "member_id": member_id}
+
+
+@router.post("/api/membership/members/{member_id}/reset-password", dependencies=[Depends(_require_active_license)])
+def reset_member_password(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: generate a new temp password for a member who forgot
+    theirs. They'll be required to set their own password on next login,
+    same as a freshly created account. Does not disturb an already-active
+    session — only their next login is affected.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_reset_password(member_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return {
+        "status": "reset",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+    }
 
 
 # ── Staff management (admin only) ────────────────────────────────────────────
