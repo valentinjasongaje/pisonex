@@ -19,6 +19,12 @@
     </svg>
     Announce
   </button>
+  <button type="button" class="toolbar-btn" onclick="wakeAllPcs()">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+      <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+    </svg>
+    Wake All
+  </button>
   <button type="button" class="toolbar-btn toolbar-btn-danger" onclick="openShutdownAllModal()">
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
       <path d="M12 2v10M5.4 6.4a8 8 0 1 0 13.2 0"
@@ -151,6 +157,18 @@
               title="End session and lock"
             >Lock</button>
             {% endif %}
+            {% if not pc.is_online %}
+            <button
+              class="btn btn-sm btn-default"
+              onclick="wakePc({{ pc.pc_number }})"
+              title="Send Wake-on-LAN packet"
+            >Wake</button>
+            <button
+              class="btn btn-sm btn-danger"
+              onclick="openDeletePcModal({{ pc.pc_number }}, '{{ pc.name | replace("'", "\\'") }}')"
+              title="Permanently remove this PC"
+            >Delete</button>
+            {% endif %}
           </div>
         </td>
       </tr>
@@ -251,6 +269,10 @@
       {% if not pc.is_locked %}
       <button class="btn btn-sm btn-danger" onclick="lockPc({{ pc.pc_number }})">Lock</button>
       {% endif %}
+      {% if not pc.is_online %}
+      <button class="btn btn-sm btn-default" onclick="wakePc({{ pc.pc_number }})">Wake</button>
+      <button class="btn btn-sm btn-danger" onclick="openDeletePcModal({{ pc.pc_number }}, '{{ pc.name | replace("'", "\\'") }}')">Delete</button>
+      {% endif %}
     </div>
 
   </div>
@@ -261,6 +283,7 @@
 
 {% include "partials/announce_modal.html" %}
 {% include "partials/shutdown_all_modal.html" %}
+{% include "partials/delete_pc_modal.html" %}
 
 <!-- Add Time Modal (shared with overview) -->
 <div id="add-time-modal" class="modal hidden">

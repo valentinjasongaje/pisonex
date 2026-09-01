@@ -352,6 +352,24 @@ def is_watched(pc_number: int) -> bool:
         return True
 
 
+# ── Purge (called when a PC is deleted) ──────────────────────────────────────
+
+def purge_pc(pc_number: int) -> None:
+    """Remove every per-PC entry so nothing stale resurfaces if the number is reused."""
+    with _lock:
+        _commands.pop(pc_number, None)
+        _messages.pop(pc_number, None)
+        _pc_coin_enabled.pop(pc_number, None)
+        _pc_wallpaper.pop(pc_number, None)
+        _receiving_coins.pop(pc_number, None)
+        _coin_progress.pop(pc_number, None)
+        _member_pc_binding.pop(pc_number, None)
+        _pc_idle_since.pop(pc_number, None)
+        _pc_had_session.pop(pc_number, None)
+        _zero_time_since.pop(pc_number, None)
+        _watched.pop(pc_number, None)
+
+
 _LOGIN_WINDOW_SECONDS = 60
 _LOGIN_MAX_ATTEMPTS = 5
 
