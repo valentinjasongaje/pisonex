@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # Run 'gpio readall' on the board to list available pins.
     COIN_PIN: int = 12
     RELAY_PIN: int = 11
+    KEYPAD_ENABLED: bool = False   # standalone kiosk keypad+LCD, off by default
     KEYPAD_ROWS: list[int] = [17, 27, 22, 5]   # R1, R2, R3, R4
     KEYPAD_COLS: list[int] = [9, 11, 10]        # C1, C2, C3
     LCD_I2C_ADDRESS: int = 0x27

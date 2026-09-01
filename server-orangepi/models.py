@@ -166,6 +166,15 @@ class ServerConfig(Base):
     coin_debounce_ms   = Column(Integer, nullable=True)   # software debounce window (ms)
     coin_pulse_timeout = Column(String(16), nullable=True)  # seconds of silence to finalize (stored as text to allow decimals)
 
+    # ── Standalone kiosk keypad + LCD (admin-editable, hot-reloaded) ─────────
+    # Off by default — most installs are coin-only with the client driving
+    # "Insert Coin". Turning this on rebuilds the hardware controller with a
+    # Keypad + LCD attached. Pins are stored comma-separated (e.g. "17,27,22,5");
+    # NULL falls back to the .env/config.py KEYPAD_ROWS/KEYPAD_COLS defaults.
+    keypad_enabled   = Column(Boolean, default=False, nullable=False)
+    keypad_row_pins  = Column(String(64), nullable=True)
+    keypad_col_pins  = Column(String(64), nullable=True)
+
     # ── Monitoring ────────────────────────────────────────────────────────────
     # When True (default), the server requests FFmpeg live-streaming when admin
     # opens fullscreen.  Set False to fall back to 1-second JPEG snapshots.

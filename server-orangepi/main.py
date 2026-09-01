@@ -129,6 +129,8 @@ async def lifespan(app: FastAPI):
             settings.COIN_PIN, settings.RELAY_PIN, settings.COIN_EDGE,
             settings.COIN_DEBOUNCE_MS, settings.COIN_PULSE_TIMEOUT,
         )
+        # Load admin-configured keypad settings from DB into live settings
+        _apply_keypad_config(srv_cfg)
     finally:
         db.close()
 
@@ -282,6 +284,18 @@ def _migrate_schema():
             cursor.execute("ALTER TABLE pcs ADD COLUMN rate_profile_id INTEGER")
             migrated.append("pcs.rate_profile_id (added)")
 
+    # Standalone kiosk keypad/LCD config columns on server_config if missing
+    if table_exists("server_config"):
+        new_keypad_columns = [
+            ("keypad_enabled", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("keypad_row_pins", "VARCHAR(64)"),
+            ("keypad_col_pins", "VARCHAR(64)"),
+        ]
+        for col_name, col_type in new_keypad_columns:
+            if not has_column("server_config", col_name):
+                cursor.execute(f"ALTER TABLE server_config ADD COLUMN {col_name} {col_type}")
+                migrated.append(f"server_config.{col_name} (added)")
+
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
         cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")
@@ -401,14 +415,34 @@ def _apply_coin_config(srv_cfg) -> None:
             pass
 
 
+def _apply_keypad_config(srv_cfg) -> None:
+    """Copy admin-editable keypad settings from a ServerConfig row into the
+    live `settings` object so HardwareController picks them up. NULL/empty
+    columns leave the .env / config.py defaults in place. Safe to call
+    repeatedly."""
+    if srv_cfg is None:
+        return
+    settings.KEYPAD_ENABLED = bool(srv_cfg.keypad_enabled)
+    if srv_cfg.keypad_row_pins:
+        try:
+            settings.KEYPAD_ROWS = [int(p) for p in srv_cfg.keypad_row_pins.split(",") if p.strip()]
+        except ValueError:
+            pass
+    if srv_cfg.keypad_col_pins:
+        try:
+            settings.KEYPAD_COLS = [int(p) for p in srv_cfg.keypad_col_pins.split(",") if p.strip()]
+        except ValueError:
+            pass
+
+
 def rebuild_hardware_controller() -> bool:
     """Tear down and recreate the coin-slot hardware controller so that changed
     GPIO pin settings take effect without a full server restart.
 
     Returns True if a controller is running afterwards, False if hardware is
-    unavailable (e.g. running off-Pi in dev). Callers should _apply_coin_config
-    (or update `settings`) BEFORE calling this so the new CoinSlot reads the
-    updated pins.
+    unavailable (e.g. running off-Pi in dev). Callers should _apply_coin_config /
+    _apply_keypad_config (or update `settings`) BEFORE calling this so the new
+    CoinSlot/Keypad/LCD read the updated settings.
     """
     global hw_controller
     old = hw_controller
