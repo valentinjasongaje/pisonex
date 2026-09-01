@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import verify_client_key
 from schemas import (
-    MemberRegisterRequest, MemberRegisterResponse,
     MemberLoginRequest, MemberLoginResponse,
     MemberLogoutRequest, MemberLogoutResponse,
     MemberStatusResponse,
+    MemberChangePasswordRequest, MemberChangePasswordResponse,
 )
 from services.membership_service import MembershipService
 
@@ -15,12 +15,10 @@ router = APIRouter(prefix="/api/member", tags=["member"])
 
 _ClientAuth = Depends(verify_client_key)
 
-
-@router.post("/register", response_model=MemberRegisterResponse, dependencies=[_ClientAuth])
-def register_member(req: MemberRegisterRequest, db: Session = Depends(get_db)):
-    svc = MembershipService(db)
-    result = svc.register_member(req.username, req.password, req.pc_number)
-    return MemberRegisterResponse(**result)
+# NOTE: self-service registration (POST /api/member/register) was removed.
+# Member accounts are now created only by an admin via the dashboard
+# (see dashboard/routes.py: POST /dashboard/api/membership/create-member),
+# which issues a temp password and sets must_change_password=True.
 
 
 @router.post("/login", response_model=MemberLoginResponse, dependencies=[_ClientAuth])
@@ -42,3 +40,10 @@ def member_status(pc_number: int, db: Session = Depends(get_db)):
     svc = MembershipService(db)
     result = svc.get_member_status(pc_number)
     return MemberStatusResponse(**result)
+
+
+@router.post("/change-password", response_model=MemberChangePasswordResponse, dependencies=[_ClientAuth])
+def change_password(req: MemberChangePasswordRequest, db: Session = Depends(get_db)):
+    svc = MembershipService(db)
+    result = svc.change_password(req.pc_number, req.new_password)
+    return MemberChangePasswordResponse(**result)

@@ -70,6 +70,42 @@
   </form>
 </div>
 
+<!-- Create Member (admin-only — the only way to create a member account) -->
+<div class="card">
+  <h2>Create Member</h2>
+  <p style="color:var(--text-dim, #94a3b8);font-size:.85rem;margin-top:-.25rem;margin-bottom:1rem;">
+    Self-registration from the client lock screen has been disabled. Create the account here and
+    hand the temp password to the member — they'll be required to set their own on first login.
+  </p>
+
+  <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin-bottom:1rem;">
+    <input id="new-member-username" type="text" placeholder="Username (3-20 alphanumeric)" maxlength="20"
+      oninput="this.value = this.value.toLowerCase()"
+      style="flex:1;min-width:220px;background:var(--surface-2,rgba(255,255,255,0.04));border:1px solid var(--border);border-radius:6px;padding:.5rem .65rem;color:var(--text);" />
+    <div class="input-suffix" style="width:160px;">
+      <input id="new-member-initial-minutes" type="number" min="0" step="1" placeholder="0"
+        style="width:100%;background:var(--surface-2,rgba(255,255,255,0.04));border:1px solid var(--border);border-radius:6px;padding:.5rem .65rem;color:var(--text);" />
+      <span class="suffix">min</span>
+    </div>
+    <button class="btn btn-primary" onclick="createMember()">Create Member</button>
+    <span id="create-member-status" style="font-size:.85rem;"></span>
+  </div>
+  <p style="color:var(--text-dim, #94a3b8);font-size:.75rem;margin-top:-.5rem;margin-bottom:1rem;">
+    Initial time is optional — use it when a membership is sold with time already included (e.g. 120 = 2 hours).
+  </p>
+
+  <div id="new-member-box" style="display:none;">
+    <label style="font-size:.8rem;font-weight:600;color:#22c55e;display:block;margin-bottom:.35rem;">
+      Temp Password for <span id="new-member-username-label"></span> — copy this now, it won't be shown again
+    </label>
+    <div style="display:flex;align-items:center;gap:.5rem;">
+      <input id="new-member-password" type="text" readonly
+        style="flex:1;font-family:monospace;font-size:.85rem;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.3);border-radius:6px;padding:.4rem .65rem;color:#22c55e;" />
+      <button class="btn btn-secondary" style="white-space:nowrap;font-size:.8rem;" onclick="copyMemberPassword()">Copy</button>
+    </div>
+  </div>
+</div>
+
 <!-- Members List -->
 <div class="card">
   <h2>Members ({{ members | length }})</h2>
@@ -101,6 +137,9 @@
             {% else %}
               <span class="badge badge-danger">Inactive</span>
             {% endif %}
+            {% if m.must_change_password %}
+              <span class="badge badge-warning" title="Member must set their own password on next login">Temp Password</span>
+            {% endif %}
           </td>
           <td>{% if m.logged_in_pc %}PC {{ "%02d" | format(m.logged_in_pc) }}{% else %}&mdash;{% endif %}</td>
           <td>{% if m.remaining_seconds > 0 %}{{ m.remaining_seconds // 60 }}m {{ m.remaining_seconds % 60 }}s{% else %}&mdash;{% endif %}</td>
@@ -115,6 +154,7 @@
               <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
             {% endif %}
             <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+            <button class="btn btn-sm btn-warning" onclick="resetMemberPassword({{ m.id }}, '{{ m.username }}')">Reset Password</button>
           </td>
         </tr>
         {% endfor %}
@@ -139,6 +179,9 @@
             <span class="badge badge-success">Active</span>
           {% else %}
             <span class="badge badge-danger">Inactive</span>
+          {% endif %}
+          {% if m.must_change_password %}
+            <span class="badge badge-warning" title="Member must set their own password on next login">Temp Password</span>
           {% endif %}
         </div>
       </div>
@@ -168,6 +211,7 @@
           <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
         {% endif %}
         <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+        <button class="btn btn-sm btn-warning" onclick="resetMemberPassword({{ m.id }}, '{{ m.username }}')">Reset Password</button>
       </div>
 
     </div>
@@ -177,6 +221,44 @@
   {% else %}
   <p style="color:var(--gray)">No registered members yet.</p>
   {% endif %}
+</div>
+
+<!-- Reset Password (custom modal — confirm, then swaps to a one-time reveal) -->
+<div id="reset-password-modal" class="modal hidden">
+  <div class="modal-box modal-confirm" id="reset-password-confirm-view">
+    <div class="confirm-icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3-3.5 3.5Zm0 0L19 4"
+              stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2 class="confirm-title">Reset this member's password?</h2>
+    <p class="confirm-body">
+      <strong id="reset-password-username"></strong> will get a new temporary password and must set
+      their own on next login. Their current password stops working immediately.
+    </p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-default" onclick="closeResetPasswordModal()">Cancel</button>
+      <button type="button" id="reset-password-confirm-btn" class="btn btn-warning" onclick="confirmResetPassword()">
+        Reset Password
+      </button>
+    </div>
+  </div>
+  <div class="modal-box" id="reset-password-result-view" style="display:none;">
+    <h2>New Temp Password for <span id="reset-password-result-username"></span></h2>
+    <p style="color:var(--text-dim, #94a3b8);font-size:.85rem;">
+      Copy this now — it won't be shown again.
+    </p>
+    <div style="display:flex;align-items:center;gap:.5rem;margin:.75rem 0;">
+      <input id="reset-password-result-value" type="text" readonly
+        style="flex:1;font-family:monospace;font-size:.9rem;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.3);border-radius:6px;padding:.5rem .65rem;color:#22c55e;" />
+      <button class="btn btn-secondary" onclick="copyResetPassword()">Copy</button>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-primary" style="width:100%;" onclick="closeResetPasswordModal()">Done</button>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -390,6 +472,112 @@ function adjustBalance(id, username) {
     body: JSON.stringify({seconds})
   }).then(() => location.reload());
 }
+
+async function createMember() {
+  const input = document.getElementById('new-member-username');
+  const username = input.value.trim();
+  const minutesInput = document.getElementById('new-member-initial-minutes');
+  const initialMinutes = parseInt(minutesInput.value) || 0;
+  const statusEl = document.getElementById('create-member-status');
+  if (!username) {
+    statusEl.textContent = 'Username is required.';
+    statusEl.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  if (initialMinutes < 0) {
+    statusEl.textContent = 'Initial time cannot be negative.';
+    statusEl.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  const res = await fetch('/dashboard/api/membership/create-member', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username, initial_minutes: initialMinutes})
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    statusEl.textContent = data.detail || 'Failed to create member.';
+    statusEl.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  const data = await res.json();
+  document.getElementById('new-member-username-label').textContent = data.username;
+  document.getElementById('new-member-password').value = data.temp_password;
+  document.getElementById('new-member-box').style.display = 'block';
+  statusEl.textContent = data.balance_seconds > 0
+    ? `Member created with ${Math.floor(data.balance_seconds / 60)}m initial time.`
+    : 'Member created.';
+  statusEl.style.color = 'var(--green, #22c55e)';
+  input.value = '';
+  minutesInput.value = '';
+}
+
+function copyMemberPassword() {
+  const val = document.getElementById('new-member-password').value;
+  navigator.clipboard.writeText(val).then(() => {
+    const el = document.getElementById('create-member-status');
+    el.textContent = 'Copied to clipboard!';
+    el.style.color = 'var(--green, #22c55e)';
+    setTimeout(() => { el.textContent = ''; location.reload(); }, 1500);
+  });
+}
+
+// ── Reset Password modal ──────────────────────────────────────────────────
+let _resetPasswordMemberId = null;
+
+function resetMemberPassword(id, username) {
+  _resetPasswordMemberId = id;
+  document.getElementById('reset-password-username').textContent = username;
+  document.getElementById('reset-password-confirm-view').style.display = '';
+  document.getElementById('reset-password-result-view').style.display = 'none';
+  const btn = document.getElementById('reset-password-confirm-btn');
+  btn.disabled = false;
+  btn.textContent = 'Reset Password';
+  document.getElementById('reset-password-modal').classList.remove('hidden');
+}
+
+function closeResetPasswordModal() {
+  // If the result view is showing, a password was actually generated server-side —
+  // reload so the "Temp Password" badge shows immediately. If we're still on the
+  // confirm view, nothing happened yet (plain cancel), so no reload needed.
+  const wasShowingResult = document.getElementById('reset-password-result-view').style.display !== 'none';
+  document.getElementById('reset-password-modal').classList.add('hidden');
+  _resetPasswordMemberId = null;
+  if (wasShowingResult) location.reload();
+}
+
+async function confirmResetPassword() {
+  if (_resetPasswordMemberId === null) return;
+  const btn = document.getElementById('reset-password-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Resetting…';
+  const res = await fetch(`/dashboard/api/membership/members/${_resetPasswordMemberId}/reset-password`, {method: 'POST'});
+  if (res.ok) {
+    const data = await res.json();
+    document.getElementById('reset-password-result-username').textContent = data.username;
+    document.getElementById('reset-password-result-value').value = data.temp_password;
+    document.getElementById('reset-password-confirm-view').style.display = 'none';
+    document.getElementById('reset-password-result-view').style.display = '';
+  } else {
+    const data = await res.json().catch(() => ({}));
+    alert(data.detail || 'Failed to reset password.');
+    btn.disabled = false;
+    btn.textContent = 'Reset Password';
+  }
+}
+
+function copyResetPassword() {
+  const val = document.getElementById('reset-password-result-value').value;
+  navigator.clipboard.writeText(val);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const resetPwModal = document.getElementById('reset-password-modal');
+  if (resetPwModal) {
+    resetPwModal.addEventListener('click', e => {
+      if (e.target.id === 'reset-password-modal') closeResetPasswordModal();
+    });
+  }
+});
 </script>
 
 {% endblock %}

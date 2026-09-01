@@ -136,11 +136,6 @@ class LogResponse(BaseModel):
 
 # ── Member ────────────────────────────────────────────────────────
 
-class MemberRegisterRequest(BaseModel):
-    username: str
-    password: str
-    pc_number: int
-
 class MemberLoginRequest(BaseModel):
     pc_number: int
     username: str
@@ -149,17 +144,19 @@ class MemberLoginRequest(BaseModel):
 class MemberLogoutRequest(BaseModel):
     pc_number: int
 
-class MemberRegisterResponse(BaseModel):
-    success: bool
-    user_id: int = 0
-    username: str = ""
-    absorbed_seconds: int = 0
-    error: Optional[str] = None
-
 class MemberLoginResponse(BaseModel):
     success: bool
     balance_seconds: int = 0
     absorbed_seconds: int = 0
+    must_change_password: bool = False
+    error: Optional[str] = None
+
+class MemberChangePasswordRequest(BaseModel):
+    pc_number: int
+    new_password: str
+
+class MemberChangePasswordResponse(BaseModel):
+    success: bool
     error: Optional[str] = None
 
 class MemberLogoutResponse(BaseModel):
@@ -211,6 +208,7 @@ class MemberListResponse(BaseModel):
     logged_in_pc_id: Optional[int]
     last_login_at: Optional[datetime]
     created_at: datetime
+    must_change_password: bool = False
 
     class Config:
         from_attributes = True
