@@ -89,6 +89,61 @@ function closeRenameModal() {
   document.getElementById('rename-modal').classList.add('hidden');
 }
 
+// ── Wake-on-LAN ───────────────────────────────────────────────────────────────
+async function wakePc(pcNumber) {
+  const res = await apiPost(`/dashboard/api/pc/${pcNumber}/wake`, {});
+  if (!res) return;
+  if (res.ok) {
+    showToast(`Wake-on-LAN packet sent to PC ${String(pcNumber).padStart(2, '0')}`, 'success');
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || 'Failed to send Wake-on-LAN packet', 'error');
+  }
+}
+
+async function wakeAllPcs() {
+  const res = await apiPost('/dashboard/api/pcs/wake-all', {});
+  if (!res) return;
+  if (res.ok) {
+    const data = await res.json();
+    showToast(`Wake-on-LAN sent to ${data.woken_count} PC${data.woken_count === 1 ? '' : 's'}`, 'success');
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || 'Failed to send Wake-on-LAN broadcast', 'error');
+  }
+}
+
+// ── Delete PC ─────────────────────────────────────────────────────────────────
+function openDeletePcModal(pcNumber, pcName) {
+  const modal = document.getElementById('delete-pc-modal');
+  if (!modal) return;
+  document.getElementById('delete-pc-label').textContent = `PC ${String(pcNumber).padStart(2, '0')} (${pcName})`;
+  document.getElementById('delete-pc-number').value = pcNumber;
+  modal.classList.remove('hidden');
+}
+
+function closeDeletePcModal() {
+  const m = document.getElementById('delete-pc-modal');
+  if (m) m.classList.add('hidden');
+}
+
+async function confirmDeletePc() {
+  const pcNumber = document.getElementById('delete-pc-number').value;
+  const btn = document.getElementById('delete-pc-confirm');
+  if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+  const res = await fetch(`/dashboard/api/pc/${pcNumber}`, { method: 'DELETE' });
+  if (res.status === 401) { window.location.href = '/dashboard/login'; return; }
+  closeDeletePcModal();
+  if (btn) { btn.disabled = false; btn.textContent = 'Delete PC'; }
+  if (res.ok) {
+    showToast(`PC ${String(pcNumber).padStart(2, '0')} deleted`, 'success');
+    location.reload();
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || 'Failed to delete PC', 'error');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // ── Add Time form ──────────────────────────────────────────────────────────
   const addTimeForm = document.getElementById('add-time-form');

@@ -6,6 +6,23 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
+class RateProfile(Base):
+    """A named set of coin rates.  All CoinRate rows belong to exactly one profile.
+    The profile with is_default=True is used as a fallback when a PC has no
+    profile assigned, or when the assigned profile has no active rates.
+    """
+    __tablename__ = "rate_profiles"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String(50), nullable=False, unique=True)
+    color      = Column(String(20), default="#4f8ef7")   # hex color for badge in dashboard
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    rates = relationship("CoinRate", back_populates="profile")
+    pcs   = relationship("PC",       back_populates="rate_profile")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -29,18 +46,21 @@ class User(Base):
 class PC(Base):
     __tablename__ = "pcs"
 
-    id            = Column(Integer, primary_key=True, index=True)
-    pc_number     = Column(Integer, unique=True, nullable=False, index=True)
-    name          = Column(String(50))
-    mac_address   = Column(String(50), unique=True)
-    ip_address    = Column(String(50))
-    is_online     = Column(Boolean, default=False)
-    is_locked     = Column(Boolean, default=True)
-    last_seen     = Column(DateTime, nullable=True)
-    registered_at = Column(DateTime, default=datetime.utcnow)
+    id              = Column(Integer, primary_key=True, index=True)
+    pc_number       = Column(Integer, unique=True, nullable=False, index=True)
+    name            = Column(String(50))
+    mac_address     = Column(String(50), unique=True)
+    ip_address      = Column(String(50))
+    is_online       = Column(Boolean, default=False)
+    is_locked       = Column(Boolean, default=True)
+    last_seen       = Column(DateTime, nullable=True)
+    registered_at   = Column(DateTime, default=datetime.utcnow)
+    # NULL means "use the Default rate profile" — see RateProfile above.
+    rate_profile_id = Column(Integer, ForeignKey("rate_profiles.id"), nullable=True)
 
     sessions     = relationship("Session", back_populates="pc")
     transactions = relationship("CoinTransaction", back_populates="pc")
+    rate_profile = relationship("RateProfile", back_populates="pcs")
 
 
 class Session(Base):
@@ -83,6 +103,10 @@ class CoinRate(Base):
     label      = Column(String(100))            # e.g. "₱5 = 30 minutes"
     is_active  = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # NULL profile_id means "belongs to Default profile (id=1)"
+    profile_id = Column(Integer, ForeignKey("rate_profiles.id"), nullable=True)
+
+    profile = relationship("RateProfile", back_populates="rates")
 
 
 class MembershipConfig(Base):

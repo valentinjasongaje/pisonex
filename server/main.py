@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base, SessionLocal
-from models import AdminUser, CoinRate, MembershipConfig, ServerConfig
+from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig
 from api import auth, pc, sessions, admin
 from api.license import router as license_router
 from api.member import router as member_router
@@ -266,6 +266,17 @@ def _migrate_schema():
                 cursor.execute(f"ALTER TABLE server_config ADD COLUMN {col_name} {col_type}")
                 migrated.append(f"server_config.{col_name} (added)")
 
+    # Rate Profiles: add profile_id FK to coin_rates and pcs if missing
+    if table_exists("coin_rates"):
+        if not has_column("coin_rates", "profile_id"):
+            cursor.execute("ALTER TABLE coin_rates ADD COLUMN profile_id INTEGER")
+            migrated.append("coin_rates.profile_id (added)")
+
+    if table_exists("pcs"):
+        if not has_column("pcs", "rate_profile_id"):
+            cursor.execute("ALTER TABLE pcs ADD COLUMN rate_profile_id INTEGER")
+            migrated.append("pcs.rate_profile_id (added)")
+
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
         cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")
@@ -304,11 +315,28 @@ def _seed_defaults(db):
         db.add(admin_user)
         logger.info("Created default admin user: %s", settings.ADMIN_USERNAME)
 
+    # Ensure the Default rate profile exists (id=1, is_default=True).
+    # On fresh installs this runs before create_all so the table may not exist yet —
+    # that is fine; create_all runs right before _seed_defaults and will have created it.
+    default_profile = db.query(RateProfile).filter_by(is_default=True).first()
+    if not default_profile:
+        default_profile = RateProfile(name="Default", color="#4f8ef7", is_default=True)
+        db.add(default_profile)
+        db.flush()   # get the id assigned
+        logger.info("Created Default rate profile (id=%d)", default_profile.id)
+
+    # Any CoinRate rows with profile_id=None are owned by the Default profile.
+    if default_profile.id:
+        db.query(CoinRate).filter(CoinRate.profile_id == None).update(  # noqa: E711
+            {"profile_id": default_profile.id}, synchronize_session=False
+        )
+
     if not db.query(CoinRate).first():
         rate = CoinRate(
             pesos=settings.DEFAULT_RATE_PESOS,
             seconds=settings.DEFAULT_RATE_SECONDS,
             label=f"₱{settings.DEFAULT_RATE_PESOS} = {settings.DEFAULT_RATE_SECONDS // 60} minutes",
+            profile_id=default_profile.id,
         )
         db.add(rate)
         logger.info(
