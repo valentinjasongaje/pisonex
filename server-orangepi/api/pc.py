@@ -115,6 +115,7 @@ def heartbeat(
     member_can_logout = False
     zero_time_logout_seconds = 0
     idle_shutdown_seconds = 0
+    member_loyalty_points = 0
 
     cfg     = db.query(MembershipConfig).first()
     srv_cfg = db.query(ServerConfig).first()
@@ -128,6 +129,7 @@ def heartbeat(
         if member_user:
             member_username = member_user.username
             member_balance_seconds = member_user.balance_seconds
+            member_loyalty_points = member_user.loyalty_points
 
             # Update last_activity_at (heartbeat = activity proof)
             member_user.last_activity_at = datetime.utcnow()
@@ -195,6 +197,9 @@ def heartbeat(
         coin_progress_pesos=coin_progress_pesos,
         coin_progress_seconds=coin_progress_seconds,
         minimum_logout_minutes=minimum_logout_minutes,
+        points_enabled=cfg.points_enabled if cfg else False,
+        member_loyalty_points=member_loyalty_points,
+        points_per_minute_redeem=cfg.points_per_minute_redeem if cfg else 0,
         # When an admin is watching this PC AND FFmpeg streaming is enabled,
         # tell the client to ramp up; 0 = use own config (1 s JPEG snapshots).
         capture_interval_ms=(

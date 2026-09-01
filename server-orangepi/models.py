@@ -43,6 +43,13 @@ class User(Base):
     # POST /api/member/change-password on first successful password change.
     must_change_password = Column(Boolean, default=False, nullable=False)
 
+    # Loyalty points — earned by inserting coins while logged in and by
+    # logging in on consecutive days, redeemed for bonus time from the
+    # client tray icon. See services/membership_service.py.
+    loyalty_points    = Column(Integer, default=0, nullable=False)
+    login_streak_days = Column(Integer, default=0, nullable=False)
+    last_login_date   = Column(String(10), nullable=True)  # "YYYY-MM-DD", server-local date
+
     sessions     = relationship("Session", back_populates="user")
     transactions = relationship("CoinTransaction", back_populates="user")
     logged_in_pc = relationship("PC", foreign_keys=[logged_in_pc_id])
@@ -98,6 +105,19 @@ class CoinTransaction(Base):
     user = relationship("User", back_populates="transactions")
 
 
+class PointsTransaction(Base):
+    """Audit log of every loyalty-points earn/redeem/admin-adjust event."""
+    __tablename__ = "points_transactions"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    user_id          = Column(Integer, ForeignKey("users.id"), nullable=False)
+    pc_id            = Column(Integer, ForeignKey("pcs.id"), nullable=True)
+    kind             = Column(String(20), nullable=False)  # "earn_coin"|"earn_streak"|"redeem"|"admin_adjust"
+    points_delta     = Column(Integer, nullable=False)     # +/-
+    seconds_redeemed = Column(Integer, nullable=True)      # only set for "redeem" rows
+    created_at       = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class CoinRate(Base):
     __tablename__ = "coin_rates"
 
@@ -125,6 +145,12 @@ class MembershipConfig(Base):
     idle_auto_shutdown_minutes      = Column(Integer, default=5, nullable=False)
     member_heartbeat_timeout_minutes = Column(Integer, default=60, nullable=False)
     preset_amounts_enabled          = Column(Boolean, default=False, nullable=False)
+
+    # ── Loyalty points ────────────────────────────────────────────────────────
+    points_enabled          = Column(Boolean, default=False, nullable=False)
+    points_per_10_pesos      = Column(Integer, default=1, nullable=False)
+    points_streak_bonus      = Column(Integer, default=5, nullable=False)
+    points_per_minute_redeem = Column(Integer, default=2, nullable=False)
 
 
 class SystemLog(Base):

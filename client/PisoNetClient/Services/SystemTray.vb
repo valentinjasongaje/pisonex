@@ -15,6 +15,7 @@ Namespace Services
         Private _timerItem          As ToolStripMenuItem
         Private _memberLoginItem    As ToolStripMenuItem
         Private _memberLoginSep     As ToolStripSeparator
+        Private _redeemPointsItem   As ToolStripMenuItem
         Private _memberLoggedInUsername As String = ""   ' "" = nobody logged in on this PC
         Private _disposed           As Boolean = False
 
@@ -26,6 +27,8 @@ Namespace Services
         Public Event MemberLoginRequested()
         ''' <summary>Raised when the member menu item is clicked while a member IS logged in.</summary>
         Public Event MemberChangePasswordRequested(username As String)
+        ''' <summary>Raised when "Redeem Points..." is clicked (only visible while a member is logged in and points are enabled).</summary>
+        Public Event RedeemPointsRequested(username As String)
 
         Public Sub New()
             _notify = New NotifyIcon()
@@ -68,6 +71,15 @@ Namespace Services
                                                 End Sub
             menu.Items.Add(_memberLoginItem)
 
+            ' Hidden until a member is logged in AND the café has points enabled —
+            ' see UpdateMemberMenuState.
+            _redeemPointsItem = New ToolStripMenuItem("Redeem Points...") With {
+                .ForeColor = Color.White,
+                .Visible = False
+            }
+            AddHandler _redeemPointsItem.Click, Sub(s, e) RaiseEvent RedeemPointsRequested(_memberLoggedInUsername)
+            menu.Items.Add(_redeemPointsItem)
+
             menu.Items.Add(New ToolStripSeparator())
 
             Dim adminItem = CType(menu.Items.Add("Admin Panel..."), ToolStripMenuItem)
@@ -89,13 +101,17 @@ Namespace Services
         ''' Hidden entirely when membership is off. When on, shows "Member Login..."
         ''' if nobody is logged in on this PC, or "Change Password" if a member is —
         ''' logging in again wouldn't make sense once already logged in.
+        ''' "Redeem Points..." is a separate item, shown only when a member IS
+        ''' logged in AND the café has points enabled (pointsEnabled, from the
+        ''' same heartbeat as everything else here).
         ''' </summary>
-        Public Sub UpdateMemberMenuState(enabled As Boolean, loggedInUsername As String)
+        Public Sub UpdateMemberMenuState(enabled As Boolean, loggedInUsername As String, pointsEnabled As Boolean)
             If _disposed Then Return
             _memberLoggedInUsername = If(loggedInUsername, "")
             _memberLoginItem.Visible = enabled
             _memberLoginSep.Visible = enabled
             _memberLoginItem.Text = If(String.IsNullOrEmpty(_memberLoggedInUsername), "Member Login...", "Change Password")
+            _redeemPointsItem.Visible = enabled AndAlso pointsEnabled AndAlso Not String.IsNullOrEmpty(_memberLoggedInUsername)
         End Sub
 
         ''' <summary>Update the tooltip shown when hovering the tray icon.</summary>

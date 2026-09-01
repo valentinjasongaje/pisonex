@@ -32,6 +32,15 @@ Namespace Services
         Public Property [error] As String
     End Class
 
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
+    Public Class MemberRedeemPointsResponse
+        Public Property success As Boolean
+        Public Property points_redeemed As Integer
+        Public Property seconds_added As Integer
+        Public Property remaining_points As Integer
+        Public Property [error] As String
+    End Class
+
     Public Class MemberService
         Implements IDisposable
 
@@ -116,6 +125,31 @@ Namespace Services
             Catch ex As Exception
                 LogMemberServiceException("ChangePasswordAsync", ex)
                 Return New MemberChangePasswordResponse() With {
+                    .success = False,
+                    .[error] = $"Connection error: {ex.Message}"
+                }
+            End Try
+        End Function
+
+        ''' <summary>
+        ''' Identifies the member server-side via the PC binding set by login,
+        ''' same as ChangePasswordAsync — no re-auth needed.
+        ''' </summary>
+        Public Async Function RedeemPointsAsync(pcNumber As Integer, points As Integer) As Task(Of MemberRedeemPointsResponse)
+            Try
+                Dim body = New With {
+                    .pc_number = pcNumber,
+                    .points = points
+                }
+                Dim json = JsonSerializer.Serialize(body)
+                Dim content = New StringContent(json, Encoding.UTF8, "application/json")
+                Dim response = Await _client.PostAsync($"{_baseUrl}/api/member/redeem-points", content)
+                Dim responseJson = Await response.Content.ReadAsStringAsync()
+                Dim options = New JsonSerializerOptions() With {.PropertyNameCaseInsensitive = True}
+                Return JsonSerializer.Deserialize(Of MemberRedeemPointsResponse)(responseJson, options)
+            Catch ex As Exception
+                LogMemberServiceException("RedeemPointsAsync", ex)
+                Return New MemberRedeemPointsResponse() With {
                     .success = False,
                     .[error] = $"Connection error: {ex.Message}"
                 }

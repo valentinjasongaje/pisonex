@@ -87,7 +87,8 @@ Namespace Services
         Public Event MembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                         balanceSeconds As Integer, canLogout As Boolean,
                                         zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                        minimumLogoutMinutes As Integer)
+                                        minimumLogoutMinutes As Integer, pointsEnabled As Boolean,
+                                        loyaltyPoints As Integer, pointsPerMinuteRedeem As Integer)
         ''' <summary>Fired when the server requests a specific capture interval (ms). 0 means reset to configured.</summary>
         Public Event CaptureIntervalChanged(intervalMs As Integer)
 
@@ -302,7 +303,10 @@ Namespace Services
                 response.member_can_logout,
                 response.zero_time_logout_seconds,
                 response.idle_shutdown_seconds,
-                response.minimum_logout_minutes)
+                response.minimum_logout_minutes,
+                response.points_enabled,
+                response.member_loyalty_points,
+                response.points_per_minute_redeem)
 
             ' Server-driven capture interval — ramp up when admin is watching this PC,
             ' reset to configured when not watched (0 = use own config).

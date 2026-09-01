@@ -21,6 +21,11 @@ Module Program
     Private _metrics As MetricsService
     Private _notifs As NotificationService
     Private _guardTimer As System.Timers.Timer   ' mutual watchdog keeper
+    ' Latest values from the heartbeat's MembershipUpdated event, kept so
+    ' OnTrayRedeemPointsRequested can open RedeemPointsForm without an extra
+    ' round trip (the redeem call itself still re-validates server-side).
+    Private _lastLoyaltyPoints As Integer = 0
+    Private _lastPointsPerMinuteRedeem As Integer = 0
     ' Accumulates time_added_seconds while the coin slot is open so the
     ' voice/toast notification is not fired until the user clicks Done
     ' and the lock form actually hides.
@@ -151,6 +156,7 @@ Module Program
         AddHandler _tray.TimerToggleRequested, AddressOf OnTimerToggleRequested
         AddHandler _tray.MemberLoginRequested, AddressOf OnTrayMemberLoginRequested
         AddHandler _tray.MemberChangePasswordRequested, AddressOf OnTrayChangePasswordRequested
+        AddHandler _tray.RedeemPointsRequested, AddressOf OnTrayRedeemPointsRequested
         AddHandler _overlay.TimerHiddenByUser, Sub() _tray.SetTimerVisible(False)
 
         ' ── Lock immediately on startup ──────────────────────────────────
@@ -552,12 +558,15 @@ Module Program
     Private Sub OnMembershipUpdated(enabled As Boolean, absorption As Boolean, username As String,
                                      balanceSeconds As Integer, canLogout As Boolean,
                                      zeroTimeLogoutSeconds As Integer, idleShutdownSeconds As Integer,
-                                     minimumLogoutMinutes As Integer)
+                                     minimumLogoutMinutes As Integer, pointsEnabled As Boolean,
+                                     loyaltyPoints As Integer, pointsPerMinuteRedeem As Integer)
         _lockMgr.UpdateMembershipUI(enabled, absorption, username, balanceSeconds,
                                      canLogout, zeroTimeLogoutSeconds, idleShutdownSeconds,
                                      minimumLogoutMinutes)
         _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout, minimumLogoutMinutes)
-        _tray.UpdateMemberMenuState(enabled, username)
+        _tray.UpdateMemberMenuState(enabled, username, pointsEnabled)
+        _lastLoyaltyPoints = loyaltyPoints
+        _lastPointsPerMinuteRedeem = pointsPerMinuteRedeem
     End Sub
 
     ''' <summary>
@@ -595,6 +604,19 @@ Module Program
         Dim result = dlg.ShowDialog()
         If result = DialogResult.OK Then
             _notifs.Show("Password Updated", "Your password has been changed.", ToastType.Success)
+        End If
+    End Sub
+
+    ''' <summary>
+    ''' "Redeem Points..." from the tray menu — only visible while a member is
+    ''' logged in on this PC and the café has points enabled (see
+    ''' SystemTray.UpdateMemberMenuState). Freely cancelable.
+    ''' </summary>
+    Private Sub OnTrayRedeemPointsRequested(username As String)
+        Dim dlg = New Forms.RedeemPointsForm(_memberSvc, AppConfig.PCNumber, _lastLoyaltyPoints, _lastPointsPerMinuteRedeem)
+        Dim result = dlg.ShowDialog()
+        If result = DialogResult.OK Then
+            _notifs.Show("Points Redeemed", $"{dlg.PointsRedeemed} points → +{dlg.MinutesAdded} minute(s).", ToastType.Success)
         End If
     End Sub
 

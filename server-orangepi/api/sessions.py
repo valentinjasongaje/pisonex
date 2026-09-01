@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from schemas import AddTimeRequest, AddTimeResponse, SessionStatusResponse
 from services.session_service import SessionService
+from services.membership_service import MembershipService
 import command_store
 
 router = APIRouter(prefix="/api/session", tags=["session"])
@@ -39,6 +40,9 @@ def add_time(body: AddTimeRequest, db: Session = Depends(get_db)):
         seconds, session = svc.add_time_by_pesos(body.pc_number, body.pesos, user_id=user_id)
     except ValueError as e:
         raise HTTPException(422, str(e))
+
+    if user_id is not None:
+        MembershipService(db).award_coin_points(user_id, session.pc_id, body.pesos)
 
     return AddTimeResponse(
         pc_number=body.pc_number,

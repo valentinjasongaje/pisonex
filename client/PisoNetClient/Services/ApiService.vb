@@ -42,6 +42,10 @@ Namespace Services
         Public Property coin_progress_pesos As Integer = 0
         Public Property coin_progress_seconds As Integer = 0
         Public Property minimum_logout_minutes As Integer = 0
+        ' Loyalty points — live balance + redemption rate, refreshed every heartbeat.
+        Public Property points_enabled As Boolean = False
+        Public Property member_loyalty_points As Integer = 0
+        Public Property points_per_minute_redeem As Integer = 0
         ' Live-stream hint: >0 = server wants client to capture at this interval (ms);
         ' 0 = use the client's own configured interval.
         Public Property capture_interval_ms As Integer = 0

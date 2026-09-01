@@ -2139,6 +2139,7 @@ def membership_page(
             "last_login_at": m.last_login_at,
             "created_at": m.created_at,
             "must_change_password": m.must_change_password,
+            "loyalty_points": m.loyalty_points,
         })
 
     return templates.TemplateResponse("membership.html", {
@@ -2209,6 +2210,10 @@ def update_membership_config(
         "zero_time_auto_logout_seconds": cfg.zero_time_auto_logout_seconds,
         "idle_auto_shutdown_minutes": cfg.idle_auto_shutdown_minutes,
         "member_heartbeat_timeout_minutes": cfg.member_heartbeat_timeout_minutes,
+        "points_enabled": cfg.points_enabled,
+        "points_per_10_pesos": cfg.points_per_10_pesos,
+        "points_streak_bonus": cfg.points_streak_bonus,
+        "points_per_minute_redeem": cfg.points_per_minute_redeem,
     }}
 
 
@@ -2270,6 +2275,27 @@ def adjust_member_balance(
     user.balance_seconds = max(0, user.balance_seconds + body.seconds)
     db.commit()
     return {"status": "ok", "balance_seconds": user.balance_seconds}
+
+
+class AdjustPointsBody(BaseModel):
+    points: int
+
+
+@router.post("/api/membership/members/{member_id}/adjust-points", dependencies=[Depends(_require_active_license)])
+def adjust_member_points(
+    member_id: int,
+    body: AdjustPointsBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_adjust_points(member_id, body.points)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"status": "ok", "loyalty_points": result["loyalty_points"]}
 
 
 @router.post("/api/membership/members/{member_id}/force-logout", dependencies=[Depends(_require_active_license)])
