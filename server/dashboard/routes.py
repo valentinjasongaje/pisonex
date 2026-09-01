@@ -1607,6 +1607,8 @@ def settings_page(
             "enabled": bool(srv_cfg.keypad_enabled) if srv_cfg else False,
             "row_pins": _cfg("keypad_row_pins", ",".join(str(p) for p in settings.KEYPAD_ROWS)),
             "col_pins": _cfg("keypad_col_pins", ",".join(str(p) for p in settings.KEYPAD_COLS)),
+            "lcd_i2c_address": hex(_cfg("lcd_i2c_address", settings.LCD_I2C_ADDRESS)),
+            "lcd_i2c_port": _cfg("lcd_i2c_port", settings.LCD_I2C_PORT),
         },
     })
 
@@ -1804,6 +1806,15 @@ class KeypadConfigBody(BaseModel):
     enabled: bool
     row_pins: str
     col_pins: str
+    lcd_i2c_address: str
+    lcd_i2c_port: int
+
+
+# PCF8574 backpacks (the chip virtually every I2C character LCD backpack
+# uses) only ever answer at 0x20-0x27; PCF8574A variants at 0x38-0x3F.
+# Anything else on the bus isn't this LCD, so it's rejected outright rather
+# than accepted as "some other pin" the way GPIO fields are.
+_LCD_VALID_ADDRESS_RANGES = ((0x20, 0x27), (0x38, 0x3F))
 
 
 @router.post("/api/settings/keypad-config")
@@ -1812,15 +1823,15 @@ def save_keypad_config(
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(_validate_session),
 ):
-    """Persist the standalone kiosk keypad settings (DB + .env), apply them to
-    the live `settings`, and rebuild the hardware controller so the change
-    takes effect immediately — no server restart required."""
+    """Persist the standalone kiosk keypad + LCD settings (DB + .env), apply
+    them to the live `settings`, and rebuild the hardware controller so the
+    change takes effect immediately — no server restart required."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    # ── Validate ─────────────────────────────────────────────────────────────
+    # ── Validate keypad pins ─────────────────────────────────────────────────
     try:
         row_pins = [int(p.strip()) for p in body.row_pins.split(",") if p.strip() != ""]
         col_pins = [int(p.strip()) for p in body.col_pins.split(",") if p.strip() != ""]
@@ -1838,6 +1849,26 @@ def save_keypad_config(
     row_str = ",".join(str(p) for p in row_pins)
     col_str = ",".join(str(p) for p in col_pins)
 
+    # ── Validate LCD I2C address/bus — this is NOT a GPIO pin, it's the
+    # PCF8574 backpack's address on the I2C bus, so only its two known
+    # chip-family address ranges are accepted. ───────────────────────────────
+    try:
+        lcd_addr = int(body.lcd_i2c_address.strip(), 0)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="LCD I2C address must be a number (e.g. 0x27)")
+    if not any(lo <= lcd_addr <= hi for lo, hi in _LCD_VALID_ADDRESS_RANGES):
+        raise HTTPException(
+            status_code=400,
+            detail="LCD I2C address must be 0x20-0x27 (PCF8574) or 0x38-0x3F (PCF8574A) — "
+                   "run 'i2cdetect -y <bus>' to find your backpack's actual address",
+        )
+    if not (0 <= body.lcd_i2c_port <= 5):
+        raise HTTPException(
+            status_code=400,
+            detail="LCD I2C bus number must be 0-5 — this is a bus index (/dev/i2c-N), "
+                   "not a GPIO pin; it's almost always 1",
+        )
+
     # ── Persist to DB ──────────────────────────────────────────────────────────
     srv_cfg = db.query(ServerConfig).first()
     if not srv_cfg:
@@ -1846,6 +1877,8 @@ def save_keypad_config(
     srv_cfg.keypad_enabled = body.enabled
     srv_cfg.keypad_row_pins = row_str
     srv_cfg.keypad_col_pins = col_str
+    srv_cfg.lcd_i2c_address = lcd_addr
+    srv_cfg.lcd_i2c_port = body.lcd_i2c_port
     db.commit()
 
     # ── Persist to .env (so it survives a DB reset / matches config.py defaults) ─
@@ -1864,12 +1897,16 @@ def save_keypad_config(
     _set_env("KEYPAD_ENABLED", "true" if body.enabled else "false")
     _set_env("KEYPAD_ROWS", "[" + ",".join(str(p) for p in row_pins) + "]")
     _set_env("KEYPAD_COLS", "[" + ",".join(str(p) for p in col_pins) + "]")
+    _set_env("LCD_I2C_ADDRESS", hex(lcd_addr))
+    _set_env("LCD_I2C_PORT", str(body.lcd_i2c_port))
     env_path.write_text("".join(lines), encoding="utf-8")
 
     # ── Apply to live settings + rebuild hardware ────────────────────────────────
     settings.KEYPAD_ENABLED = body.enabled
     settings.KEYPAD_ROWS = row_pins
     settings.KEYPAD_COLS = col_pins
+    settings.LCD_I2C_ADDRESS = lcd_addr
+    settings.LCD_I2C_PORT = body.lcd_i2c_port
 
     hardware_active = False
     try:
@@ -1890,6 +1927,8 @@ def save_keypad_config(
         "keypad_enabled": body.enabled,
         "row_pins": row_str,
         "col_pins": col_str,
+        "lcd_i2c_address": hex(lcd_addr),
+        "lcd_i2c_port": body.lcd_i2c_port,
     }
 
 
