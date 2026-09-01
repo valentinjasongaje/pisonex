@@ -147,6 +147,25 @@
         <input type="text" id="cfg-keypad-cols" placeholder="9,11,10"
           value="{{ keypad.col_pins }}" style="width:100%;" />
       </div>
+    </div>
+    <p style="font-size:.85rem;color:var(--gray);margin:1rem 0 .5rem;">
+      The LCD is I2C, not a GPIO pin — its address is the PCF8574 backpack
+      chip's address on the bus, and its "pin" is really the I2C bus index.
+      Run <code>i2cdetect -y &lt;bus&gt;</code> to find your backpack's actual address.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;">
+      <div class="form-group" style="margin:0;">
+        <label for="cfg-lcd-address" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">LCD I2C Address</label>
+        <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">0x20–0x27 (PCF8574) or 0x38–0x3F (PCF8574A) only.</p>
+        <input type="text" id="cfg-lcd-address" placeholder="0x27"
+          value="{{ keypad.lcd_i2c_address }}" style="width:100%;" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label for="cfg-lcd-port" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">LCD I2C Bus</label>
+        <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Bus index (not a GPIO pin) — almost always 1.</p>
+        <input type="number" id="cfg-lcd-port" min="0" max="5"
+          value="{{ keypad.lcd_i2c_port }}" style="width:100%;" />
+      </div>
       <div style="display:flex;align-items:flex-end;gap:12px;padding-bottom:.15rem;">
         <button class="btn btn-primary" onclick="saveKeypadConfig()">Save</button>
         <span id="keypad-status" style="font-size:.85rem;"></span>
@@ -498,6 +517,8 @@ async function saveKeypadConfig() {
     enabled:  document.getElementById('cfg-keypad-enabled').checked,
     row_pins: document.getElementById('cfg-keypad-rows').value.trim(),
     col_pins: document.getElementById('cfg-keypad-cols').value.trim(),
+    lcd_i2c_address: document.getElementById('cfg-lcd-address').value.trim(),
+    lcd_i2c_port: parseInt(document.getElementById('cfg-lcd-port').value),
   };
   const res = await fetch('/dashboard/api/settings/keypad-config', {
     method: 'POST',

@@ -131,6 +131,7 @@ async def lifespan(app: FastAPI):
         )
         # Load admin-configured keypad settings from DB into live settings
         _apply_keypad_config(srv_cfg)
+        _apply_lcd_config(srv_cfg)
     finally:
         db.close()
 
@@ -296,6 +297,15 @@ def _migrate_schema():
                 cursor.execute(f"ALTER TABLE server_config ADD COLUMN {col_name} {col_type}")
                 migrated.append(f"server_config.{col_name} (added)")
 
+        new_lcd_columns = [
+            ("lcd_i2c_address", "INTEGER"),
+            ("lcd_i2c_port", "INTEGER"),
+        ]
+        for col_name, col_type in new_lcd_columns:
+            if not has_column("server_config", col_name):
+                cursor.execute(f"ALTER TABLE server_config ADD COLUMN {col_name} {col_type}")
+                migrated.append(f"server_config.{col_name} (added)")
+
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
         cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")
@@ -435,14 +445,26 @@ def _apply_keypad_config(srv_cfg) -> None:
             pass
 
 
+def _apply_lcd_config(srv_cfg) -> None:
+    """Copy admin-editable LCD I2C settings from a ServerConfig row into the
+    live `settings` object so the LCD picks them up. NULL columns leave the
+    .env / config.py default in place. Safe to call repeatedly."""
+    if srv_cfg is None:
+        return
+    if srv_cfg.lcd_i2c_address is not None:
+        settings.LCD_I2C_ADDRESS = srv_cfg.lcd_i2c_address
+    if srv_cfg.lcd_i2c_port is not None:
+        settings.LCD_I2C_PORT = srv_cfg.lcd_i2c_port
+
+
 def rebuild_hardware_controller() -> bool:
     """Tear down and recreate the coin-slot hardware controller so that changed
     GPIO pin settings take effect without a full server restart.
 
     Returns True if a controller is running afterwards, False if hardware is
     unavailable (e.g. running off-Pi in dev). Callers should _apply_coin_config /
-    _apply_keypad_config (or update `settings`) BEFORE calling this so the new
-    CoinSlot/Keypad/LCD read the updated settings.
+    _apply_keypad_config / _apply_lcd_config (or update `settings`) BEFORE
+    calling this so the new CoinSlot/Keypad/LCD read the updated settings.
     """
     global hw_controller
     old = hw_controller

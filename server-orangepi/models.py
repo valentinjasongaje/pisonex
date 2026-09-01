@@ -174,6 +174,11 @@ class ServerConfig(Base):
     keypad_enabled   = Column(Boolean, default=False, nullable=False)
     keypad_row_pins  = Column(String(64), nullable=True)
     keypad_col_pins  = Column(String(64), nullable=True)
+    # LCD is I2C, not discrete GPIO pins — address is the PCF8574 backpack's
+    # chip address on the bus, port is the /dev/i2c-N bus index. NULL falls
+    # back to the .env/config.py LCD_I2C_ADDRESS/LCD_I2C_PORT defaults.
+    lcd_i2c_address  = Column(Integer, nullable=True)
+    lcd_i2c_port     = Column(Integer, nullable=True)
 
     # ── Monitoring ────────────────────────────────────────────────────────────
     # When True (default), the server requests FFmpeg live-streaming when admin
