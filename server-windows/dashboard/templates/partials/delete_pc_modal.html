@@ -1,0 +1,28 @@
+<!--
+  Confirmation modal for permanently deleting a decommissioned PC.
+  Wired by admin.js: openDeletePcModal() fills in the PC label; submitting
+  sends DELETE to /dashboard/api/pc/{n}.
+-->
+<div id="delete-pc-modal" class="modal hidden">
+  <div class="modal-box modal-confirm modal-confirm-danger">
+    <div class="confirm-icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+        <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"
+              stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2 class="confirm-title">Delete <span id="delete-pc-label"></span>?</h2>
+    <p class="confirm-body">
+      This permanently removes the PC from the system. Its session history is deleted;
+      revenue records are kept. This cannot be undone — if a replacement PC later
+      registers with the same number, it will be added back as a new PC.
+    </p>
+    <input type="hidden" id="delete-pc-number" />
+    <div class="modal-actions">
+      <button type="button" class="btn btn-default" onclick="closeDeletePcModal()">Cancel</button>
+      <button type="button" id="delete-pc-confirm" class="btn btn-danger" onclick="confirmDeletePc()">
+        Delete PC
+      </button>
+    </div>
+  </div>
+</div>

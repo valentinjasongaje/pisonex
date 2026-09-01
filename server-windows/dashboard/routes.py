@@ -23,6 +23,7 @@ from database import get_db
 from models import AdminUser, CoinTransaction, SystemLog, CoinRate, RateProfile, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
+from services.wol_service import wake_pc, wake_all
 from services.rate_service import pesos_to_seconds, pesos_for_seconds
 from config import settings
 import command_store
@@ -879,6 +880,73 @@ def dashboard_rename_pc(
     return {"pc_number": pc_number, "name": pc.name}
 
 
+@router.post("/api/pc/{pc_number}/wake", dependencies=[Depends(_require_active_license)])
+def wake_pc_route(
+    pc_number: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Send a Wake-on-LAN magic packet to power on a PC — called from the dashboard UI."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    pc = db.query(PC).filter(PC.pc_number == pc_number).first()
+    if not pc:
+        raise HTTPException(status_code=404, detail=f"PC {pc_number} not found")
+    if not pc.mac_address:
+        raise HTTPException(status_code=422, detail=f"PC {pc_number} has no MAC address on file")
+
+    wake_pc(pc)
+    db.add(SystemLog(level="INFO", source="pc", message=f"Sent Wake-on-LAN packet to PC {pc_number:02d} ({pc.mac_address})"))
+    db.commit()
+    return {"status": "sent", "pc_number": pc_number}
+
+
+@router.delete("/api/pc/{pc_number}", dependencies=[Depends(_require_active_license)])
+def delete_pc(
+    pc_number: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Permanently remove a decommissioned PC. Only allowed while the PC is offline.
+
+    If a PC with the same number ever registers again (e.g. a replacement machine
+    is installed and configured with this number), it will simply create a new
+    row — that mirrors how PCs are created in the first place (there's no
+    separate "Add PC" flow; they self-register on first client connection).
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    pc = db.query(PC).filter(PC.pc_number == pc_number).first()
+    if not pc:
+        raise HTTPException(status_code=404, detail=f"PC {pc_number} not found")
+    if pc.is_online:
+        raise HTTPException(status_code=409, detail=f"PC {pc_number} is online — power it off before deleting")
+
+    # Sessions are operational/time-tracking data — safe to remove with the PC.
+    db.query(SessionModel).filter(SessionModel.pc_id == pc.id).delete(synchronize_session=False)
+    # Coin transactions and any logged-in member are financial/account records —
+    # keep them, just detach from the deleted PC.
+    db.query(CoinTransaction).filter(CoinTransaction.pc_id == pc.id).update(
+        {"pc_id": None}, synchronize_session=False
+    )
+    db.query(User).filter(User.logged_in_pc_id == pc.id).update(
+        {"logged_in_pc_id": None}, synchronize_session=False
+    )
+
+    command_store.purge_pc(pc_number)
+
+    db.add(SystemLog(level="INFO", source="pc", message=f"Deleted PC {pc_number:02d} ({pc.name})"))
+    db.delete(pc)
+    db.commit()
+    return {"status": "deleted", "pc_number": pc_number}
+
+
 # ── PC Monitor page ───────────────────────────────────────────────────────────
 
 @router.get("/monitor", response_class=HTMLResponse)
@@ -1397,6 +1465,26 @@ def send_command_to_all_pcs(
         "queued_count": queued,
         "skipped_count": skipped,
     }
+
+
+@router.post("/api/pcs/wake-all", dependencies=[Depends(_require_active_license)])
+def wake_all_pcs_route(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Send a Wake-on-LAN magic packet to every registered PC with a MAC address on file."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    woken, skipped = wake_all(db)
+    db.add(SystemLog(
+        level="INFO", source="pc",
+        message=f"Sent Wake-on-LAN broadcast to {woken} PC(s), {skipped} skipped (no MAC on file)",
+    ))
+    db.commit()
+    return {"status": "sent", "woken_count": woken, "skipped_no_mac": skipped}
 
 
 @router.post("/api/announcement", dependencies=[Depends(_require_active_license)])
