@@ -149,43 +149,81 @@
 
   <div class="form-group" style="margin-top:.5rem;">
     <label class="toggle-label">
-      <input type="checkbox" id="cfg-keypad-enabled" {% if keypad.enabled %}checked{% endif %} />
+      <input type="checkbox" id="cfg-keypad-enabled" onchange="onKeypadEnabledChange()"
+        {% if keypad.enabled %}checked{% endif %} />
       <span>Enable Keypad + LCD</span>
     </label>
   </div>
 
-  <div class="form-group" style="margin-top:1rem;">
-    <label for="cfg-keypad-rows" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Row Pins</label>
-    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">4 pins, comma-separated.</p>
-    <input type="text" id="cfg-keypad-rows" placeholder="17,27,22,5"
-      value="{{ keypad.row_pins }}" style="max-width:200px;width:100%;" />
-  </div>
+  <div id="keypad-fields-wrap">
+    <p style="font-size:.78rem;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin:1rem 0 .5rem;">
+      Keypad pins
+    </p>
 
-  <div class="form-group" style="margin-top:1rem;">
-    <label for="cfg-keypad-cols" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Column Pins</label>
-    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">3 pins, comma-separated.</p>
-    <input type="text" id="cfg-keypad-cols" placeholder="9,11,10"
-      value="{{ keypad.col_pins }}" style="max-width:200px;width:100%;" />
-  </div>
+    <div class="form-group" style="margin-top:.5rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Row Pins (4)</label>
+      <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Which GPIO pin drives each keypad row.</p>
+      <div style="display:flex;gap:6px;max-width:280px;">
+        {% for p in keypad.row_pins %}
+        <input type="number" id="cfg-keypad-row-{{ loop.index0 }}" class="keypad-dependent-field" min="0" max="255"
+          value="{{ p }}" style="width:100%;min-width:0;" />
+        {% endfor %}
+      </div>
+    </div>
 
-  <p style="font-size:.85rem;color:var(--gray);margin:1.25rem 0 .5rem;">
-    The LCD is I2C, not a GPIO pin — its address is the PCF8574 backpack
-    chip's address on the bus, and its "pin" is really the I2C bus index.
-    Run <code>i2cdetect -y &lt;bus&gt;</code> to find your backpack's actual address.
-  </p>
+    <div class="form-group" style="margin-top:1rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Column Pins (3)</label>
+      <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Which GPIO pin reads each keypad column.</p>
+      <div style="display:flex;gap:6px;max-width:210px;">
+        {% for p in keypad.col_pins %}
+        <input type="number" id="cfg-keypad-col-{{ loop.index0 }}" class="keypad-dependent-field" min="0" max="255"
+          value="{{ p }}" style="width:100%;min-width:0;" />
+        {% endfor %}
+      </div>
+    </div>
 
-  <div class="form-group" style="margin-top:1rem;">
-    <label for="cfg-lcd-address" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">LCD I2C Address</label>
-    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">0x20–0x27 (PCF8574) or 0x38–0x3F (PCF8574A) only.</p>
-    <input type="text" id="cfg-lcd-address" placeholder="0x27"
-      value="{{ keypad.lcd_i2c_address }}" style="max-width:200px;width:100%;" />
-  </div>
+    <p style="font-size:.78rem;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin:1.25rem 0 .5rem;">
+      LCD (I2C)
+    </p>
+    <p style="font-size:.85rem;color:var(--gray);margin:0 0 .75rem;">
+      The LCD talks over I2C, not GPIO pins, so there's no pin number to get
+      wrong — pick the address and bus from the lists below. Run
+      <code>i2cdetect -y &lt;bus&gt;</code> if you're not sure which address your
+      backpack answers at.
+    </p>
 
-  <div class="form-group" style="margin-top:1rem;">
-    <label for="cfg-lcd-port" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">LCD I2C Bus</label>
-    <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Bus index (not a GPIO pin) — almost always 1.</p>
-    <input type="number" id="cfg-lcd-port" min="0" max="5"
-      value="{{ keypad.lcd_i2c_port }}" style="max-width:140px;width:100%;" />
+    <div class="form-group" style="margin-top:.5rem;">
+      <label for="cfg-lcd-address" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">LCD I2C Address</label>
+      <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">PCF8574 backpack chip address.</p>
+      <select id="cfg-lcd-address" class="keypad-dependent-field" style="max-width:200px;width:100%;">
+        <optgroup label="PCF8574">
+          {% for a in ["0x20","0x21","0x22","0x23","0x24","0x25","0x26","0x27"] %}
+          <option value="{{ a }}" {% if keypad.lcd_i2c_address == a %}selected{% endif %}>
+            {{ a }}{% if a == "0x27" %} (most common){% endif %}
+          </option>
+          {% endfor %}
+        </optgroup>
+        <optgroup label="PCF8574A">
+          {% for a in ["0x38","0x39","0x3a","0x3b","0x3c","0x3d","0x3e","0x3f"] %}
+          <option value="{{ a }}" {% if keypad.lcd_i2c_address == a %}selected{% endif %}>
+            {{ a }}{% if a == "0x3f" %} (2nd most common){% endif %}
+          </option>
+          {% endfor %}
+        </optgroup>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-top:1rem;">
+      <label for="cfg-lcd-port" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">LCD I2C Bus</label>
+      <p style="font-size:.78rem;color:var(--gray);margin:.2rem 0 .4rem;">Bus index, not a GPIO pin.</p>
+      <select id="cfg-lcd-port" class="keypad-dependent-field" style="max-width:140px;width:100%;">
+        {% for b in range(0, 6) %}
+        <option value="{{ b }}" {% if keypad.lcd_i2c_port == b %}selected{% endif %}>
+          {{ b }}{% if b == 1 %} (default — RPi 2+){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
   </div>
 
   <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
@@ -362,12 +400,21 @@ async function saveCoinConfig() {
   setTimeout(() => el.textContent = '', 5000);
 }
 
+function onKeypadEnabledChange() {
+  const enabled = document.getElementById('cfg-keypad-enabled').checked;
+  document.querySelectorAll('.keypad-dependent-field').forEach(el => el.disabled = !enabled);
+  const wrap = document.getElementById('keypad-fields-wrap');
+  if (wrap) wrap.style.opacity = enabled ? '1' : '.5';
+}
+
 async function saveKeypadConfig() {
   const el = document.getElementById('keypad-status');
+  const rowPins = [0, 1, 2, 3].map(i => document.getElementById('cfg-keypad-row-' + i).value.trim()).join(',');
+  const colPins = [0, 1, 2].map(i => document.getElementById('cfg-keypad-col-' + i).value.trim()).join(',');
   const body = {
     enabled:  document.getElementById('cfg-keypad-enabled').checked,
-    row_pins: document.getElementById('cfg-keypad-rows').value.trim(),
-    col_pins: document.getElementById('cfg-keypad-cols').value.trim(),
+    row_pins: rowPins,
+    col_pins: colPins,
     lcd_i2c_address: document.getElementById('cfg-lcd-address').value.trim(),
     lcd_i2c_port: parseInt(document.getElementById('cfg-lcd-port').value),
   };
@@ -432,6 +479,7 @@ function copyKey() {
     setTimeout(() => el.textContent = '', 2500);
   });
 }
+onKeypadEnabledChange();
 </script>
 
 {% endblock %}

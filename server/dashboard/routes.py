@@ -1605,8 +1605,8 @@ def settings_page(
         },
         "keypad": {
             "enabled": bool(srv_cfg.keypad_enabled) if srv_cfg else False,
-            "row_pins": _cfg("keypad_row_pins", ",".join(str(p) for p in settings.KEYPAD_ROWS)),
-            "col_pins": _cfg("keypad_col_pins", ",".join(str(p) for p in settings.KEYPAD_COLS)),
+            "row_pins": [int(p) for p in _cfg("keypad_row_pins", ",".join(str(p) for p in settings.KEYPAD_ROWS)).split(",")],
+            "col_pins": [int(p) for p in _cfg("keypad_col_pins", ",".join(str(p) for p in settings.KEYPAD_COLS)).split(",")],
             "lcd_i2c_address": hex(_cfg("lcd_i2c_address", settings.LCD_I2C_ADDRESS)),
             "lcd_i2c_port": _cfg("lcd_i2c_port", settings.LCD_I2C_PORT),
         },
