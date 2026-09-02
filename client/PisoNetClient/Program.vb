@@ -21,11 +21,10 @@ Module Program
     Private _metrics As MetricsService
     Private _notifs As NotificationService
     Private _guardTimer As System.Timers.Timer   ' mutual watchdog keeper
-    ' Latest values from the heartbeat's MembershipUpdated event, kept so
-    ' OnTrayRedeemPointsRequested can open RedeemPointsForm without an extra
+    ' Latest value from the heartbeat's MembershipUpdated event, kept so
+    ' OnTrayRedeemPointsRequested can open RewardsMenuForm without an extra
     ' round trip (the redeem call itself still re-validates server-side).
     Private _lastLoyaltyPoints As Integer = 0
-    Private _lastPointsPerMinuteRedeem As Integer = 0
     ' Accumulates time_added_seconds while the coin slot is open so the
     ' voice/toast notification is not fired until the user clicks Done
     ' and the lock form actually hides.
@@ -566,7 +565,6 @@ Module Program
         _overlay.SetMemberInfo(If(Not String.IsNullOrEmpty(username), username, Nothing), canLogout, minimumLogoutMinutes)
         _tray.UpdateMemberMenuState(enabled, username, pointsEnabled)
         _lastLoyaltyPoints = loyaltyPoints
-        _lastPointsPerMinuteRedeem = pointsPerMinuteRedeem
     End Sub
 
     ''' <summary>
@@ -610,14 +608,13 @@ Module Program
     ''' <summary>
     ''' "Redeem Points..." from the tray menu — only visible while a member is
     ''' logged in on this PC and the café has points enabled (see
-    ''' SystemTray.UpdateMemberMenuState). Freely cancelable.
+    ''' SystemTray.UpdateMemberMenuState). Opens the Rewards Menu, which shows
+    ''' its own inline result per redemption and stays open so a member can
+    ''' claim more than one item in a visit — nothing to report once it closes.
     ''' </summary>
     Private Sub OnTrayRedeemPointsRequested(username As String)
-        Dim dlg = New Forms.RedeemPointsForm(_memberSvc, AppConfig.PCNumber, _lastLoyaltyPoints, _lastPointsPerMinuteRedeem)
-        Dim result = dlg.ShowDialog()
-        If result = DialogResult.OK Then
-            _notifs.Show("Points Redeemed", $"{dlg.PointsRedeemed} points → +{dlg.MinutesAdded} minute(s).", ToastType.Success)
-        End If
+        Dim dlg = New Forms.RewardsMenuForm(_memberSvc, AppConfig.PCNumber, _lastLoyaltyPoints)
+        dlg.ShowDialog()
     End Sub
 
     Private Sub OnMemberLogin(username As String, password As String)
