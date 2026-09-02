@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base, SessionLocal
-from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig
+from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig, CoinSchedule, ScheduledAnnouncement
 from api import auth, pc, sessions, admin
 from api.license import router as license_router
 from api.member import router as member_router
@@ -172,6 +172,9 @@ async def lifespan(app: FastAPI):
     # Background task: hourly status ping to pisonex.com (live branch totals)
     status_task = asyncio.create_task(_hourly_status_ping_loop())
 
+    # Background task: enforce coin block schedules and fire timed announcements
+    schedule_task = asyncio.create_task(_schedule_loop())
+
     yield
 
     # Shutdown
@@ -180,6 +183,7 @@ async def lifespan(app: FastAPI):
     membership_task.cancel()
     status_task.cancel()
     earnings_task.cancel()
+    schedule_task.cancel()
     if hw_controller:
         hw_controller.cleanup()
     logger.info("Pisonex server shut down")
@@ -577,6 +581,88 @@ async def _membership_expiry_loop():
                 db.close()
         except Exception as e:
             logger.error("Membership expiry error: %s", e)
+
+
+def _time_in_range(start: str, end: str, current: str) -> bool:
+    """Return True if current HH:MM falls within [start, end]. Handles midnight crossings."""
+    if start <= end:
+        return start <= current <= end
+    # Crosses midnight e.g. "22:00" to "06:00"
+    return current >= start or current <= end
+
+
+def _next_minute(t: str) -> str:
+    """Return HH:MM for t + 1 minute (used to build a 1-minute fire window)."""
+    h, m = map(int, t.split(":"))
+    m += 1
+    if m >= 60:
+        m, h = 0, (h + 1) % 24
+    return f"{h:02d}:{m:02d}"
+
+
+def _run_schedule_tick():
+    """
+    Called every 30 s from _schedule_loop.
+
+    1. Evaluates all active CoinSchedule rows → sets command_store._schedule_blocked.
+    2. Fires any ScheduledAnnouncement whose fire_time window is now and hasn't
+       fired today yet.
+
+    Uses local server time (datetime.now()), NOT UTC, so schedules match the
+    café's timezone.
+    """
+    import command_store
+    from datetime import datetime as _dt
+    now      = _dt.now()
+    cur_time = now.strftime("%H:%M")
+    cur_date = now.strftime("%Y-%m-%d")
+    cur_dow  = str(now.weekday())   # "0"=Mon … "6"=Sun
+
+    with SessionLocal() as db:
+        # ── Coin block ────────────────────────────────────────────────────────
+        schedules = db.query(CoinSchedule).filter(CoinSchedule.is_active == True).all()
+        blocked = any(
+            cur_dow in s.days_of_week
+            and _time_in_range(s.start_time, s.end_time, cur_time)
+            for s in schedules
+        )
+        old_blocked = command_store.is_schedule_blocked()
+        if blocked != old_blocked:
+            command_store.set_schedule_blocked(blocked)
+            logger.info(
+                "Coin slot %s by schedule at %s",
+                "BLOCKED" if blocked else "UNBLOCKED",
+                cur_time,
+            )
+
+        # ── Announcements ─────────────────────────────────────────────────────
+        announcements = db.query(ScheduledAnnouncement).filter(
+            ScheduledAnnouncement.is_active == True
+        ).all()
+        for ann in announcements:
+            if cur_dow not in ann.days_of_week:
+                continue
+            if ann.last_fired_date == cur_date:
+                continue   # already fired today
+            # Fire if we're within the 1-minute window of fire_time
+            if ann.fire_time <= cur_time < _next_minute(ann.fire_time):
+                command_store.set_announcement(ann.message)
+                ann.last_fired_date = cur_date
+                db.commit()
+                logger.info(
+                    "Scheduled announcement fired: %s",
+                    ann.label or ann.message[:50],
+                )
+
+
+async def _schedule_loop():
+    """Background task: enforce coin schedules and fire timed announcements."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            _run_schedule_tick()
+        except Exception as exc:
+            logger.error("_schedule_loop error: %s", exc)
 
 
 async def _nightly_earnings_sync_loop():
