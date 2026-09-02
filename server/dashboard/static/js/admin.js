@@ -337,6 +337,84 @@ async function togglePcCoinSlot(pcNumber) {
   }
 }
 
+// ── Server health widget (Overview page) ────────────────────────────────────────
+(function() {
+  function _barColor(pct) {
+    if (pct >= 85) return '#ef4444';
+    if (pct >= 65) return '#f59e0b';
+    return null;
+  }
+  function _fmtUptime(sec) {
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
+  function _setBar(barId, valId, pct, label, defaultColor) {
+    const bar = document.getElementById(barId);
+    const val = document.getElementById(valId);
+    if (!bar || !val) return;
+    bar.style.width = pct + '%';
+    // Use alert color when high, otherwise keep the bar's own default color.
+    // Never clear to '' — that makes the inner div transparent against the gray track.
+    bar.style.background = _barColor(pct) || defaultColor;
+    val.textContent = label;
+  }
+  async function _loadOvHealth() {
+    if (!document.getElementById('ov-bar-cpu')) return;   // not on this page
+    try {
+      const res = await fetch('/dashboard/api/system/health');
+      if (!res.ok) return;
+      const d = await res.json();
+      _setBar('ov-bar-cpu',  'ov-val-cpu',  d.cpu_percent,    d.cpu_percent + '%',              '#3b82f6');
+      _setBar('ov-bar-mem',  'ov-val-mem',  d.memory_percent, d.memory_percent + '%',            '#8b5cf6');
+      if (d.disk_percent !== null)
+        _setBar('ov-bar-disk', 'ov-val-disk', d.disk_percent, (d.disk_used_gb || '?') + ' GB',  '#22c55e');
+      const tv = document.getElementById('ov-val-temp');
+      if (tv) tv.textContent = d.temperature_c !== null ? d.temperature_c + ' °C' : '—';
+      const uv = document.getElementById('ov-val-uptime');
+      if (uv) uv.textContent = _fmtUptime(d.uptime_seconds);
+    } catch (e) { /* silently ignore — widget is non-critical */ }
+  }
+  if (document.getElementById('ov-bar-cpu')) {
+    _loadOvHealth();
+    setInterval(_loadOvHealth, 10000);
+  }
+})();
+
+// ── Overview: restart / shutdown quick buttons ──────────────────────────────────
+async function ovSysControl(action) {
+  const msgs = {
+    restart:  'Restart the Pisonex service? Clients will briefly disconnect.',
+    shutdown: 'Shut down the Raspberry Pi? All clients will go offline.',
+  };
+  if (!confirm(msgs[action])) return;
+  const el = document.getElementById('ov-sys-status');
+  if (el) {
+    el.style.color = 'var(--text-dim)';
+    el.textContent = action === 'restart' ? 'Restarting…' : 'Shutting down…';
+  }
+  try {
+    const res = await fetch(`/dashboard/api/system/${action}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!el) return;
+    if (res.ok) {
+      el.style.color = 'var(--green)';
+      el.textContent = action === 'restart'
+        ? 'Restarting — page reloads in 6s…'
+        : 'Shutdown initiated.';
+      if (action === 'restart') setTimeout(() => location.reload(), 6000);
+    } else {
+      el.style.color = 'var(--red)';
+      el.textContent = data.detail || 'Failed.';
+    }
+  } catch (e) {
+    if (el) { el.style.color = 'var(--red)'; el.textContent = 'Request failed.'; }
+  }
+}
+
 // ── Announcement ──────────────────────────────────────────────────────────────
 function openAnnouncementModal() {
   const inp = document.getElementById('announcement-text');

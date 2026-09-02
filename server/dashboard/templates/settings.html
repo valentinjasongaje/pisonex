@@ -44,9 +44,83 @@
     </div>
   </div>
 
+  <div class="form-group" style="margin-top:1rem;">
+    <label for="cfg-idle-timeout" style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Coin Slot Idle Timeout</label>
+    <p style="font-size:.8rem;color:var(--gray);margin:.25rem 0 .5rem;">
+      How long the coin slot stays open after the last coin before auto-closing (seconds).
+      Should match the countdown bar duration in the client.
+    </p>
+    <div class="input-suffix" style="max-width:180px;">
+      <input type="number" id="cfg-idle-timeout" min="5" max="300"
+        value="{{ idle_timeout }}" />
+      <span class="suffix">sec</span>
+    </div>
+  </div>
+
   <div style="margin-top:1.25rem;display:flex;align-items:center;gap:12px;">
     <button class="btn btn-primary" onclick="saveIdleShutdown()">Save</button>
     <span id="idle-status" style="font-size:.85rem;"></span>
+  </div>
+</div>
+
+<!-- Network -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>Network</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Configure the Raspberry Pi's IP address. Changes apply immediately — if you
+    set a static IP you must reconnect to that address.
+  </p>
+  <div id="net-loading" style="font-size:.85rem;color:var(--text-dim);">Loading…</div>
+  <div id="net-form" style="display:none;">
+    <div class="form-group" style="margin-bottom:.8rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Interface</label>
+      <input id="net-iface" type="text" readonly
+        style="max-width:120px;width:100%;margin-top:.3rem;
+               background:rgba(255,255,255,.04);border:1px solid var(--border);
+               border-radius:6px;padding:.35rem .6rem;color:var(--text-dim);font-size:.85rem;" />
+    </div>
+    <div class="form-group" style="margin-bottom:.8rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Mode</label>
+      <div style="display:flex;gap:1.5rem;margin-top:.45rem;">
+        <label class="toggle-label">
+          <input type="radio" name="net-mode" value="dhcp" id="net-radio-dhcp" onchange="onNetModeChange()" />
+          <span>DHCP (automatic)</span>
+        </label>
+        <label class="toggle-label">
+          <input type="radio" name="net-mode" value="static" id="net-radio-static" onchange="onNetModeChange()" />
+          <span>Static IP</span>
+        </label>
+      </div>
+    </div>
+    <div id="net-static-fields" style="display:none;">
+      <div class="form-group" style="margin-bottom:.6rem;">
+        <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">IP Address</label>
+        <input id="net-ip" type="text" placeholder="192.168.1.21"
+          style="max-width:200px;width:100%;margin-top:.3rem;" />
+      </div>
+      <div class="form-group" style="margin-bottom:.6rem;">
+        <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Subnet Mask</label>
+        <input id="net-mask" type="text" placeholder="255.255.255.0"
+          style="max-width:200px;width:100%;margin-top:.3rem;" />
+      </div>
+      <div class="form-group" style="margin-bottom:.6rem;">
+        <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">Gateway</label>
+        <input id="net-gw" type="text" placeholder="192.168.1.1"
+          style="max-width:200px;width:100%;margin-top:.3rem;" />
+      </div>
+      <div class="form-group" style="margin-bottom:.75rem;">
+        <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);">DNS</label>
+        <input id="net-dns" type="text" placeholder="8.8.8.8"
+          style="max-width:200px;width:100%;margin-top:.3rem;" />
+      </div>
+    </div>
+    <p id="net-warn" style="font-size:.78rem;color:#f59e0b;margin:.4rem 0;display:none;">
+      ⚠ Changing the IP will disconnect you — reconnect to the new address.
+    </p>
+    <div style="margin-top:1rem;display:flex;align-items:center;gap:12px;">
+      <button class="btn btn-primary" onclick="saveNetworkConfig()">Apply</button>
+      <span id="net-status" style="font-size:.85rem;"></span>
+    </div>
   </div>
 </div>
 
@@ -309,6 +383,21 @@
   </div>
 </div>
 
+<!-- System Control -->
+<div class="card" style="max-width:480px;margin-bottom:1.25rem;">
+  <h2>System Control</h2>
+  <p style="font-size:.85rem;color:var(--gray);margin:.5rem 0 1rem;">
+    Control the Pisonex service or the Raspberry Pi hardware itself.
+    Reboot and Shutdown will disconnect all PC clients immediately.
+  </p>
+  <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;">
+    <button class="btn btn-secondary" onclick="sysControl('restart')">&#8635; Restart Service</button>
+    <button class="btn btn-secondary" onclick="sysControl('reboot')">&#9167; Reboot Pi</button>
+    <button class="btn btn-danger"    onclick="sysControl('shutdown')">&#9211; Shutdown Pi</button>
+  </div>
+  <span id="sys-status" style="font-size:.85rem;display:block;margin-top:.75rem;"></span>
+</div>
+
 <style>
   .input-suffix {
     display: flex;
@@ -380,10 +469,29 @@ async function _saveConfig(body, statusId) {
   setTimeout(() => el.textContent = '', 3000);
 }
 
-function saveIdleShutdown() {
-  const val = parseInt(document.getElementById('cfg-idle-shutdown').value);
-  if (isNaN(val) || val < 0) return;
-  _saveConfig({ idle_auto_shutdown_minutes: val }, 'idle-status');
+async function saveIdleShutdown() {
+  const el = document.getElementById('idle-status');
+  const shutdown = parseInt(document.getElementById('cfg-idle-shutdown').value);
+  const timeout  = parseInt(document.getElementById('cfg-idle-timeout').value);
+  if (isNaN(shutdown) || shutdown < 0 || isNaN(timeout) || timeout < 5) {
+    el.textContent = 'Please enter valid values.';
+    el.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  const r1 = await fetch('/dashboard/api/membership/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idle_auto_shutdown_minutes: shutdown }),
+  });
+  const r2 = await fetch('/dashboard/api/settings/idle-timeout', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ seconds: timeout }),
+  });
+  if (r1.ok && r2.ok) {
+    el.textContent = 'Saved.'; el.style.color = 'var(--green, #22c55e)';
+  } else {
+    el.textContent = 'Failed to save one or more settings.'; el.style.color = 'var(--red, #ef4444)';
+  }
+  setTimeout(() => el.textContent = '', 3500);
 }
 
 function savePresetAmounts() {
@@ -527,6 +635,101 @@ function copyKey() {
   });
 }
 onKeypadEnabledChange();
+
+// ── Network config ────────────────────────────────────────────────────────────
+function onNetModeChange() {
+  const isStatic = document.getElementById('net-radio-static').checked;
+  document.getElementById('net-static-fields').style.display = isStatic ? '' : 'none';
+  document.getElementById('net-warn').style.display = isStatic ? '' : 'none';
+}
+async function loadNetworkConfig() {
+  try {
+    const res = await fetch('/dashboard/api/network/config');
+    if (!res.ok) { document.getElementById('net-loading').textContent = 'Could not load network info.'; return; }
+    const d = await res.json();
+    document.getElementById('net-loading').style.display = 'none';
+    document.getElementById('net-form').style.display = '';
+    document.getElementById('net-iface').value = d.interface;
+    if (d.mode === 'static') {
+      document.getElementById('net-radio-static').checked = true;
+    } else {
+      document.getElementById('net-radio-dhcp').checked = true;
+    }
+    document.getElementById('net-ip').value   = d.ip_address || '';
+    document.getElementById('net-mask').value = d.netmask    || '255.255.255.0';
+    document.getElementById('net-gw').value   = d.gateway    || '';
+    document.getElementById('net-dns').value  = d.dns        || '8.8.8.8';
+    onNetModeChange();
+  } catch (e) {
+    document.getElementById('net-loading').textContent = 'Error loading network config.';
+  }
+}
+async function saveNetworkConfig() {
+  const el = document.getElementById('net-status');
+  const mode  = document.querySelector('input[name="net-mode"]:checked')?.value;
+  const iface = document.getElementById('net-iface').value;
+  if (!mode) { el.textContent = 'Select a mode.'; el.style.color = 'var(--red)'; return; }
+  const body = {
+    interface: iface, mode,
+    ip_address: document.getElementById('net-ip').value.trim(),
+    netmask:    document.getElementById('net-mask').value.trim(),
+    gateway:    document.getElementById('net-gw').value.trim(),
+    dns:        document.getElementById('net-dns').value.trim(),
+  };
+  if (mode === 'static' && (!body.ip_address || !body.gateway)) {
+    el.textContent = 'IP address and gateway are required for static mode.';
+    el.style.color = 'var(--red, #ef4444)'; return;
+  }
+  if (mode === 'static' && !confirm(
+    `Set static IP ${body.ip_address} on ${iface}?\n\nYou will need to reconnect to this address.`
+  )) return;
+  el.textContent = 'Applying…'; el.style.color = 'var(--text-dim)';
+  try {
+    const res = await fetch('/dashboard/api/network/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      el.textContent = data.note || 'Applied.'; el.style.color = '#22c55e';
+    } else {
+      el.textContent = data.detail || 'Failed.'; el.style.color = 'var(--red, #ef4444)';
+    }
+  } catch (e) {
+    el.textContent = 'Request failed.'; el.style.color = 'var(--red, #ef4444)';
+  }
+}
+loadNetworkConfig();
+
+// ── System Control ────────────────────────────────────────────────────────────
+async function sysControl(action) {
+  const labels = { restart: 'Restart Service', reboot: 'Reboot Pi', shutdown: 'Shutdown Pi' };
+  const confirmMsgs = {
+    restart:  'Restart the Pisonex service? All PC clients will briefly disconnect.',
+    reboot:   'Reboot the Raspberry Pi? All PC clients will disconnect until it boots up.',
+    shutdown: 'Shut down the Raspberry Pi? All PC clients will disconnect and the server will go offline.',
+  };
+  if (!confirm(confirmMsgs[action])) return;
+  const el = document.getElementById('sys-status');
+  el.textContent = `${labels[action]}…`; el.style.color = 'var(--text-dim)';
+  try {
+    const res = await fetch(`/dashboard/api/system/${action}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const msgs = {
+        restart:  'Service is restarting — page will reload in 5 seconds.',
+        reboot:   'Raspberry Pi is rebooting. Reconnect in ~30 seconds.',
+        shutdown: 'Raspberry Pi is shutting down.',
+      };
+      el.textContent = msgs[action]; el.style.color = '#22c55e';
+      if (action === 'restart') setTimeout(() => location.reload(), 5000);
+    } else {
+      el.textContent = data.detail || 'Failed.'; el.style.color = 'var(--red, #ef4444)';
+    }
+  } catch (e) {
+    el.textContent = 'Request failed.'; el.style.color = 'var(--red, #ef4444)';
+  }
+}
 </script>
 
 {% endblock %}

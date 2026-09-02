@@ -9,7 +9,67 @@
     <div class="stat-pill earnings">₱ <span id="today-earnings">{{ today_pesos }}</span> Today</div>
     <button class="btn btn-sm btn-default" onclick="openAnnouncementModal()">📢 Announce</button>
     <button id="global-coin-btn" class="btn btn-sm coin-toggle-btn coin-enabled" onclick="toggleGlobalCoinSlot()">🪙 Coins: ON</button>
+    <button class="btn btn-sm btn-secondary" style="width:32px;height:32px;padding:0;font-size:1rem;display:flex;align-items:center;justify-content:center;"
+      onclick="ovSysControl('restart')" title="Restart Service">↻</button>
+    <button class="btn btn-sm btn-danger" style="width:32px;height:32px;padding:0;font-size:1rem;display:flex;align-items:center;justify-content:center;"
+      onclick="ovSysControl('shutdown')" title="Shutdown Raspberry Pi">⏻</button>
   </div>
+</div>
+
+<!-- Server Health -->
+<div class="card" style="padding:1rem;margin-bottom:16px;">
+  <h2 style="margin-bottom:1rem;">Server Health</h2>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem 1rem;align-items:center;">
+
+    <!-- CPU -->
+    <div style="display:flex;flex-direction:column;gap:.3rem;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-size:.72rem;font-weight:600;color:var(--text-dim);">CPU</span>
+        <span id="ov-val-cpu" style="font-size:.72rem;font-weight:600;color:var(--text);">—</span>
+      </div>
+      <div style="height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;">
+        <div id="ov-bar-cpu" style="height:100%;width:0%;background:#3b82f6;border-radius:3px;transition:width .4s;"></div>
+      </div>
+    </div>
+
+    <!-- Disk -->
+    <div style="display:flex;flex-direction:column;gap:.3rem;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-size:.72rem;font-weight:600;color:var(--text-dim);">Disk</span>
+        <span id="ov-val-disk" style="font-size:.72rem;font-weight:600;color:var(--text);white-space:nowrap;">—</span>
+      </div>
+      <div style="height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;">
+        <div id="ov-bar-disk" style="height:100%;width:0%;background:#22c55e;border-radius:3px;transition:width .4s;"></div>
+      </div>
+    </div>
+
+    <!-- RAM -->
+    <div style="display:flex;flex-direction:column;gap:.3rem;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-size:.72rem;font-weight:600;color:var(--text-dim);">RAM</span>
+        <span id="ov-val-mem" style="font-size:.72rem;font-weight:600;color:var(--text);">—</span>
+      </div>
+      <div style="height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;">
+        <div id="ov-bar-mem" style="height:100%;width:0%;background:#8b5cf6;border-radius:3px;transition:width .4s;"></div>
+      </div>
+    </div>
+
+    <!-- Temp + Uptime -->
+    <div style="display:flex;gap:1rem;align-items:center;">
+      <div>
+        <div style="font-size:.68rem;color:var(--text-dim);">Temp</div>
+        <div id="ov-val-temp" style="font-size:.82rem;font-weight:700;color:var(--text);">—</div>
+      </div>
+      <div>
+        <div style="font-size:.68rem;color:var(--text-dim);">Uptime</div>
+        <div id="ov-val-uptime" style="font-size:.82rem;font-weight:700;color:var(--text);">—</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="ov-sys-status" style="font-size:.78rem;margin-top:.5rem;min-height:1.1em;"></div>
 </div>
 
 <!-- Active announcement banner (hidden until JS populates it) -->
