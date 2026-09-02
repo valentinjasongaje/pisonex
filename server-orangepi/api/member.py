@@ -8,7 +8,8 @@ from schemas import (
     MemberLogoutRequest, MemberLogoutResponse,
     MemberStatusResponse,
     MemberChangePasswordRequest, MemberChangePasswordResponse,
-    MemberRedeemPointsRequest, MemberRedeemPointsResponse,
+    RewardItemResponse,
+    MemberRedeemRewardRequest, MemberRedeemRewardResponse,
 )
 from services.membership_service import MembershipService
 
@@ -50,8 +51,14 @@ def change_password(req: MemberChangePasswordRequest, db: Session = Depends(get_
     return MemberChangePasswordResponse(**result)
 
 
-@router.post("/redeem-points", response_model=MemberRedeemPointsResponse, dependencies=[_ClientAuth])
-def redeem_points(req: MemberRedeemPointsRequest, db: Session = Depends(get_db)):
+@router.get("/rewards", response_model=list[RewardItemResponse], dependencies=[_ClientAuth])
+def list_rewards(db: Session = Depends(get_db)):
     svc = MembershipService(db)
-    result = svc.redeem_points(req.pc_number, req.points)
-    return MemberRedeemPointsResponse(**result)
+    return svc.list_active_rewards()
+
+
+@router.post("/redeem-reward", response_model=MemberRedeemRewardResponse, dependencies=[_ClientAuth])
+def redeem_reward(req: MemberRedeemRewardRequest, db: Session = Depends(get_db)):
+    svc = MembershipService(db)
+    result = svc.redeem_reward(req.pc_number, req.reward_item_id)
+    return MemberRedeemRewardResponse(**result)

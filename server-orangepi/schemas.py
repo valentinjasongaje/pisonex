@@ -180,15 +180,29 @@ class MemberChangePasswordResponse(BaseModel):
     success: bool
     error: Optional[str] = None
 
-class MemberRedeemPointsRequest(BaseModel):
-    pc_number: int
-    points: int
+class RewardItemResponse(BaseModel):
+    id: int
+    name: str
+    kind: str
+    points_cost: int
+    minutes: Optional[int] = None
+    is_active: bool = True
 
-class MemberRedeemPointsResponse(BaseModel):
+    class Config:
+        from_attributes = True
+
+class MemberRedeemRewardRequest(BaseModel):
+    pc_number: int
+    reward_item_id: int
+
+class MemberRedeemRewardResponse(BaseModel):
     success: bool
-    points_redeemed: int = 0
-    seconds_added: int = 0
+    item_name: Optional[str] = None
+    kind: Optional[str] = None
+    points_spent: int = 0
+    minutes_granted: Optional[int] = None
     remaining_points: int = 0
+    status: Optional[str] = None  # "fulfilled" | "pending"
     error: Optional[str] = None
 
 class MemberLogoutResponse(BaseModel):

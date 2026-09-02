@@ -119,6 +119,39 @@ class PointsTransaction(Base):
     created_at       = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class RewardItem(Base):
+    """Admin-defined catalog entry a member can redeem loyalty points for."""
+    __tablename__ = "reward_items"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    name        = Column(String(120), nullable=False)     # "30 Minutes Bonus", "Chips"
+    kind        = Column(String(10), nullable=False)      # "time" | "food"
+    points_cost = Column(Integer, nullable=False)
+    minutes     = Column(Integer, nullable=True)           # only meaningful for kind="time"
+    is_active   = Column(Boolean, default=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class RewardRedemption(Base):
+    """One member's claim against the reward catalog. Snapshots the item's
+    name/kind/cost at redemption time so editing or deleting a catalog item
+    later never corrupts history — this is a receipt, not a live join.
+    """
+    __tablename__ = "reward_redemptions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=False)
+    pc_id           = Column(Integer, ForeignKey("pcs.id"), nullable=True)
+    reward_item_id  = Column(Integer, ForeignKey("reward_items.id"), nullable=True)  # nullable: item may be deleted later
+    item_name       = Column(String(120), nullable=False)
+    kind            = Column(String(10), nullable=False)
+    points_spent    = Column(Integer, nullable=False)
+    minutes_granted = Column(Integer, nullable=True)       # set only for "time" kind
+    status          = Column(String(10), nullable=False, default="pending")  # "pending" | "fulfilled"
+    created_at      = Column(DateTime, default=datetime.utcnow, index=True)
+    fulfilled_at    = Column(DateTime, nullable=True)
+
+
 class CoinRate(Base):
     __tablename__ = "coin_rates"
 

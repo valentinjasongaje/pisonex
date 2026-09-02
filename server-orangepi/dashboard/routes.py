@@ -24,7 +24,7 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, RateProfile, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, RateProfile, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement, RewardItem
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from services.wol_service import wake_pc, wake_all
@@ -2340,6 +2340,140 @@ def reset_member_password(
         "username": result["username"],
         "temp_password": result["temp_password"],
     }
+
+
+# ── Reward catalog + redemption queue (admin only) ────────────────────────────
+
+class CreateRewardBody(BaseModel):
+    name: str
+    kind: str  # "time" | "food"
+    points_cost: int
+    minutes: Optional[int] = None
+
+
+@router.get("/rewards", response_class=HTMLResponse)
+def rewards_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
+
+    msvc = MembershipService(db)
+    items = db.query(RewardItem).order_by(RewardItem.points_cost).all()
+    pending = msvc.list_pending_redemptions()
+
+    return templates.TemplateResponse("rewards.html", {
+        "request": request,
+        "items": items,
+        "pending": pending,
+    })
+
+
+@router.get("/api/rewards/pending", dependencies=[Depends(_require_active_license)])
+def get_pending_redemptions(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """JSON snapshot of the pending queue, for the Rewards page's auto-refresh."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    msvc = MembershipService(db)
+    pending = msvc.list_pending_redemptions()
+    result = []
+    for r in pending:
+        user = db.query(User).filter(User.id == r.user_id).first()
+        pc = db.query(PC).filter(PC.id == r.pc_id).first() if r.pc_id else None
+        result.append({
+            "id": r.id,
+            "username": user.username if user else "?",
+            "item_name": r.item_name,
+            "points_spent": r.points_spent,
+            "pc_number": pc.pc_number if pc else None,
+            "created_at": r.created_at.strftime("%m/%d %H:%M"),
+        })
+    return result
+
+
+@router.post("/api/rewards", dependencies=[Depends(_require_active_license)])
+def create_reward(
+    body: CreateRewardBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_create_reward(body.name, body.kind, body.points_cost, body.minutes)
+    if not result["success"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+    item = result["item"]
+    return {
+        "id": item.id, "name": item.name, "kind": item.kind,
+        "points_cost": item.points_cost, "minutes": item.minutes,
+        "is_active": item.is_active,
+    }
+
+
+@router.post("/api/rewards/{reward_id}/toggle", dependencies=[Depends(_require_active_license)])
+def toggle_reward(
+    reward_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_toggle_reward(reward_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"id": reward_id, "is_active": result["is_active"]}
+
+
+@router.delete("/api/rewards/{reward_id}", dependencies=[Depends(_require_active_license)])
+def delete_reward(
+    reward_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_delete_reward(reward_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"status": "deleted", "id": reward_id}
+
+
+@router.post("/api/rewards/redemptions/{redemption_id}/fulfill", dependencies=[Depends(_require_active_license)])
+def fulfill_redemption(
+    redemption_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.fulfill_redemption(redemption_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"status": "fulfilled", "id": redemption_id}
 
 
 # ── Staff management (admin only) ────────────────────────────────────────────

@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session as DBSession
 
-from models import User, Session, PC, MembershipConfig, SystemLog, PointsTransaction
+from models import User, Session, PC, MembershipConfig, SystemLog, PointsTransaction, RewardItem, RewardRedemption
 from services.session_service import SessionService
 from api.auth import hash_password, verify_password
 import command_store
@@ -343,20 +343,36 @@ class MembershipService:
         self._db.commit()
         return points
 
-    def redeem_points(self, pc_number: int, points: int) -> dict:
+    def list_active_rewards(self) -> list:
+        """Client-facing catalog — only items an admin has left active."""
+        return (
+            self._db.query(RewardItem)
+            .filter(RewardItem.is_active == True)
+            .order_by(RewardItem.points_cost)
+            .all()
+        )
+
+    def redeem_reward(self, pc_number: int, reward_item_id: int) -> dict:
         """Member-facing, self-service: identifies the member via the PC
         binding set by login_member() (no re-auth needed — same as
-        change_password). Spends whole minutes' worth of points only —
-        e.g. redeeming 25 at a 20-points/minute rate spends 20, keeps 5.
-        Extends a live session directly if the member has one right now
-        (immediate effect); otherwise banks the time to balance_seconds,
-        same as a stored purchase.
+        change_password). A catalog item has one fixed points cost — no
+        partial-cost logic like the old flat rate had.
+
+        "time" items fulfill themselves immediately, same live-session-vs-
+        balance split the old redeem_points() used. "food" items can't be
+        auto-dispensed: points are deducted now (so they can't be spent
+        twice), but the RewardRedemption row is created "pending" for staff
+        to fulfill at the counter from the Rewards dashboard page.
         """
         cfg = self.get_config()
         if not cfg.points_enabled:
             return {"success": False, "error": "Loyalty points are not enabled"}
-        if points <= 0:
-            return {"success": False, "error": "Points must be greater than 0"}
+
+        item = self._db.query(RewardItem).filter(
+            RewardItem.id == reward_item_id, RewardItem.is_active == True
+        ).first()
+        if not item:
+            return {"success": False, "error": "Reward not found"}
 
         user_id = command_store.get_member_for_pc(pc_number)
         if user_id is None:
@@ -366,44 +382,114 @@ class MembershipService:
         if not user:
             return {"success": False, "error": "Member not found"}
 
-        if points > user.loyalty_points:
+        if item.points_cost > user.loyalty_points:
             return {"success": False, "error": f"Not enough points (you have {user.loyalty_points})"}
 
-        rate = cfg.points_per_minute_redeem
-        if rate <= 0:
-            return {"success": False, "error": "Redemption is not configured"}
+        user.loyalty_points -= item.points_cost
 
-        minutes = points // rate
-        if minutes <= 0:
-            return {"success": False, "error": f"Redeem at least {rate} points (1 minute)"}
+        minutes_granted = None
+        status = "pending"
+        fulfilled_at = None
 
-        spent_points = minutes * rate
-        seconds = minutes * 60
+        if item.kind == "time":
+            minutes_granted = item.minutes or 0
+            seconds = minutes_granted * 60
+            svc = SessionService(self._db)
+            pc = svc.get_pc(pc_number)
+            session = svc.get_active_session(pc_number) if pc else None
+            if session and session.user_id == user.id:
+                session.granted_seconds += seconds
+            else:
+                user.balance_seconds += seconds
+            status = "fulfilled"
+            fulfilled_at = datetime.utcnow()
 
-        svc = SessionService(self._db)
-        pc = svc.get_pc(pc_number)
-        session = svc.get_active_session(pc_number) if pc else None
-
-        if session and session.user_id == user.id:
-            session.granted_seconds += seconds
-        else:
-            user.balance_seconds += seconds
-
-        user.loyalty_points -= spent_points
-        self._db.add(PointsTransaction(
-            user_id=user.id, pc_id=pc.id if pc else None,
-            kind="redeem", points_delta=-spent_points, seconds_redeemed=seconds,
-        ))
+        pc = self._db.query(PC).filter(PC.pc_number == pc_number).first()
+        redemption = RewardRedemption(
+            user_id=user.id,
+            pc_id=pc.id if pc else None,
+            reward_item_id=item.id,
+            item_name=item.name,
+            kind=item.kind,
+            points_spent=item.points_cost,
+            minutes_granted=minutes_granted,
+            status=status,
+            fulfilled_at=fulfilled_at,
+        )
+        self._db.add(redemption)
         self._log("INFO", "membership",
-                   f"Member {user.username} redeemed {spent_points} points for {minutes}m on PC {pc_number:02d}")
+                   f"Member {user.username} redeemed '{item.name}' ({item.points_cost} pts) on PC {pc_number:02d}"
+                   + (" — pending staff fulfillment" if status == "pending" else ""))
         self._db.commit()
 
         return {
             "success": True,
-            "points_redeemed": spent_points,
-            "seconds_added": seconds,
+            "item_name": item.name,
+            "kind": item.kind,
+            "points_spent": item.points_cost,
+            "minutes_granted": minutes_granted,
             "remaining_points": user.loyalty_points,
+            "status": status,
         }
+
+    def admin_create_reward(self, name: str, kind: str, points_cost: int, minutes: int = None) -> dict:
+        name = name.strip()
+        if not name:
+            return {"success": False, "error": "Name cannot be empty"}
+        if kind not in ("time", "food"):
+            return {"success": False, "error": "kind must be 'time' or 'food'"}
+        if points_cost <= 0:
+            return {"success": False, "error": "Points cost must be greater than 0"}
+        if kind == "time" and (not minutes or minutes <= 0):
+            return {"success": False, "error": "Minutes must be greater than 0 for a time reward"}
+
+        item = RewardItem(
+            name=name, kind=kind, points_cost=points_cost,
+            minutes=minutes if kind == "time" else None,
+        )
+        self._db.add(item)
+        self._db.commit()
+        self._db.refresh(item)
+        return {"success": True, "item": item}
+
+    def admin_toggle_reward(self, reward_item_id: int) -> dict:
+        item = self._db.query(RewardItem).filter(RewardItem.id == reward_item_id).first()
+        if not item:
+            return {"success": False, "error": "Reward not found"}
+        item.is_active = not item.is_active
+        self._db.commit()
+        return {"success": True, "is_active": item.is_active}
+
+    def admin_delete_reward(self, reward_item_id: int) -> dict:
+        item = self._db.query(RewardItem).filter(RewardItem.id == reward_item_id).first()
+        if not item:
+            return {"success": False, "error": "Reward not found"}
+        self._db.delete(item)
+        self._db.commit()
+        return {"success": True}
+
+    def list_pending_redemptions(self) -> list:
+        return (
+            self._db.query(RewardRedemption)
+            .filter(RewardRedemption.status == "pending")
+            .order_by(RewardRedemption.created_at)
+            .all()
+        )
+
+    def fulfill_redemption(self, redemption_id: int) -> dict:
+        """Admin/staff: mark a food redemption as handed over at the counter."""
+        redemption = self._db.query(RewardRedemption).filter(
+            RewardRedemption.id == redemption_id
+        ).first()
+        if not redemption:
+            return {"success": False, "error": "Redemption not found"}
+        if redemption.status == "fulfilled":
+            return {"success": False, "error": "Already fulfilled"}
+
+        redemption.status = "fulfilled"
+        redemption.fulfilled_at = datetime.utcnow()
+        self._db.commit()
+        return {"success": True}
 
     def admin_adjust_points(self, user_id: int, points_delta: int) -> dict:
         """Admin dashboard: mirrors adjust_member_balance but for loyalty

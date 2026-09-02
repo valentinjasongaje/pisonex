@@ -84,16 +84,12 @@
           <span class="suffix">pts</span>
         </div>
       </div>
-
-      <div class="form-group">
-        <label for="cfg-points-redeem-rate">Redemption Rate</label>
-        <div class="input-suffix">
-          <input type="number" id="cfg-points-redeem-rate" min="1" max="1000"
-            value="{{ config.points_per_minute_redeem }}" />
-          <span class="suffix">pts / min</span>
-        </div>
-      </div>
     </div>
+
+    <p style="font-size:.8rem;color:var(--gray);margin:.5rem 0 0;">
+      Manage what points can be redeemed for — bonus time, food, drinks —
+      on the <a href="/dashboard/rewards">Rewards</a> page.
+    </p>
 
     <div class="membership-actions">
       <button type="submit" class="btn btn-primary">Save Settings</button>
@@ -473,7 +469,6 @@ async function saveMembershipConfig(e) {
     points_enabled: document.getElementById('cfg-points-enabled').checked,
     points_per_10_pesos: parseInt(document.getElementById('cfg-points-per-10-pesos').value),
     points_streak_bonus: parseInt(document.getElementById('cfg-points-streak-bonus').value),
-    points_per_minute_redeem: parseInt(document.getElementById('cfg-points-redeem-rate').value),
   };
   const res = await fetch('/dashboard/api/membership/config', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)

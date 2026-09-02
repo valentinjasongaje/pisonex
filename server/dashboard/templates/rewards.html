@@ -1,0 +1,260 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Rewards</h1>
+</div>
+
+<!-- ── Section 1: Reward Catalog ────────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+    <div>
+      <h2 style="margin:0 0 .2rem;">Reward Catalog</h2>
+      <p style="font-size:.82rem;color:var(--gray);margin:0;">
+        What members can redeem their loyalty points for. Bonus time credits
+        automatically; food/drink items go to the Pending Redemptions queue
+        below for staff to hand over at the counter.
+      </p>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="toggleRewardForm()">+ Add Reward</button>
+  </div>
+
+  <!-- Inline add form -->
+  <div id="reward-form-wrap" style="display:none;background:var(--surface-2,rgba(255,255,255,.04));border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;margin-bottom:.75rem;">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Name</label>
+        <input type="text" id="rf-name" maxlength="120" placeholder="e.g. Chips"
+          style="width:100%;margin-top:.3rem;" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Type</label>
+        <select id="rf-kind" onchange="onRewardKindChange()" style="width:100%;margin-top:.3rem;">
+          <option value="food">Food / Drink</option>
+          <option value="time">Bonus Time</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Points Cost</label>
+        <input type="number" id="rf-points-cost" min="1" step="1" placeholder="50"
+          style="width:100%;margin-top:.3rem;" />
+      </div>
+    </div>
+    <div id="rf-minutes-wrap" style="display:none;margin-bottom:.75rem;max-width:220px;">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Minutes Granted</label>
+        <input type="number" id="rf-minutes" min="1" step="1" placeholder="30"
+          style="width:100%;margin-top:.3rem;" />
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center;">
+      <button class="btn btn-primary" onclick="addReward()">Add</button>
+      <button class="btn btn-default" onclick="toggleRewardForm()">Cancel</button>
+      <span id="rf-status" style="font-size:.82rem;"></span>
+    </div>
+  </div>
+
+  <!-- Catalog table -->
+  <div id="rewards-table">
+    {% if items %}
+    <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Name</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Type</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Cost</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Grants</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Status</th>
+          <th style="text-align:right;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="rewards-body">
+        {% for r in items %}
+        <tr id="reward-row-{{ r.id }}" style="border-bottom:1px solid rgba(255,255,255,.05);">
+          <td style="padding:.55rem .75rem;color:var(--text);">{{ r.name }}</td>
+          <td style="padding:.55rem .75rem;color:var(--text-dim);">{{ "Bonus Time" if r.kind == "time" else "Food / Drink" }}</td>
+          <td style="padding:.55rem .75rem;color:var(--text);">{{ r.points_cost }} pts</td>
+          <td style="padding:.55rem .75rem;color:var(--text-dim);">{% if r.kind == "time" %}{{ r.minutes }} min{% else %}—{% endif %}</td>
+          <td style="padding:.55rem .75rem;">
+            {% if r.is_active %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:99px;font-weight:600;">Active</span>
+            {% else %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(148,163,184,.1);color:var(--text-dim);border:1px solid var(--border);border-radius:99px;font-weight:600;">Hidden</span>
+            {% endif %}
+          </td>
+          <td style="padding:.55rem .75rem;text-align:right;">
+            <button class="btn btn-sm btn-secondary" style="font-size:.75rem;"
+              onclick="toggleReward({{ r.id }})">
+              {{ "Hide" if r.is_active else "Show" }}
+            </button>
+            <button class="btn btn-sm btn-danger" style="font-size:.75rem;margin-left:.35rem;"
+              onclick="deleteReward({{ r.id }})">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p id="rewards-empty" style="font-size:.85rem;color:var(--text-dim);margin:0;">
+      No rewards in the catalog yet — add one above.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Section 2: Pending Redemptions ───────────────────────────────────────── -->
+<div class="card">
+  <div style="margin-bottom:1rem;">
+    <h2 style="margin:0 0 .2rem;">Pending Redemptions</h2>
+    <p style="font-size:.82rem;color:var(--gray);margin:0;">
+      Food/drink claims waiting to be handed over at the counter. Mark
+      fulfilled once the member has received it. Updates every 10 seconds.
+    </p>
+  </div>
+
+  <div id="pending-table">
+    {% if pending %}
+    <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Member</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Item</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Points</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">PC</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Requested</th>
+          <th style="text-align:right;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="pending-body">
+        {% for p in pending %}
+        <tr id="pending-row-{{ p.id }}" style="border-bottom:1px solid rgba(255,255,255,.05);">
+          <td style="padding:.55rem .75rem;color:var(--text);">{{ p.username if p.username else "?" }}</td>
+          <td style="padding:.55rem .75rem;color:var(--text);">{{ p.item_name }}</td>
+          <td style="padding:.55rem .75rem;color:var(--text-dim);">{{ p.points_spent }} pts</td>
+          <td style="padding:.55rem .75rem;color:var(--text-dim);">{% if p.pc_number %}PC {{ "%02d" | format(p.pc_number) }}{% else %}—{% endif %}</td>
+          <td style="padding:.55rem .75rem;color:var(--text-dim);">{{ p.created_at.strftime('%m/%d %H:%M') }}</td>
+          <td style="padding:.55rem .75rem;text-align:right;">
+            <button class="btn btn-sm btn-success" style="font-size:.75rem;"
+              onclick="fulfillRedemption({{ p.id }})">Mark Fulfilled</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p id="pending-empty" style="font-size:.85rem;color:var(--text-dim);margin:0;">
+      Nothing pending right now.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function _statusEl(id, msg, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok ? 'var(--green,#22c55e)' : 'var(--red,#ef4444)';
+  if (ok) setTimeout(() => el.textContent = '', 3500);
+}
+
+// ── Reward Catalog ──────────────────────────────────────────────────────────────
+function toggleRewardForm() {
+  const w = document.getElementById('reward-form-wrap');
+  w.style.display = w.style.display === 'none' ? '' : 'none';
+}
+
+function onRewardKindChange() {
+  const isTime = document.getElementById('rf-kind').value === 'time';
+  document.getElementById('rf-minutes-wrap').style.display = isTime ? '' : 'none';
+}
+
+async function addReward() {
+  const name = document.getElementById('rf-name').value.trim();
+  const kind = document.getElementById('rf-kind').value;
+  const pointsCost = parseInt(document.getElementById('rf-points-cost').value);
+  const minutes = kind === 'time' ? parseInt(document.getElementById('rf-minutes').value) : null;
+
+  if (!name) { _statusEl('rf-status', 'Name is required.', false); return; }
+  if (isNaN(pointsCost) || pointsCost <= 0) { _statusEl('rf-status', 'Points cost must be greater than 0.', false); return; }
+  if (kind === 'time' && (isNaN(minutes) || minutes <= 0)) { _statusEl('rf-status', 'Minutes must be greater than 0.', false); return; }
+
+  const res = await fetch('/dashboard/api/rewards', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, kind, points_cost: pointsCost, minutes }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    _statusEl('rf-status', d.detail || 'Failed.', false); return;
+  }
+  location.reload();
+}
+
+async function toggleReward(id) {
+  const res = await fetch(`/dashboard/api/rewards/${id}/toggle`, { method: 'POST' });
+  if (res.ok) location.reload();
+}
+
+async function deleteReward(id) {
+  if (!confirm('Delete this reward from the catalog?')) return;
+  const res = await fetch(`/dashboard/api/rewards/${id}`, { method: 'DELETE' });
+  if (res.ok) {
+    const row = document.getElementById(`reward-row-${id}`);
+    if (row) row.remove();
+  }
+}
+
+// ── Pending Redemptions ───────────────────────────────────────────────────────
+async function fulfillRedemption(id) {
+  const res = await fetch(`/dashboard/api/rewards/redemptions/${id}/fulfill`, { method: 'POST' });
+  if (res.ok) {
+    const row = document.getElementById(`pending-row-${id}`);
+    if (row) row.remove();
+  }
+}
+
+async function _refreshPending() {
+  try {
+    const res = await fetch('/dashboard/api/rewards/pending');
+    if (!res.ok) return;
+    const rows = await res.json();
+    const tbody = document.getElementById('pending-body');
+    const table = document.getElementById('pending-table');
+    if (rows.length === 0) {
+      table.innerHTML = '<p id="pending-empty" style="font-size:.85rem;color:var(--text-dim);margin:0;">Nothing pending right now.</p>';
+      return;
+    }
+    const html = rows.map(p => `
+      <tr id="pending-row-${p.id}" style="border-bottom:1px solid rgba(255,255,255,.05);">
+        <td style="padding:.55rem .75rem;color:var(--text);">${p.username}</td>
+        <td style="padding:.55rem .75rem;color:var(--text);">${p.item_name}</td>
+        <td style="padding:.55rem .75rem;color:var(--text-dim);">${p.points_spent} pts</td>
+        <td style="padding:.55rem .75rem;color:var(--text-dim);">${p.pc_number ? 'PC ' + String(p.pc_number).padStart(2,'0') : '—'}</td>
+        <td style="padding:.55rem .75rem;color:var(--text-dim);">${p.created_at}</td>
+        <td style="padding:.55rem .75rem;text-align:right;">
+          <button class="btn btn-sm btn-success" style="font-size:.75rem;" onclick="fulfillRedemption(${p.id})">Mark Fulfilled</button>
+        </td>
+      </tr>`).join('');
+    if (tbody) {
+      tbody.innerHTML = html;
+    } else {
+      table.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+        <thead><tr style="border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Member</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Item</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Points</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">PC</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Requested</th>
+          <th style="text-align:right;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Actions</th>
+        </tr></thead>
+        <tbody id="pending-body">${html}</tbody>
+      </table>`;
+    }
+  } catch (e) { /* silently ignore — polling is non-critical */ }
+}
+setInterval(_refreshPending, 10000);
+</script>
+
+{% endblock %}
