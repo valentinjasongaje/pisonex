@@ -10,9 +10,10 @@ import string
 import secrets
 import logging
 from datetime import datetime
+from typing import Optional
 from sqlalchemy.orm import Session as DBSession
 
-from models import User, Session, PC, MembershipConfig, SystemLog
+from models import User, Session, PC, MembershipConfig, SystemLog, PointsTransaction
 from services.session_service import SessionService
 from api.auth import hash_password, verify_password
 import command_store
@@ -265,6 +266,8 @@ class MembershipService:
         command_store.bind_member(pc_number, user.id)
         command_store.clear_idle_since(pc_number)
 
+        self._award_login_streak(user, cfg)
+
         self._db.commit()
 
         return {
@@ -272,7 +275,153 @@ class MembershipService:
             "balance_seconds": user.balance_seconds,
             "absorbed_seconds": absorbed_seconds,
             "must_change_password": user.must_change_password,
+            "loyalty_points": user.loyalty_points,
         }
+
+    # ── Loyalty points ───────────────────────────────────────────────
+
+    def _award_login_streak(self, user: User, cfg: MembershipConfig) -> int:
+        """Called from inside login_member(), right before its commit — shares
+        that transaction rather than starting its own. Awards points once per
+        calendar day (server-local), and only when the previous login was
+        exactly the day before; any bigger gap resets the streak to 1.
+        """
+        if not cfg.points_enabled:
+            return 0
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        if user.last_login_date == today:
+            return 0  # already logged in today — no double-dip
+
+        if user.last_login_date:
+            try:
+                prev = datetime.strptime(user.last_login_date, "%Y-%m-%d").date()
+                gap_days = (datetime.now().date() - prev).days
+            except ValueError:
+                gap_days = None
+            user.login_streak_days = user.login_streak_days + 1 if gap_days == 1 else 1
+        else:
+            user.login_streak_days = 1
+
+        user.last_login_date = today
+
+        bonus = cfg.points_streak_bonus
+        if bonus > 0:
+            user.loyalty_points += bonus
+            self._db.add(PointsTransaction(
+                user_id=user.id, pc_id=None,
+                kind="earn_streak", points_delta=bonus,
+            ))
+        return bonus
+
+    def award_coin_points(self, user_id: Optional[int], pc_id: Optional[int], pesos: int) -> int:
+        """Called right after a coin-triggered time credit for a logged-in
+        member (both the REST add-time route and the hardware coin ISR).
+        No-op if points are disabled or nobody is logged in. Returns the
+        number of points awarded. Commits on its own — unlike the streak
+        bonus, this isn't already inside another method's transaction.
+        """
+        if user_id is None or pesos <= 0:
+            return 0
+        cfg = self.get_config()
+        if not cfg.points_enabled:
+            return 0
+
+        points = (pesos * cfg.points_per_10_pesos) // 10
+        if points <= 0:
+            return 0
+
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return 0
+
+        user.loyalty_points += points
+        self._db.add(PointsTransaction(
+            user_id=user.id, pc_id=pc_id,
+            kind="earn_coin", points_delta=points,
+        ))
+        self._db.commit()
+        return points
+
+    def redeem_points(self, pc_number: int, points: int) -> dict:
+        """Member-facing, self-service: identifies the member via the PC
+        binding set by login_member() (no re-auth needed — same as
+        change_password). Spends whole minutes' worth of points only —
+        e.g. redeeming 25 at a 20-points/minute rate spends 20, keeps 5.
+        Extends a live session directly if the member has one right now
+        (immediate effect); otherwise banks the time to balance_seconds,
+        same as a stored purchase.
+        """
+        cfg = self.get_config()
+        if not cfg.points_enabled:
+            return {"success": False, "error": "Loyalty points are not enabled"}
+        if points <= 0:
+            return {"success": False, "error": "Points must be greater than 0"}
+
+        user_id = command_store.get_member_for_pc(pc_number)
+        if user_id is None:
+            return {"success": False, "error": "No member logged in on this PC"}
+
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return {"success": False, "error": "Member not found"}
+
+        if points > user.loyalty_points:
+            return {"success": False, "error": f"Not enough points (you have {user.loyalty_points})"}
+
+        rate = cfg.points_per_minute_redeem
+        if rate <= 0:
+            return {"success": False, "error": "Redemption is not configured"}
+
+        minutes = points // rate
+        if minutes <= 0:
+            return {"success": False, "error": f"Redeem at least {rate} points (1 minute)"}
+
+        spent_points = minutes * rate
+        seconds = minutes * 60
+
+        svc = SessionService(self._db)
+        pc = svc.get_pc(pc_number)
+        session = svc.get_active_session(pc_number) if pc else None
+
+        if session and session.user_id == user.id:
+            session.granted_seconds += seconds
+        else:
+            user.balance_seconds += seconds
+
+        user.loyalty_points -= spent_points
+        self._db.add(PointsTransaction(
+            user_id=user.id, pc_id=pc.id if pc else None,
+            kind="redeem", points_delta=-spent_points, seconds_redeemed=seconds,
+        ))
+        self._log("INFO", "membership",
+                   f"Member {user.username} redeemed {spent_points} points for {minutes}m on PC {pc_number:02d}")
+        self._db.commit()
+
+        return {
+            "success": True,
+            "points_redeemed": spent_points,
+            "seconds_added": seconds,
+            "remaining_points": user.loyalty_points,
+        }
+
+    def admin_adjust_points(self, user_id: int, points_delta: int) -> dict:
+        """Admin dashboard: mirrors adjust_member_balance but for loyalty
+        points. Allows negative adjustments; never lets the balance go
+        below 0."""
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return {"success": False, "error": "Member not found"}
+
+        applied = max(-user.loyalty_points, points_delta)
+        user.loyalty_points += applied
+        if applied != 0:
+            self._db.add(PointsTransaction(
+                user_id=user.id, pc_id=None,
+                kind="admin_adjust", points_delta=applied,
+            ))
+        self._db.commit()
+        return {"success": True, "loyalty_points": user.loyalty_points}
 
     # ── Logout ────────────────────────────────────────────────────
 
@@ -349,6 +498,9 @@ class MembershipService:
             "balance_seconds": 0,
             "can_logout": False,
             "logout_denied_reason": None,
+            "points_enabled": cfg.points_enabled,
+            "loyalty_points": 0,
+            "points_per_minute_redeem": cfg.points_per_minute_redeem,
         }
 
         if user_id is None:
@@ -364,6 +516,7 @@ class MembershipService:
 
         result["logged_in_user"] = user.username
         result["balance_seconds"] = user.balance_seconds
+        result["loyalty_points"] = user.loyalty_points
 
         # Can logout? Zero-time always allowed (Case 26)
         if not session or remaining == 0:

@@ -299,13 +299,28 @@ class HardwareController:
                 self._show_lcd_error(Screen.error("License expired"))
                 return
 
+            # Attribute the transaction to whoever is logged in on this PC, if
+            # anyone — mirrors api/sessions.py's REST add-time route. Without
+            # this, a coin inserted while a member is logged in would create
+            # an anonymous CoinTransaction (and, from a zero-time login, even
+            # an anonymous Session), and loyalty points below would have no
+            # member to award to.
+            member_user_id = command_store.get_member_for_pc(pc_number)
+
             seconds_added, session = self._service.add_time_by_pesos(
                 pc_number=pc_number,
                 pesos=pesos,
+                user_id=member_user_id,
             )
             # Reset idle/zero-time auto-shutdown timers — the PC is receiving time
             command_store.clear_idle_since(pc_number)
             command_store.clear_zero_time_since(pc_number)
+
+            if member_user_id is not None:
+                from services.membership_service import MembershipService
+                MembershipService(self._service._db).award_coin_points(
+                    member_user_id, session.pc_id, pesos
+                )
 
             logger.info("PC %02d: ₱%d → +%ds (total %ds)",
                         pc_number, pesos, seconds_added, session.granted_seconds)
