@@ -95,6 +95,54 @@
 </div>
 {% endif %}
 
+<!-- ── Pricing warnings ──────────────────────────────────────────── -->
+{% if value_warnings %}
+<div class="card" style="border-left:3px solid #f59e0b;">
+  <h2 style="margin-bottom:.4rem;">Check these prices</h2>
+  <p style="color:var(--text-dim);font-size:13px;margin:0 0 12px;">
+    A bigger coin is worth <em>less</em> per peso than a smaller one here. Customers
+    still get the best combination their coins can buy — the server works that out —
+    but the bigger coin is the one they'll learn to avoid.
+  </p>
+  <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.7;">
+    {% for w in value_warnings %}
+    <li>
+      <strong>&#8369;{{ w.pesos }} = {{ (w.seconds // 60) }} min</strong>
+      ({{ '%.1f'|format(w.seconds / w.pesos / 60) }} min per peso)
+      is beaten by
+      <strong>&#8369;{{ w.beaten_by_pesos }} = {{ (w.beaten_by_seconds // 60) }} min</strong>
+      ({{ '%.1f'|format(w.beaten_by_seconds / w.beaten_by_pesos / 60) }} min per peso).
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- ── Leftover coin handling ────────────────────────────────────── -->
+<div class="card">
+  <h2 style="margin-bottom:.4rem;">Unpriced coins</h2>
+  <p style="color:var(--text-dim);font-size:13px;margin:0 0 14px;">
+    What happens to pesos that no combination of your rates can use — for example a
+    &#8369;1 coin when your cheapest rate is
+    &#8369;{{ smallest_rate.pesos if smallest_rate else 5 }}.
+  </p>
+  <div class="form-row" style="align-items:flex-end;">
+    <div class="form-group" style="max-width:320px;">
+      <label>When a coin doesn't fit any rate</label>
+      <select id="leftover-mode">
+        <option value="prorate" {% if leftover_mode == 'prorate' %}selected{% endif %}>
+          Give time at the smallest rate's value
+        </option>
+        <option value="discard" {% if leftover_mode == 'discard' %}selected{% endif %}>
+          Give no time for it
+        </option>
+      </select>
+    </div>
+    <button class="btn btn-primary align-end" onclick="saveLeftoverMode()">Save</button>
+    <span id="leftover-status" style="font-size:13px;color:var(--text-dim);margin-left:8px;"></span>
+  </div>
+</div>
+
 <!-- ── Add rate form ─────────────────────────────────────────────── -->
 <div class="card">
   <h2>Add Rate — {{ selected_profile.name if selected_profile else "Default" }}</h2>
@@ -116,6 +164,33 @@
 
 <!-- ── Rates table ────────────────────────────────────────────────── -->
 {% include "partials/rates_table.html" %}
+
+<script>
+async function saveLeftoverMode() {
+  const status = document.getElementById('leftover-status');
+  const mode   = document.getElementById('leftover-mode').value;
+  status.textContent = 'Saving…';
+  try {
+    const res = await fetch('/dashboard/api/rates/leftover-mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    });
+    if (res.ok) {
+      status.textContent = 'Saved';
+      status.style.color = '#22c55e';
+    } else {
+      const err = await res.json().catch(() => ({}));
+      status.textContent = err.detail || 'Could not save';
+      status.style.color = '#ef4444';
+    }
+  } catch (e) {
+    status.textContent = 'Could not reach the server';
+    status.style.color = '#ef4444';
+  }
+  setTimeout(() => { status.textContent = ''; }, 4000);
+}
+</script>
 
 <style>
 .profile-tab {

@@ -121,7 +121,16 @@ async def lifespan(app: FastAPI):
             logger.info("Client API key loaded from database (auth enabled)")
         else:
             settings.CLIENT_API_KEY = ""
-            logger.info("Client API key not set — client auth disabled")
+            # Not an info-level detail: with no key set, verify_client_key is a
+            # no-op, so every /api/pc/* and /api/member/* route is open to anyone
+            # who can reach this server — including the customer Wi-Fi. Left
+            # opt-in so existing installs keep working, but say so loudly.
+            logger.warning(
+                "Client API key is NOT set — PC client endpoints accept "
+                "unauthenticated requests from anyone on the network. "
+                "Set one in Settings -> Security, then configure the same key "
+                "on each PC client."
+            )
         # Load admin-configured coin GPIO settings from DB into live settings
         _apply_coin_config(srv_cfg)
         logger.info(
@@ -342,6 +351,14 @@ def _migrate_schema():
                 "ALTER TABLE server_config ADD COLUMN ffmpeg_streaming_enabled BOOLEAN DEFAULT 1"
             )
             migrated.append("server_config.ffmpeg_streaming_enabled (added)")
+
+        # Default 'prorate' preserves the pre-setting behaviour on upgrade.
+        if not has_column("server_config", "coin_leftover_mode"):
+            cursor.execute(
+                "ALTER TABLE server_config ADD COLUMN coin_leftover_mode "
+                "VARCHAR(10) NOT NULL DEFAULT 'prorate'"
+            )
+            migrated.append("server_config.coin_leftover_mode (added)")
 
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
@@ -696,19 +713,17 @@ async def _nightly_earnings_sync_loop():
     Skipped if BRANCH_NAME is empty or no license key is found.
     """
     import httpx
+    import timeutil
     from datetime import datetime as _dt, timedelta
 
-    def _seconds_until_next_midnight() -> float:
-        """Returns seconds remaining until the next UTC midnight."""
-        now = _dt.utcnow()
-        tomorrow = (now + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        return (tomorrow - now).total_seconds()
-
-    # Sleep until next midnight before entering the daily loop
-    initial_sleep = _seconds_until_next_midnight()
-    logger.info("Nightly earnings sync: first run in %.0f seconds (at next UTC midnight)", initial_sleep)
+    # Local midnight, not UTC: the figure the portal receives has to match the
+    # one the owner sees on their own dashboard, and a UTC day boundary splits a
+    # Philippine café's trading day at 8 AM local.
+    initial_sleep = timeutil.seconds_until_next_local_midnight()
+    logger.info(
+        "Nightly earnings sync: first run in %d seconds (at next %s midnight)",
+        initial_sleep, settings.TIMEZONE,
+    )
     await asyncio.sleep(initial_sleep)
 
     while True:
@@ -731,7 +746,9 @@ async def _nightly_earnings_sync_loop():
                         svc = SessionService(db)
                         pc_earnings = svc.get_all_pcs_today_earnings()
 
-                        yesterday = (_dt.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+                        yesterday = timeutil.to_local(
+                            timeutil.local_day_start_utc(1)
+                        ).strftime("%Y-%m-%d")
 
                         from services.license_service import _signed_payload
                         raw_payload = {
@@ -774,7 +791,9 @@ async def _nightly_earnings_sync_loop():
             logger.error("Nightly earnings sync error: %s", e)
 
         # Sleep 24 hours until the next midnight cycle
-        await asyncio.sleep(24 * 60 * 60)
+        # Re-derive each night rather than sleeping a flat 24 h, so the run
+        # stays pinned to local midnight even across a DST shift.
+        await asyncio.sleep(timeutil.seconds_until_next_local_midnight())
 
 
 async def _hourly_status_ping_loop():

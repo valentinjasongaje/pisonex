@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     DEFAULT_RATE_PESOS: int = 5
     DEFAULT_RATE_SECONDS: int = 1800  # 30 minutes
 
+    # Café timezone (IANA name). Timestamps are always STORED as UTC; this only
+    # decides where a business day starts when earnings are added up, so that
+    # "today" on the dashboard means the day the owner actually worked rather
+    # than the UTC day (which in the Philippines rolls over at 8 AM local).
+    TIMEZONE: str = "Asia/Manila"
+
     # PC monitoring
     PC_HEARTBEAT_TIMEOUT: int = 30  # seconds before PC is marked offline
 

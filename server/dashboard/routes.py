@@ -30,6 +30,7 @@ from services.session_service import SessionService
 from services.wol_service import wake_pc, wake_all
 from config import settings
 import command_store
+import timeutil
 
 
 class RenamePcBody(BaseModel):
@@ -109,6 +110,17 @@ def login_submit(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
+    # Throttle before touching the DB — this login guards the whole café and is
+    # reachable from the customer Wi-Fi, so unlimited guesses is not acceptable.
+    client_ip = request.client.host if request.client else "unknown"
+    if not command_store.check_admin_login_rate(client_ip):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request,
+             "error": "Too many failed attempts. Please wait a few minutes and try again."},
+            status_code=429,
+        )
+
     admin = db.query(AdminUser).filter(AdminUser.username == username).first()
     valid = admin and bcrypt.checkpw(
         password.encode("utf-8"), admin.password.encode("utf-8")
@@ -120,6 +132,7 @@ def login_submit(
             status_code=401,
         )
 
+    command_store.clear_admin_login_rate(client_ip)
     token = _create_session_token(admin.username, admin.role)
     response = RedirectResponse("/dashboard", status_code=302)
     response.set_cookie(
@@ -283,11 +296,11 @@ def _pc_overview_data(db: Session):
 
     db.commit()
 
-    today = datetime.utcnow().date()
+    today_start = timeutil.local_day_start_utc()
     today_row = db.query(
         func.coalesce(func.sum(CoinTransaction.amount_php), 0)
     ).filter(
-        func.date(CoinTransaction.created_at) == today
+        CoinTransaction.created_at >= today_start
     ).scalar()
 
     return pc_data, online_count, active_count, int(today_row)
@@ -377,12 +390,20 @@ def rates_page(
         .order_by(CoinRate.pesos.asc())
         .all()
     )
+    from services.rate_service import find_worse_value_rates
+    srv_cfg = db.query(ServerConfig).first()
     return templates.TemplateResponse("rates.html", {
         "request": request,
         "rates": rates,
         "profiles": profiles,
         "selected_profile": selected_profile,
         "selected_id": selected_id,
+        # Denominations that are worse value per peso than a smaller coin. Not a
+        # payout bug — the solver always pays the best combination — but almost
+        # always an unintended price, so the owner should see it.
+        "value_warnings": find_worse_value_rates(rates),
+        "leftover_mode": getattr(srv_cfg, "coin_leftover_mode", "prorate") or "prorate",
+        "smallest_rate": rates[0] if rates else None,
     })
 
 
@@ -459,6 +480,33 @@ def save_rate(
         "rates": rates,
         "selected_id": profile_id,
     })
+
+
+class LeftoverModeBody(BaseModel):
+    mode: str
+
+
+@router.post("/api/rates/leftover-mode", dependencies=[Depends(_require_active_license)])
+def save_leftover_mode(
+    body: LeftoverModeBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Set what happens to pesos no combination of rates can consume."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if body.mode not in ("prorate", "discard"):
+        raise HTTPException(status_code=422, detail="Mode must be 'prorate' or 'discard'")
+
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1)
+        db.add(srv_cfg)
+    srv_cfg.coin_leftover_mode = body.mode
+    db.commit()
+    return {"status": "ok", "mode": body.mode}
 
 
 @router.delete("/rates/{rate_id}", response_class=HTMLResponse)
@@ -743,7 +791,9 @@ def dashboard_add_time(
         raise HTTPException(status_code=422, detail="Minutes must be greater than 0")
 
     seconds = body.minutes * 60
-    session = svc.add_time_seconds(body.pc_number, seconds)
+    session = svc.add_time_seconds(
+        body.pc_number, seconds, actor=current_user["username"]
+    )
     return {
         "pc_number": body.pc_number,
         "seconds_added": seconds,
@@ -769,7 +819,9 @@ def dashboard_add_time_pesos(
         raise HTTPException(status_code=404, detail=f"PC {body.pc_number} not found")
 
     try:
-        seconds_added, session = svc.add_time_by_pesos(body.pc_number, body.pesos)
+        seconds_added, session = svc.add_time_by_pesos(
+            body.pc_number, body.pesos, actor=current_user["username"]
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -792,7 +844,7 @@ def dashboard_lock_pc(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     svc = SessionService(db)
-    ok = svc.end_session(pc_number)
+    ok = svc.end_session(pc_number, actor=current_user["username"])
     if not ok:
         raise HTTPException(status_code=404, detail=f"PC {pc_number} not found")
     return {"status": "locked", "pc_number": pc_number}
@@ -1242,9 +1294,10 @@ def pcs_page(
 
 def _reports_data(days: int, db):
     """Shared helper — compute all aggregate data for the reports page/export."""
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start  = today_start - timedelta(days=today_start.weekday())
-    month_start = today_start.replace(day=1)
+    # Day boundaries follow the CAFÉ's timezone, not UTC — see timeutil.
+    today_start = timeutil.local_day_start_utc()
+    week_start  = timeutil.local_week_start_utc()
+    month_start = timeutil.local_month_start_utc()
 
     def _sum(q):
         row = q.with_entities(
@@ -1283,25 +1336,31 @@ def _reports_data(days: int, db):
     ]
     max_pc_pesos = max((r["pesos"] for r in per_pc), default=1) or 1
 
-    # Daily revenue — last 30 days (or custom range)
+    # Daily revenue — last 30 days (or custom range).
+    #
+    # Bucketed in Python rather than with SQL's func.date(), because that groups
+    # by the UTC calendar date and would split each café day across two bars.
+    # A month of one café's transactions is a small result set, so converting
+    # each row to local time here is cheap and always correct (DST included).
     chart_days = days if days and days > 0 else 30
-    chart_since = today_start - timedelta(days=chart_days - 1)
-    daily_rows = (
-        db.query(
-            func.date(CoinTransaction.created_at).label("day"),
-            func.sum(CoinTransaction.amount_php).label("pesos"),
-            func.count(CoinTransaction.id).label("count"),
-        )
+    chart_since = timeutil.local_day_start_utc(chart_days - 1)
+    tx_rows = (
+        db.query(CoinTransaction.created_at, CoinTransaction.amount_php)
         .filter(CoinTransaction.created_at >= chart_since)
-        .group_by(func.date(CoinTransaction.created_at))
-        .order_by("day")
         .all()
     )
-    daily_map = {str(r.day): (int(r.pesos), int(r.count)) for r in daily_rows}
+    daily_map: dict[str, list[int]] = {}
+    for created_at, amount in tx_rows:
+        key = timeutil.local_date_str(created_at)
+        bucket = daily_map.setdefault(key, [0, 0])
+        bucket[0] += int(amount or 0)
+        bucket[1] += 1
+
+    first_local_day = timeutil.to_local(chart_since).date()
     daily = []
     for i in range(chart_days):
-        d = (chart_since + timedelta(days=i)).date()
-        pesos, count = daily_map.get(str(d), (0, 0))
+        d = first_local_day + timedelta(days=i)
+        pesos, count = daily_map.get(d.strftime("%Y-%m-%d"), (0, 0))
         daily.append({"date": d, "pesos": pesos, "count": count})
     max_day_pesos = max((d["pesos"] for d in daily), default=1) or 1
 

@@ -230,6 +230,13 @@ class ServerConfig(Base):
     coin_debounce_ms   = Column(Integer, nullable=True)   # software debounce window (ms)
     coin_pulse_timeout = Column(String(16), nullable=True)  # seconds of silence to finalize (stored as text to allow decimals)
 
+    # What to do with pesos no combination of configured rates can consume —
+    # e.g. a ₱1 coin when the cheapest configured rate is ₱5.
+    #   "prorate" — credit them at the smallest denomination's per-peso value
+    #               (the behaviour every install had before this was a setting)
+    #   "discard" — credit nothing for them
+    coin_leftover_mode = Column(String(10), nullable=False, default="prorate")
+
     # ── Standalone kiosk keypad + LCD (admin-editable, hot-reloaded) ─────────
     # Off by default — most installs are coin-only with the client driving
     # "Insert Coin". Turning this on rebuilds the hardware controller with a

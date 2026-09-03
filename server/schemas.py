@@ -35,11 +35,13 @@ class PCHeartbeatResponse(BaseModel):
     coin_progress_pesos: int = 0
     coin_progress_seconds: int = 0
     minimum_logout_minutes: int = 0
-    # Loyalty points — live balance + redemption rate, so the client tray
-    # can show/redeem without an extra round trip.
+    # Loyalty points — live balance, so the client tray can show it and gate the
+    # Rewards Menu item without an extra round trip. The old flat
+    # points_per_minute_redeem rate is NOT sent: per-item costs now come from the
+    # reward catalog (GET /api/member/rewards), so shipping it to every PC every
+    # second was pure waste. The DB column stays (additive-only migrations).
     points_enabled: bool = False
     member_loyalty_points: int = 0
-    points_per_minute_redeem: int = 0
     # Live-stream hint for monitoring: >0 means server wants client to capture
     # screenshots at this rate (ms); 0 means client uses its own configured
     # interval. Set to 33ms while an admin is watching this PC's fullscreen

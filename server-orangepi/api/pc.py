@@ -10,11 +10,16 @@ from schemas import PCHeartbeatResponse, PCStatusResponse
 from services.session_service import SessionService
 from config import settings
 from dependencies import verify_client_key
+from api.auth import get_current_admin
 import command_store
 
 router = APIRouter(prefix="/api/pc", tags=["pc"])
 
 _ClientAuth = Depends(verify_client_key)
+# Admin JWT. Unlike verify_client_key (a no-op while CLIENT_API_KEY is empty,
+# which is the default), this is always enforced — so anything that exposes the
+# whole estate or changes a paid session hangs off this one.
+_AdminAuth = Depends(get_current_admin)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -165,11 +170,18 @@ def heartbeat(
     receiving_coins = command_store.is_receiving_coins(pc_number)
 
     # Live running total of coins inserted so far (for the client display).
+    # This MUST use the PC's own rate profile, exactly as the crediting path in
+    # SessionService.add_time_by_pesos does. Quoting the Default profile here
+    # while charging the assigned one made the "you'll get X minutes" preview
+    # disagree with the time actually granted on any PC running a VIP or promo
+    # profile — which reads to the customer as the machine cheating them.
     coin_progress_pesos = command_store.get_coin_progress(pc_number)
     coin_progress_seconds = 0
     if coin_progress_pesos > 0:
         from services.rate_service import pesos_to_seconds
-        coin_progress_seconds = pesos_to_seconds(coin_progress_pesos, db)
+        coin_progress_seconds = pesos_to_seconds(
+            coin_progress_pesos, db, profile_id=pc.rate_profile_id or 1
+        )
 
     # Minimum logout minutes (from membership config, 0 if not configured)
     minimum_logout_minutes = cfg.minimum_logout_minutes if cfg else 0
@@ -199,7 +211,6 @@ def heartbeat(
         minimum_logout_minutes=minimum_logout_minutes,
         points_enabled=cfg.points_enabled if cfg else False,
         member_loyalty_points=member_loyalty_points,
-        points_per_minute_redeem=cfg.points_per_minute_redeem if cfg else 0,
         # When an admin is watching this PC AND FFmpeg streaming is enabled,
         # tell the client to ramp up; 0 = use own config (1 s JPEG snapshots).
         capture_interval_ms=(
@@ -211,9 +222,14 @@ def heartbeat(
     )
 
 
-@router.get("/status", response_model=list[PCStatusResponse])
+@router.get("/status", response_model=list[PCStatusResponse],
+            dependencies=[_AdminAuth])
 def all_pc_status(db: Session = Depends(get_db)):
-    """Returns status of all registered PCs. Used by the admin dashboard."""
+    """Returns status of all registered PCs (number, name, IP, lock state,
+    remaining time). Admin-only — this is the estate inventory, and unauthenticated
+    it told an attacker exactly which PC numbers were live and worth targeting.
+    The dashboard renders the same data server-side via its own cookie-authed routes.
+    """
     timeout_cutoff = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
     svc = SessionService(db)
     pcs = svc.get_all_pcs()
@@ -274,14 +290,11 @@ async def upload_screenshot(pc_number: int, request: Request):
     return {"status": "ok"}
 
 
-@router.post("/{pc_number}/lock")
-def lock_pc(pc_number: int, db: Session = Depends(get_db)):
-    """Admin: immediately lock a PC and end its session."""
-    svc = SessionService(db)
-    ok = svc.end_session(pc_number)
-    if not ok:
-        raise HTTPException(404, f"PC {pc_number} not found")
-    return {"status": "locked", "pc_number": pc_number}
+# NOTE: the "lock a PC" endpoint used to live here, unauthenticated, letting
+# anyone on the LAN end a paying customer's session. It was an exact duplicate of
+# POST /api/admin/pc/{pc_number}/lock (api/admin.py), which is correctly gated
+# behind an admin JWT — so it was removed rather than re-gated. Use the admin
+# route, or the dashboard's own /dashboard/api/pc/{n}/lock.
 
 
 @router.post("/{pc_number}/request-coins", dependencies=[_ClientAuth])

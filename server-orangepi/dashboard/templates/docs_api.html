@@ -45,6 +45,7 @@
 .mb-get          { background: rgba(79,142,247,.18); color: #4f8ef7; }
 .mb-post         { background: rgba(34,197,94,.18); color: #22c55e; }
 .mb-delete       { background: rgba(239,68,68,.18); color: #ef4444; }
+.mb-gone         { background: rgba(107,114,128,.15); color: #6b7280; text-decoration: line-through; }
 
 /* ── Params tables ───────────────────────────────────────────────── */
 .pt              { width: 100%; border-collapse: collapse; font-size: .83rem; margin: .65rem 0 1rem; }
@@ -259,10 +260,12 @@
         </div>
         <div class="ep-body">
           <p class="ep-note">Returns all registered PCs. PCs that missed a heartbeat for more than <strong>30 seconds</strong> (<code>PC_HEARTBEAT_TIMEOUT</code>) are automatically marked offline.</p>
+          <p class="ep-note"><strong>Requires an admin JWT.</strong> This is the estate inventory — PC numbers, names and IP addresses — so it is not readable without credentials.</p>
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/status</pre>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/status \
+  -H "Authorization: Bearer $TOKEN"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
           <div class="cb"><pre class="json-block">[
@@ -304,28 +307,17 @@
         </div>
       </div>
 
-      <!-- lock -->
+      <!-- lock — removed, see note -->
       <div class="endpoint" id="ep-pc-lock">
         <div class="ep-header" onclick="toggleEp(this)">
-          <span class="mb mb-post">POST</span>
+          <span class="mb mb-gone">GONE</span>
           <span class="ep-path">/api/pc/{pc_number}/lock</span>
-          <span class="ep-brief">End session and lock a PC</span>
+          <span class="ep-brief">Removed — use /api/admin/pc/{pc_number}/lock</span>
           <span class="ep-chevron">▶</span>
         </div>
         <div class="ep-body">
-          <p class="ep-note">Ends the active session and immediately locks the specified PC. Called by admin or the dashboard UI.</p>
-          <div class="sub-label">Path Parameters</div>
-          <table class="pt">
-            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
-            <tr><td><code>pc_number</code></td><td>int</td><td>The PC's number</td></tr>
-          </table>
-          <div class="ex-label">Request</div>
-          <div class="cb">
-            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/pc/1/lock</pre>
-          </div>
-          <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
-          <div class="cb"><pre class="json-block">{"status": "locked", "pc_number": 1}</pre></div>
+          <p class="ep-note"><strong>This endpoint has been removed.</strong> It ended a paying customer's session and required no credentials, so anyone on the network could lock any PC.</p>
+          <p class="ep-note">It was an exact duplicate of <a href="#ep-admin-lock"><code>POST /api/admin/pc/{pc_number}/lock</code></a>, which does the same thing behind an admin JWT. Use that, or the dashboard's own <code>/dashboard/api/pc/{pc_number}/lock</code>.</p>
         </div>
       </div>
     </div>
@@ -334,7 +326,7 @@
     <div class="docs-section" id="s-session">
       <div class="section-head">
         <span class="section-icon">⏱</span> Session Endpoints
-        <span class="section-auth auth-none">No Auth</span>
+        <span class="section-auth auth-jwt">🔑 JWT Bearer Required</span>
       </div>
 
       <!-- add-time -->
@@ -346,7 +338,8 @@
           <span class="ep-chevron">▶</span>
         </div>
         <div class="ep-body">
-          <p class="ep-note">Called by the <strong>hardware controller</strong> when coins are inserted. Converts pesos to minutes using the configured coin rates, creates or extends the session, and unlocks the PC.</p>
+          <p class="ep-note">Credits a PC as though coins were inserted: converts pesos to minutes using the configured coin rates, creates or extends the session, and unlocks the PC. <strong>Requires an admin JWT</strong> — this grants paid time, so it is not reachable without credentials.</p>
+          <p class="ep-note">The coin acceptor does <em>not</em> use this route. The hardware controller calls the session service directly, in-process.</p>
           <div class="sub-label">Request Body <small style="text-transform:none;font-weight:400;color:var(--text-dim)">(application/json)</small></div>
           <table class="pt">
             <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
@@ -357,6 +350,7 @@
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/add-time \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"pc_number": 1, "pesos": 5}'</pre>
           </div>
@@ -378,6 +372,7 @@
           <span class="ep-chevron">▶</span>
         </div>
         <div class="ep-body">
+          <p class="ep-note">Read-only. Requires the client API key in <code>X-API-Key</code> when one is configured (Settings → Security).</p>
           <div class="sub-label">Path Parameters</div>
           <table class="pt">
             <tr><th>Param</th><th>Type</th><th>Description</th></tr>
@@ -386,7 +381,8 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/1</pre>
+            <pre class="base-url-aware">curl <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/1 \
+  -H "X-API-Key: $CLIENT_API_KEY"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span> — Active session</div>
           <div class="cb"><pre class="json-block">{"has_session": true, "remaining_minutes": 28, "remaining_seconds": 45, "minutes_granted": 60, "started_at": "2026-03-14T10:00:00", "session_token": "tok_abc123"}</pre></div>
@@ -404,6 +400,7 @@
           <span class="ep-chevron">▶</span>
         </div>
         <div class="ep-body">
+          <p class="ep-note">Ends a paying customer's session immediately. <strong>Requires an admin JWT.</strong></p>
           <div class="sub-label">Path Parameters</div>
           <table class="pt">
             <tr><th>Param</th><th>Type</th><th>Description</th></tr>
@@ -412,7 +409,8 @@
           <div class="ex-label">Request</div>
           <div class="cb">
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/1/end</pre>
+            <pre class="base-url-aware">curl -X POST <span class="base-url-placeholder">http://192.168.1.100</span>/api/session/1/end \
+  -H "Authorization: Bearer $TOKEN"</pre>
           </div>
           <div class="ex-label">Response <span class="status-badge s200">200 OK</span></div>
           <div class="cb"><pre class="json-block">{"status": "session ended", "pc_number": 1}</pre></div>

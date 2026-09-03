@@ -217,6 +217,11 @@ class MembershipService:
         # Check anonymous session + absorption policy
         session = svc.get_active_session(pc_number)
         absorbed_seconds = 0
+        # Time the member actually ends up with on this PC. Reporting
+        # user.balance_seconds here was meaningless — every branch below banks the
+        # balance into the session and zeroes it, so the field could only ever
+        # return 0 to the client.
+        session_seconds = 0
 
         if session and session.user_id is not None:
             return {"success": False, "error": "Session already owned by a member"}
@@ -231,6 +236,7 @@ class MembershipService:
             session.ended_at = datetime.utcnow()
 
             total_seconds = absorbed_seconds + user.balance_seconds
+            session_seconds = total_seconds
             new_session = Session(
                 pc_id=pc.id,
                 user_id=user.id,
@@ -245,6 +251,7 @@ class MembershipService:
                        f"Absorbed {absorbed_seconds}s from anonymous session on PC {pc_number:02d} for member {username}")
         elif user.balance_seconds > 0:
             # Create member session with stored balance
+            session_seconds = user.balance_seconds
             new_session = Session(
                 pc_id=pc.id,
                 user_id=user.id,
@@ -272,7 +279,7 @@ class MembershipService:
 
         return {
             "success": True,
-            "balance_seconds": user.balance_seconds,
+            "balance_seconds": session_seconds,
             "absorbed_seconds": absorbed_seconds,
             "must_change_password": user.must_change_password,
             "loyalty_points": user.loyalty_points,

@@ -121,7 +121,16 @@ async def lifespan(app: FastAPI):
             logger.info("Client API key loaded from database (auth enabled)")
         else:
             settings.CLIENT_API_KEY = ""
-            logger.info("Client API key not set — client auth disabled")
+            # Not an info-level detail: with no key set, verify_client_key is a
+            # no-op, so every /api/pc/* and /api/member/* route is open to anyone
+            # who can reach this server — including the customer Wi-Fi. Left
+            # opt-in so existing installs keep working, but say so loudly.
+            logger.warning(
+                "Client API key is NOT set — PC client endpoints accept "
+                "unauthenticated requests from anyone on the network. "
+                "Set one in Settings -> Security, then configure the same key "
+                "on each PC client."
+            )
         # Load admin-configured coin GPIO settings from DB into live settings
         _apply_coin_config(srv_cfg)
         logger.info(
@@ -300,6 +309,8 @@ def _migrate_schema():
             ("coin_debounce_ms", "INTEGER"),
             ("coin_pulse_timeout", "VARCHAR(16)"),
             ("ffmpeg_streaming_enabled", "BOOLEAN DEFAULT 1"),
+            # Default 'prorate' preserves the pre-setting behaviour on upgrade.
+            ("coin_leftover_mode", "VARCHAR(10) NOT NULL DEFAULT 'prorate'"),
         ]
         for col_name, col_type in new_server_columns:
             if not has_column("server_config", col_name):
@@ -693,17 +704,16 @@ async def _nightly_earnings_sync_loop():
     uses onConflictDoUpdate so re-syncing the same date is always safe.
     """
     import httpx
+    import timeutil
     from datetime import datetime as _dt, timedelta
 
-    def _seconds_until_next_midnight() -> float:
-        now = _dt.utcnow()
-        tomorrow = (now + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        return (tomorrow - now).total_seconds()
+    async def _sync_date(days_ago: int) -> bool:
+        """Sync earnings for one café-local calendar day (1 = yesterday).
 
-    async def _sync_date(target_date: "_dt") -> bool:
-        """Sync earnings for one specific UTC calendar date. Returns True on success."""
+        Local, not UTC: the portal must show the owner the same daily figure
+        their own dashboard shows, and a UTC day boundary splits a Philippine
+        café's trading day at 8 AM local.
+        """
         branch_name = settings.BRANCH_NAME
         if not branch_name:
             return False
@@ -716,8 +726,10 @@ async def _nightly_earnings_sync_loop():
         db = SessionLocal()
         try:
             svc = SessionService(db)
-            pc_earnings = svc.get_earnings_for_utc_date(target_date)
-            date_str = target_date.strftime("%Y-%m-%d")
+            pc_earnings = svc.get_earnings_for_local_date(days_ago)
+            date_str = timeutil.to_local(
+                timeutil.local_day_start_utc(days_ago)
+            ).strftime("%Y-%m-%d")
 
             from services.license_service import _signed_payload
             raw_payload = {
@@ -751,35 +763,37 @@ async def _nightly_earnings_sync_loop():
             db.close()
 
     # ── Startup catch-up ──────────────────────────────────────────────────────
-    # If the server was off at UTC midnight (e.g. shop closed at 10pm), those
-    # days were never archived. On startup, sync the past 7 UTC days so any
+    # If the server was off at local midnight (e.g. shop closed at 10pm), those
+    # days were never archived. On startup, sync the past 7 local days so any
     # missed nights are recovered. onConflictDoUpdate makes this idempotent.
-    now = _dt.utcnow()
     for days_back in range(1, 8):
-        missed_day = now - timedelta(days=days_back)
         try:
-            await _sync_date(missed_day)
+            await _sync_date(days_back)
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("Startup catch-up sync failed for %s: %s",
-                           missed_day.strftime("%Y-%m-%d"), e)
+            logger.warning("Startup catch-up sync failed for %d day(s) ago: %s",
+                           days_back, e)
 
     # ── Nightly loop ──────────────────────────────────────────────────────────
-    initial_sleep = _seconds_until_next_midnight()
-    logger.info("Nightly earnings sync: next run in %.0f seconds (at next UTC midnight)", initial_sleep)
+    initial_sleep = timeutil.seconds_until_next_local_midnight()
+    logger.info(
+        "Nightly earnings sync: next run in %d seconds (at next %s midnight)",
+        initial_sleep, settings.TIMEZONE,
+    )
     await asyncio.sleep(initial_sleep)
 
     while True:
         try:
-            yesterday = _dt.utcnow() - timedelta(days=1)
-            await _sync_date(yesterday)
+            await _sync_date(1)   # yesterday, café-local
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.error("Nightly earnings sync error: %s", e)
 
-        await asyncio.sleep(24 * 60 * 60)
+        # Re-derive each night rather than sleeping a flat 24 h, so the run stays
+        # pinned to local midnight even across a DST shift.
+        await asyncio.sleep(timeutil.seconds_until_next_local_midnight())
 
 
 async def _hourly_status_ping_loop():
