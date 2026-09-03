@@ -157,7 +157,16 @@ async def lifespan(app: FastAPI):
             logger.info("Client API key loaded from database (auth enabled)")
         else:
             settings.CLIENT_API_KEY = ""
-            logger.info("Client API key not set — client auth disabled")
+            # Not an info-level detail: with no key set, verify_client_key is a
+            # no-op, so every /api/pc/* and /api/member/* route is open to anyone
+            # who can reach this server — including the customer Wi-Fi. Left
+            # opt-in so existing installs keep working, but say so loudly.
+            logger.warning(
+                "Client API key is NOT set — PC client endpoints accept "
+                "unauthenticated requests from anyone on the network. "
+                "Set one in Settings -> Security, then configure the same key "
+                "on each PC client."
+            )
     finally:
         db.close()
 

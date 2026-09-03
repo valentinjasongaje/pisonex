@@ -10,11 +10,16 @@ from schemas import PCHeartbeatResponse, PCStatusResponse
 from services.session_service import SessionService
 from config import settings
 from dependencies import verify_client_key
+from api.auth import get_current_admin
 import command_store
 
 router = APIRouter(prefix="/api/pc", tags=["pc"])
 
 _ClientAuth = Depends(verify_client_key)
+# Admin JWT. Unlike verify_client_key (a no-op while CLIENT_API_KEY is empty,
+# which is the default), this is always enforced — so anything that exposes the
+# whole estate or changes a paid session hangs off this one.
+_AdminAuth = Depends(get_current_admin)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -207,9 +212,14 @@ def heartbeat(
     )
 
 
-@router.get("/status", response_model=list[PCStatusResponse])
+@router.get("/status", response_model=list[PCStatusResponse],
+            dependencies=[_AdminAuth])
 def all_pc_status(db: Session = Depends(get_db)):
-    """Returns status of all registered PCs. Used by the admin dashboard."""
+    """Returns status of all registered PCs (number, name, IP, lock state,
+    remaining time). Admin-only — this is the estate inventory, and unauthenticated
+    it told an attacker exactly which PC numbers were live and worth targeting.
+    The dashboard renders the same data server-side via its own cookie-authed routes.
+    """
     timeout_cutoff = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
     svc = SessionService(db)
     pcs = svc.get_all_pcs()
@@ -270,14 +280,11 @@ async def upload_screenshot(pc_number: int, request: Request):
     return {"status": "ok"}
 
 
-@router.post("/{pc_number}/lock")
-def lock_pc(pc_number: int, db: Session = Depends(get_db)):
-    """Admin: immediately lock a PC and end its session."""
-    svc = SessionService(db)
-    ok = svc.end_session(pc_number)
-    if not ok:
-        raise HTTPException(404, f"PC {pc_number} not found")
-    return {"status": "locked", "pc_number": pc_number}
+# NOTE: the "lock a PC" endpoint used to live here, unauthenticated, letting
+# anyone on the LAN end a paying customer's session. It was an exact duplicate of
+# POST /api/admin/pc/{pc_number}/lock (api/admin.py), which is correctly gated
+# behind an admin JWT — so it was removed rather than re-gated. Use the admin
+# route, or the dashboard's own /dashboard/api/pc/{n}/lock.
 
 
 @router.post("/{pc_number}/request-coins", dependencies=[_ClientAuth])

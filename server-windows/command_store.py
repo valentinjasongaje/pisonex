@@ -328,6 +328,36 @@ def purge_pc(pc_number: int) -> None:
 _LOGIN_WINDOW_SECONDS = 60
 _LOGIN_MAX_ATTEMPTS = 5
 
+# Admin dashboard login. Keyed by client IP, NOT username: keying the admin
+# limiter by username would let anyone lock the owner out of their own café by
+# hammering "admin" from the customer Wi-Fi. Per-IP throttles the attacker while
+# the owner, on a different address, is unaffected.
+_ADMIN_LOGIN_WINDOW_SECONDS = 300
+_ADMIN_LOGIN_MAX_ATTEMPTS = 10
+_admin_login_attempts: dict[str, list[float]] = {}
+
+
+def check_admin_login_rate(client_ip: str) -> bool:
+    """Return True if an admin dashboard login attempt is allowed."""
+    now = _time.time()
+    with _lock:
+        attempts = [
+            t for t in _admin_login_attempts.get(client_ip, [])
+            if now - t < _ADMIN_LOGIN_WINDOW_SECONDS
+        ]
+        _admin_login_attempts[client_ip] = attempts
+        if len(attempts) >= _ADMIN_LOGIN_MAX_ATTEMPTS:
+            return False
+        attempts.append(now)
+        return True
+
+
+def clear_admin_login_rate(client_ip: str) -> None:
+    """Reset the counter after a successful login, so a legitimate admin who
+    fumbled their password a few times isn't throttled afterwards."""
+    with _lock:
+        _admin_login_attempts.pop(client_ip, None)
+
 
 def check_login_rate(username: str) -> bool:
     """Return True if the login attempt is allowed, False if rate-limited."""

@@ -155,6 +155,17 @@ def login_submit(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
+    # Throttle before touching the DB — this login guards the whole café and is
+    # reachable from the customer Wi-Fi, so unlimited guesses is not acceptable.
+    client_ip = request.client.host if request.client else "unknown"
+    if not command_store.check_admin_login_rate(client_ip):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request,
+             "error": "Too many failed attempts. Please wait a few minutes and try again."},
+            status_code=429,
+        )
+
     admin = db.query(AdminUser).filter(AdminUser.username == username).first()
     valid = admin and bcrypt.checkpw(
         password.encode("utf-8"), admin.password.encode("utf-8")
@@ -166,6 +177,7 @@ def login_submit(
             status_code=401,
         )
 
+    command_store.clear_admin_login_rate(client_ip)
     token = _create_session_token(admin.username, admin.role)
     response = RedirectResponse("/dashboard", status_code=302)
     response.set_cookie(
