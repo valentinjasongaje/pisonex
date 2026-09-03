@@ -6,7 +6,9 @@
   <h1>Overview</h1>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
     <button class="btn btn-sm btn-default" onclick="openAnnouncementModal()">📢 Announce</button>
+    {% if not traditional_mode_enabled %}
     <button id="global-coin-btn" class="btn btn-sm coin-toggle-btn coin-enabled" onclick="toggleGlobalCoinSlot()">🪙 Coins: ON</button>
+    {% endif %}
     <button class="btn btn-sm btn-secondary" style="width:32px;height:32px;padding:0;font-size:1rem;display:flex;align-items:center;justify-content:center;"
       onclick="ovSysControl('restart')" title="Restart Service">↻</button>
     <button class="btn btn-sm btn-danger" style="width:32px;height:32px;padding:0;font-size:1rem;display:flex;align-items:center;justify-content:center;"

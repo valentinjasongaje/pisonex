@@ -312,6 +312,9 @@ def _migrate_schema():
             ("ffmpeg_streaming_enabled", "BOOLEAN DEFAULT 1"),
             # Default 'prorate' preserves the pre-setting behaviour on upgrade.
             ("coin_leftover_mode", "VARCHAR(10) NOT NULL DEFAULT 'prorate'"),
+            # Defaults to 0 (False) so existing installs keep coin-slot UI
+            # visible until an admin explicitly opts in to cashier-managed mode.
+            ("traditional_mode_enabled", "INTEGER NOT NULL DEFAULT 0"),
         ]
         for col_name, col_type in new_server_columns:
             if not has_column("server_config", col_name):

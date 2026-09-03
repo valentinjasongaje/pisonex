@@ -261,6 +261,17 @@ def _get_membership_info(db: Session) -> tuple[bool, dict[int, str]]:
     return True, pc_members
 
 
+def _get_traditional_mode_enabled(db: Session) -> bool:
+    """Returns the persistent "Traditional Café Mode" business-model toggle
+    (ServerConfig.traditional_mode_enabled). True = cashier-run cafe with no
+    coin acceptor hardware — Insert-Coin/coin-slot UI is hidden.
+
+    Defaults False (row is always seeded on startup by _seed_defaults()).
+    """
+    srv_cfg = db.query(ServerConfig).first()
+    return srv_cfg.traditional_mode_enabled if srv_cfg else False
+
+
 def _pc_overview_data(db: Session):
     svc = SessionService(db)
     pcs = svc.get_all_pcs()
@@ -326,6 +337,7 @@ def overview(
         "active_count": active_count,
         "today_pesos": today_pesos,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
+        "traditional_mode_enabled": _get_traditional_mode_enabled(db),
     })
 
 
@@ -342,6 +354,7 @@ def pc_grid_partial(
     return templates.TemplateResponse("partials/pc_grid.html", {
         "request": request,
         "pcs": pcs,
+        "traditional_mode_enabled": _get_traditional_mode_enabled(db),
     })
 
 
@@ -1302,6 +1315,7 @@ def pcs_page(
         "membership_enabled": membership_enabled,
         "preset_amounts_enabled": cfg.preset_amounts_enabled if cfg else False,
         "profiles": profiles,
+        "traditional_mode_enabled": _get_traditional_mode_enabled(db),
     })
 
 
@@ -1813,6 +1827,7 @@ def settings_page(
         "api_key_masked": (api_key[:4] + "••••••••" + api_key[-4:]) if len(api_key) >= 8 else ("••••••••" if api_key else ""),
         "branch_name": settings.BRANCH_NAME,
         "idle_timeout": settings.PC_IDLE_TIMEOUT,
+        "traditional_mode_enabled": srv_cfg.traditional_mode_enabled if srv_cfg else False,
         "ffmpeg_streaming_enabled": getattr(srv_cfg, "ffmpeg_streaming_enabled", True) if srv_cfg else True,
         "coin": {
             "coin_pin": _cfg("coin_pin", settings.COIN_PIN),
@@ -1833,6 +1848,37 @@ def settings_page(
 
 class BranchNameBody(BaseModel):
     branch_name: str
+
+
+class TraditionalModeBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/api/settings/traditional-mode")
+def save_traditional_mode(
+    body: TraditionalModeBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Toggle "Traditional Café Mode" (no coin hardware).
+
+    Applies immediately — the next heartbeat picks it up and the client
+    hides/shows Insert Coin + Add Time coin-flow UI accordingly. Manual
+    add-time / adjust-balance from the dashboard is unaffected either way.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    srv_cfg = db.query(ServerConfig).first()
+    if srv_cfg:
+        srv_cfg.traditional_mode_enabled = body.enabled
+    else:
+        db.add(ServerConfig(id=1, client_api_key="", traditional_mode_enabled=body.enabled))
+    db.commit()
+
+    return {"status": "ok", "traditional_mode_enabled": body.enabled}
 
 
 class FfmpegToggleBody(BaseModel):

@@ -20,6 +20,7 @@ class PCHeartbeatResponse(BaseModel):
     admin_message:    Optional[str] = None   # per-PC message (popped on delivery)
     announcement:     Optional[str] = None   # shop-wide broadcast (persistent)
     coin_slot_enabled: bool = True           # combined global + per-PC coin slot state
+    traditional_mode_enabled: bool = False   # cashier-run café, no coin hardware — client hides coin-flow UI
     # Server-pushed wallpaper — optional, ignored by older clients
     wallpaper_url:  Optional[str] = None   # full URL to download wallpaper image
     wallpaper_hash: Optional[str] = None   # MD5 hex — client compares to cached hash

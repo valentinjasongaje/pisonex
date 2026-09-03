@@ -196,6 +196,7 @@ def heartbeat(
         admin_message=msg,
         announcement=ann,
         coin_slot_enabled=coins_ok,
+        traditional_mode_enabled=srv_cfg.traditional_mode_enabled if srv_cfg else False,
         wallpaper_url=wp_url,
         wallpaper_hash=wp_hash,
         membership_enabled=membership_enabled,
@@ -298,12 +299,23 @@ async def upload_screenshot(pc_number: int, request: Request):
 
 
 @router.post("/{pc_number}/request-coins", dependencies=[_ClientAuth])
-def request_coins(pc_number: int):
+def request_coins(pc_number: int, db: Session = Depends(get_db)):
     """
     Called by a PC client when the user presses 'Insert Coin'.
     Signals the server's hardware controller to open the coin slot for this PC.
     Returns 503 on Windows/no-hardware deployments where the controller is absent.
     """
+    srv_cfg = db.query(ServerConfig).first()
+    if srv_cfg and srv_cfg.traditional_mode_enabled:
+        # Defense in depth: the client hides this button when
+        # traditional_mode_enabled is True, but reject here too in case a
+        # stale/cached client UI still shows it (e.g. Traditional Café Mode
+        # was just turned on).
+        raise HTTPException(
+            status_code=403,
+            detail="Coins are disabled on this server. This café uses cashier-managed time only.",
+        )
+
     from main import hw_controller
     if hw_controller is None:
         raise HTTPException(

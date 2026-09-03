@@ -361,6 +361,15 @@ def _migrate_schema():
             )
             migrated.append("server_config.coin_leftover_mode (added)")
 
+        # Defaults to 0 (False) so existing installs keep coin-slot UI
+        # visible until an admin explicitly opts in to cashier-managed mode.
+        if not has_column("server_config", "traditional_mode_enabled"):
+            cursor.execute(
+                "ALTER TABLE server_config ADD COLUMN traditional_mode_enabled "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+            migrated.append("server_config.traditional_mode_enabled (added)")
+
     # Convert existing minutes values to seconds where applicable
     if "sessions.minutes_granted → granted_seconds" in migrated:
         cursor.execute("UPDATE sessions SET granted_seconds = granted_seconds * 60 WHERE granted_seconds > 0")

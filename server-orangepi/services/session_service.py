@@ -3,8 +3,8 @@ import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func
-from models import PC, Session, CoinTransaction, SystemLog, User
-from services.rate_service import pesos_to_seconds, resolve_profile_id
+from models import PC, Session, CoinTransaction, SystemLog, User, ServerConfig
+from services.rate_service import pesos_to_seconds, resolve_profile_id, pesos_for_seconds
 import command_store
 import timeutil
 
@@ -148,6 +148,15 @@ class SessionService:
         `actor` is the staff account performing this. Free time handed to a
         friend is the classic café shrinkage route, and with a cashier role in
         the system an unattributed "Admin added 3600s" line makes it untraceable.
+
+        In Traditional Café Mode (ServerConfig.traditional_mode_enabled), this
+        is the ONLY way time is ever added — there's no physical coin insert
+        to fall back on for earnings data. To keep Reports/the nightly
+        earnings sync meaningful, a CoinTransaction is logged with a
+        reverse-calculated estimated peso amount (see
+        rate_service.pesos_for_seconds). In normal piso-net mode, no
+        transaction is created here — coins remain the primary income record
+        and this manual add-time path stays untracked, same as before.
         """
         pc = self.get_pc(pc_number)
         if not pc:
@@ -171,10 +180,28 @@ class SessionService:
 
         _pending_notify[pc_number] = _pending_notify.get(pc_number, 0) + seconds
 
-        self._log(
-            "INFO", "admin",
-            f"{actor or 'unknown'} added {seconds}s to PC {pc_number:02d}"
-        )
+        srv_cfg = self._db.query(ServerConfig).first()
+        if srv_cfg and srv_cfg.traditional_mode_enabled:
+            profile_id = resolve_profile_id(pc, self._db)
+            pesos = pesos_for_seconds(seconds, self._db, profile_id=profile_id)
+            tx = CoinTransaction(
+                pc_id=pc.id,
+                user_id=user_id,
+                amount_php=pesos,
+                seconds_added=seconds,
+            )
+            self._db.add(tx)
+            self._log(
+                "INFO", "admin",
+                f"₱{pesos} (est.) → {seconds}s manually added to PC {pc_number:02d} "
+                f"by {actor or 'unknown'} (Traditional Café Mode)"
+            )
+        else:
+            self._log(
+                "INFO", "admin",
+                f"{actor or 'unknown'} added {seconds}s to PC {pc_number:02d}"
+            )
+
         self._db.commit()
         self._db.refresh(session)
         return session

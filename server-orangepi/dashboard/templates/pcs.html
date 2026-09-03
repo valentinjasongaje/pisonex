@@ -56,7 +56,7 @@
         {% if membership_enabled %}<th class="col-hide-sm">Member</th>{% endif %}
         <th>Rate Profile</th>
         <th class="col-hide-sm">Last Seen</th>
-        <th>Coins</th>
+        {% if not traditional_mode_enabled %}<th>Coins</th>{% endif %}
         <th>Actions</th>
       </tr>
     </thead>
@@ -129,6 +129,7 @@
         <td class="col-hide-sm" style="color: var(--text-dim); font-size: 12px;">
           {{ pc.last_seen.strftime('%b %d %H:%M') if pc.last_seen else "Never" }}
         </td>
+        {% if not traditional_mode_enabled %}
         <td>
           <button
             id="pc-coin-btn-{{ pc.pc_number }}"
@@ -138,6 +139,7 @@
             title="Toggle coin slot for this PC"
           >ON</button>
         </td>
+        {% endif %}
         <td>
           <div class="pc-actions">
             <button
@@ -259,11 +261,13 @@
     </div>
 
     <div class="pc-mgmt-tile-actions">
+      {% if not traditional_mode_enabled %}
       <button
         data-coin-pc="{{ pc.pc_number }}"
         class="btn btn-sm coin-toggle-btn coin-enabled"
         onclick="togglePcCoinSlot({{ pc.pc_number }})"
       >ON</button>
+      {% endif %}
       <button class="btn btn-sm btn-primary" onclick="openAddTime({{ pc.pc_number }})">+ Time</button>
       <button class="btn btn-sm btn-default" onclick="openRename({{ pc.pc_number }}, '{{ pc.name | replace("'", "\\'") }}')">Rename</button>
       {% if not pc.is_locked %}

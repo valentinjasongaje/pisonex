@@ -220,6 +220,13 @@ class ServerConfig(Base):
     # must send this value in the X-API-Key header.
     client_api_key = Column(String(128), nullable=False, default="")
 
+    # True = "Traditional Café Mode" — no coin acceptor hardware is used or
+    # implied. Hides all coin-slot/Insert-Coin UI on the client and dashboard;
+    # manual add-time/adjust-balance from the dashboard keeps working either way.
+    # Default False so existing installs (normal piso-net mode, Insert Coin
+    # visible) are unaffected until an admin explicitly opts in.
+    traditional_mode_enabled = Column(Boolean, nullable=False, default=False)
+
     # ── Coin slot GPIO configuration (admin-editable, hot-reloaded) ──────────
     # These mirror the COIN_* values in config.py / .env so an admin can re-pin
     # the coin acceptor and relay from the dashboard without editing files or

@@ -138,6 +138,40 @@ def pesos_to_seconds(amount_pesos: int, db: DBSession, profile_id: int = _DEFAUL
     return total_seconds
 
 
+def pesos_for_seconds(seconds: int, db: DBSession, profile_id: int = _DEFAULT_PROFILE_ID) -> int:
+    """
+    Estimates a peso amount for a given number of seconds — the reverse of
+    pesos_to_seconds(). Used to log a CoinTransaction for manual minutes-based
+    add-time in Traditional Café Mode, where there's no physical coin insert
+    to derive an amount from.
+
+    Uses the SMALLEST-denomination active rate for `profile_id` as the
+    conversion ratio (ascending by pesos, via get_active_rates()). This is an
+    approximation for logging/reporting purposes only — real coin-insert
+    rates may apply volume bonuses at higher denominations that this doesn't
+    replicate.
+
+    Falls back to the Default profile, then config.py defaults, mirroring
+    the exact fallback chain in pesos_to_seconds().
+    """
+    rates = get_active_rates(db, profile_id)
+
+    if not rates and profile_id != _DEFAULT_PROFILE_ID:
+        rates = get_active_rates(db, _DEFAULT_PROFILE_ID)
+
+    if not rates:
+        pesos_per_block = settings.DEFAULT_RATE_PESOS
+        sec_per_block = settings.DEFAULT_RATE_SECONDS
+        if sec_per_block <= 0:
+            return 0
+        return round(seconds * pesos_per_block / sec_per_block)
+
+    smallest = rates[0]  # ascending by pesos — first is smallest denomination
+    if smallest.seconds <= 0:
+        return 0
+    return round(seconds * smallest.pesos / smallest.seconds)
+
+
 def get_active_rates(db: DBSession, profile_id: int = _DEFAULT_PROFILE_ID) -> list[CoinRate]:
     """Return active rates for a specific profile, ordered by pesos ascending."""
     return (
