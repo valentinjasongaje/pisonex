@@ -170,17 +170,17 @@ def heartbeat(
     receiving_coins = command_store.is_receiving_coins(pc_number)
 
     # Live running total of coins inserted so far (for the client display).
-    # This MUST use the PC's own rate profile, exactly as the crediting path in
-    # SessionService.add_time_by_pesos does. Quoting the Default profile here
-    # while charging the assigned one made the "you'll get X minutes" preview
-    # disagree with the time actually granted on any PC running a VIP or promo
-    # profile — which reads to the customer as the machine cheating them.
+    # This MUST resolve the same profile as the crediting path in
+    # SessionService.add_time_by_pesos (PC's pinned profile, else whatever
+    # Happy Hour schedule is active, else Default). Quoting a different profile
+    # here made the "you'll get X minutes" preview disagree with the time
+    # actually granted — which reads to the customer as the machine cheating them.
     coin_progress_pesos = command_store.get_coin_progress(pc_number)
     coin_progress_seconds = 0
     if coin_progress_pesos > 0:
-        from services.rate_service import pesos_to_seconds
+        from services.rate_service import pesos_to_seconds, resolve_profile_id
         coin_progress_seconds = pesos_to_seconds(
-            coin_progress_pesos, db, profile_id=pc.rate_profile_id or 1
+            coin_progress_pesos, db, profile_id=resolve_profile_id(pc, db)
         )
 
     # Minimum logout minutes (from membership config, 0 if not configured)

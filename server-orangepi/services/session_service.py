@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func
 from models import PC, Session, CoinTransaction, SystemLog, User
-from services.rate_service import pesos_to_seconds
+from services.rate_service import pesos_to_seconds, resolve_profile_id
 import command_store
 import timeutil
 
@@ -99,8 +99,9 @@ class SessionService:
         if not pc:
             raise ValueError(f"PC {pc_number} not found")
 
-        # Use the PC's assigned rate profile (falls back to Default if None)
-        profile_id = pc.rate_profile_id or 1
+        # PC's own pinned profile, else whatever Happy Hour schedule is active
+        # right now, else Default — see rate_service.resolve_profile_id.
+        profile_id = resolve_profile_id(pc, self._db)
         seconds = pesos_to_seconds(pesos, self._db, profile_id=profile_id)
         if seconds == 0:
             raise ValueError(f"₱{pesos} does not convert to any time")

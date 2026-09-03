@@ -28,6 +28,12 @@ _coin_slot_enabled: bool = True              # global relay flag
 _pc_coin_enabled: dict[int, bool] = {}       # per-PC override (absent = enabled)
 _schedule_blocked: bool = False              # True when a CoinSchedule time range is active
 
+# RateProfile.id currently activated by a RateSchedule window ("Happy Hour"),
+# or None if no schedule is in effect. Recomputed every 30s by
+# main.py's _run_schedule_tick and read on every coin credit / heartbeat, so
+# pricing decisions never do a DB scan of rate_schedules per request.
+_active_rate_schedule_profile_id: int | None = None
+
 
 # ── Commands ─────────────────────────────────────────────────────────────────
 
@@ -110,6 +116,18 @@ def is_schedule_blocked() -> bool:
     """Return True if the coin slot is currently blocked by a schedule."""
     with _lock:
         return _schedule_blocked
+
+
+def set_active_rate_schedule_profile_id(profile_id: int | None) -> None:
+    global _active_rate_schedule_profile_id
+    with _lock:
+        _active_rate_schedule_profile_id = profile_id
+
+
+def get_active_rate_schedule_profile_id() -> int | None:
+    """The RateProfile.id a Happy Hour window currently activates, or None."""
+    with _lock:
+        return _active_rate_schedule_profile_id
 
 
 def get_coin_block_reason() -> str | None:

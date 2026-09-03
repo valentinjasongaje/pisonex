@@ -270,6 +270,31 @@ class CoinSchedule(Base):
     created_at   = Column(DateTime, default=datetime.utcnow)
 
 
+class RateSchedule(Base):
+    """Time-window override of which RateProfile is active — "Happy Hour".
+
+    Only applies to PCs with rate_profile_id = NULL (the common case — no
+    per-PC profile assignment). A PC explicitly pinned to a profile (e.g. a
+    VIP-lounge machine priced on purpose) always keeps its own rates and is
+    never swapped out by a schedule meant for the rest of the shop.
+
+    When multiple active schedules overlap the same moment, the lowest id
+    (oldest-created) wins — see _run_schedule_tick in main.py.
+    """
+    __tablename__ = "rate_schedules"
+
+    id           = Column(Integer, primary_key=True)
+    label        = Column(String(120), default="")        # human name e.g. "Weekday Happy Hour"
+    profile_id   = Column(Integer, ForeignKey("rate_profiles.id"), nullable=False)
+    start_time   = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    end_time     = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    days_of_week = Column(String(7),  default="0123456")  # subset of "0123456" (Mon=0…Sun=6)
+    is_active    = Column(Boolean, default=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    profile = relationship("RateProfile")
+
+
 class ScheduledAnnouncement(Base):
     """Announcements that fire automatically at a set time each day."""
     __tablename__ = "scheduled_announcements"

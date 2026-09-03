@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base, SessionLocal
-from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig, CoinSchedule, ScheduledAnnouncement
+from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig, CoinSchedule, ScheduledAnnouncement, RateSchedule
+import timeutil
 from api import auth, pc, sessions, admin
 from api.license import router as license_router
 from api.member import router as member_router
@@ -636,13 +637,15 @@ def _run_schedule_tick():
     1. Evaluates all active CoinSchedule rows → sets command_store._schedule_blocked.
     2. Fires any ScheduledAnnouncement whose fire_time window is now and hasn't
        fired today yet.
+    3. Evaluates all active RateSchedule rows ("Happy Hour") → sets
+       command_store._active_rate_schedule_profile_id.
 
-    Uses local server time (datetime.now()), NOT UTC, so schedules match the
-    café's timezone.
+    Uses timeutil.local_now() (the café's configured TIMEZONE), NOT UTC or the
+    server OS clock, so schedules match the timezone the owner actually set —
+    the same source of "now" the reports on the dashboard use.
     """
     import command_store
-    from datetime import datetime as _dt
-    now      = _dt.now()
+    now      = timeutil.local_now()
     cur_time = now.strftime("%H:%M")
     cur_date = now.strftime("%Y-%m-%d")
     cur_dow  = str(now.weekday())   # "0"=Mon … "6"=Sun
@@ -683,6 +686,35 @@ def _run_schedule_tick():
                     ann.label or ann.message[:50],
                 )
 
+        # ── Happy Hour rate schedule ─────────────────────────────────────────
+        # First match wins (lowest id / oldest-created), so two overlapping
+        # windows resolve deterministically rather than racing on dict order.
+        rate_schedules = (
+            db.query(RateSchedule)
+            .filter(RateSchedule.is_active == True)
+            .order_by(RateSchedule.id.asc())
+            .all()
+        )
+        matched_profile_id = None
+        matched_label = None
+        for rs in rate_schedules:
+            if rs.days_of_week and cur_dow in rs.days_of_week \
+                    and _time_in_range(rs.start_time, rs.end_time, cur_time):
+                matched_profile_id = rs.profile_id
+                matched_label = rs.label or f"{rs.start_time}–{rs.end_time}"
+                break
+
+        old_rate_profile_id = command_store.get_active_rate_schedule_profile_id()
+        if matched_profile_id != old_rate_profile_id:
+            command_store.set_active_rate_schedule_profile_id(matched_profile_id)
+            if matched_profile_id is not None:
+                logger.info(
+                    "Happy Hour rate schedule active: %r (profile_id=%s) at %s",
+                    matched_label, matched_profile_id, cur_time,
+                )
+            else:
+                logger.info("Happy Hour rate schedule ended at %s", cur_time)
+
 
 async def _schedule_loop():
     """Background task: enforce coin schedules and fire timed announcements."""
@@ -696,11 +728,11 @@ async def _schedule_loop():
 
 async def _nightly_earnings_sync_loop():
     """
-    Once per day at UTC midnight, POST the previous day's per-PC earnings to
-    pisonex.com /api/sync/earnings.
+    Once per day at café-local midnight (see timeutil / TIMEZONE), POST the
+    previous local day's per-PC earnings to pisonex.com /api/sync/earnings.
 
     On startup, also syncs any recent days the server missed while it was off
-    (e.g. shop closed at 10pm before UTC midnight ran).  The pisonex.com endpoint
+    (e.g. shop closed before local midnight ran).  The pisonex.com endpoint
     uses onConflictDoUpdate so re-syncing the same date is always safe.
     """
     import httpx

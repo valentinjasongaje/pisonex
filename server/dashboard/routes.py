@@ -24,7 +24,7 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, RateProfile, PC, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement, RewardItem
+from models import AdminUser, CoinTransaction, SystemLog, CoinRate, RateProfile, PC, Session as SessionModel, User, MembershipConfig, ServerConfig, CoinSchedule, ScheduledAnnouncement, RewardItem, RateSchedule
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from services.wol_service import wake_pc, wake_all
@@ -609,6 +609,21 @@ def delete_profile(
     db.query(CoinRate).filter(CoinRate.profile_id == profile_id).update(
         {"is_active": False}, synchronize_session=False
     )
+
+    # Remove any Happy Hour schedules that activate this profile — profile_id
+    # on RateSchedule is NOT NULL, so it can't be reassigned to "no profile"
+    # the way a PC's pin can, and silently repointing it at Default would
+    # change what an existing schedule does without the admin choosing that.
+    # A schedule for a profile that no longer exists has nothing left to mean.
+    db.query(RateSchedule).filter(RateSchedule.profile_id == profile_id).delete(
+        synchronize_session=False
+    )
+    # Clear it immediately rather than waiting up to 30s for the next tick to
+    # notice — the window is harmless either way (pesos_to_seconds falls back
+    # to Default when a profile has no active rates), but there's no reason
+    # to leave it stale.
+    if command_store.get_active_rate_schedule_profile_id() == profile_id:
+        command_store.set_active_rate_schedule_profile_id(None)
 
     db.delete(profile)
     db.commit()
@@ -3012,11 +3027,25 @@ def schedule_page(
 
     coin_schedules = db.query(CoinSchedule).order_by(CoinSchedule.created_at).all()
     announcements  = db.query(ScheduledAnnouncement).order_by(ScheduledAnnouncement.fire_time).all()
+    rate_schedules = db.query(RateSchedule).order_by(RateSchedule.id.asc()).all()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+
+    active_profile_id = command_store.get_active_rate_schedule_profile_id()
+    active_profile = (
+        next((p for p in profiles if p.id == active_profile_id), None)
+        if active_profile_id is not None else None
+    )
+
     return templates.TemplateResponse("schedule.html", {
         "request": request,
         "coin_schedules": coin_schedules,
         "announcements": announcements,
         "schedule_blocked_now": command_store.is_schedule_blocked(),
+        "rate_schedules": rate_schedules,
+        "profiles": profiles,
+        "active_happy_hour_profile": active_profile,
     })
 
 
@@ -3163,6 +3192,97 @@ def toggle_scheduled_announcement(
     return {"id": ann_id, "is_active": ann.is_active}
 
 
+# ── Happy Hour rate schedule CRUD ─────────────────────────────────────────────
+
+class RateScheduleBody(BaseModel):
+    label:        str = ""
+    profile_id:   int
+    start_time:   str          # "HH:MM"
+    end_time:     str          # "HH:MM"
+    days_of_week: str = "0123456"
+
+
+def _rate_schedule_dict(sched: RateSchedule, profile: RateProfile | None) -> dict:
+    return {
+        "id": sched.id,
+        "label": sched.label,
+        "profile_id": sched.profile_id,
+        "profile_name": profile.name if profile else "(deleted profile)",
+        "profile_color": profile.color if profile else "#6b7280",
+        "start_time": sched.start_time,
+        "end_time": sched.end_time,
+        "days_of_week": sched.days_of_week,
+        "is_active": sched.is_active,
+    }
+
+
+@router.post("/api/schedule/rate-schedules")
+def create_rate_schedule(
+    body: RateScheduleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.start_time, "start_time")
+    _validate_time(body.end_time, "end_time")
+    _validate_dow(body.days_of_week)
+
+    profile = db.query(RateProfile).filter(RateProfile.id == body.profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Rate profile not found")
+
+    sched = RateSchedule(
+        label=body.label.strip(),
+        profile_id=body.profile_id,
+        start_time=body.start_time,
+        end_time=body.end_time,
+        days_of_week=body.days_of_week,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return _rate_schedule_dict(sched, profile)
+
+
+@router.delete("/api/schedule/rate-schedules/{sched_id}")
+def delete_rate_schedule(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(RateSchedule).filter(RateSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    db.delete(sched)
+    db.commit()
+    return {"status": "deleted", "id": sched_id}
+
+
+@router.post("/api/schedule/rate-schedules/{sched_id}/toggle")
+def toggle_rate_schedule(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(RateSchedule).filter(RateSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    sched.is_active = not sched.is_active
+    db.commit()
+    return {"id": sched_id, "is_active": sched.is_active}
+
+
 @router.get("/api/schedule/status")
 def get_schedule_status(
     db: Session = Depends(get_db),
@@ -3172,8 +3292,7 @@ def get_schedule_status(
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    from datetime import datetime as _dt
-    now      = _dt.now()
+    now      = timeutil.local_now()
     cur_time = now.strftime("%H:%M")
     cur_dow  = str(now.weekday())
 
