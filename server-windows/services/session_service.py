@@ -6,6 +6,7 @@ from sqlalchemy import func
 from models import PC, Session, CoinTransaction, SystemLog, User, ServerConfig
 from services.rate_service import pesos_to_seconds, pesos_for_seconds
 import command_store
+import timeutil
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +86,13 @@ class SessionService:
         elapsed = (datetime.utcnow() - session.started_at).total_seconds()
         return max(0, int(session.granted_seconds - elapsed))
 
-    def add_time_by_pesos(self, pc_number: int, pesos: int, user_id: int = None) -> tuple[int, Session]:
+    def add_time_by_pesos(self, pc_number: int, pesos: int, user_id: int = None,
+                          actor: str = None) -> tuple[int, Session]:
         """
         Converts pesos to seconds, creates or extends an active session.
         If user_id is provided, associates the transaction with that member.
+        `actor` names the staff account when this came from a person rather than
+        the coin acceptor; None means the coin slot.
         Returns (seconds_added, session).
         """
         pc = self.get_pc(pc_number)
@@ -129,13 +133,19 @@ class SessionService:
         self._log(
             "INFO", "session",
             f"₱{pesos} → {seconds}s added to PC {pc_number:02d}"
+            f"{f' by {actor}' if actor else ' (coin slot)'}"
         )
         self._db.commit()
         self._db.refresh(session)
         return seconds, session
 
-    def add_time_seconds(self, pc_number: int, seconds: int, user_id: int = None) -> Session:
+    def add_time_seconds(self, pc_number: int, seconds: int, user_id: int = None,
+                         actor: str = None) -> Session:
         """Admin: directly add seconds without coin conversion.
+
+        `actor` is the staff account performing this. Free time handed to a
+        friend is the classic café shrinkage route, and with a cashier role in
+        the system an unattributed "Admin added 3600s" line makes it untraceable.
 
         In Traditional Café Mode (ServerConfig.traditional_mode_enabled), this
         is the ONLY way time is ever added — there's no physical coin insert
@@ -182,10 +192,13 @@ class SessionService:
             self._log(
                 "INFO", "admin",
                 f"₱{pesos} (est.) → {seconds}s manually added to PC {pc_number:02d} "
-                f"(Traditional Café Mode)"
+                f"by {actor or 'unknown'} (Traditional Café Mode)"
             )
         else:
-            self._log("INFO", "admin", f"Admin added {seconds}s to PC {pc_number:02d}")
+            self._log(
+                "INFO", "admin",
+                f"{actor or 'unknown'} added {seconds}s to PC {pc_number:02d}"
+            )
 
         self._db.commit()
         self._db.refresh(session)
@@ -227,7 +240,7 @@ class SessionService:
         """Returns seconds added since the last heartbeat and clears the counter."""
         return _pending_notify.pop(pc_number, 0)
 
-    def end_session(self, pc_number: int) -> bool:
+    def end_session(self, pc_number: int, actor: str = None) -> bool:
         session = self.get_active_session(pc_number)
         pc = self.get_pc(pc_number)
         if not pc:
@@ -271,23 +284,27 @@ class SessionService:
             session.is_active = False
             session.ended_at = datetime.utcnow()
         pc.is_locked = True
-        self._log("INFO", "session", f"Session ended for PC {pc_number:02d}")
+        self._log(
+            "INFO", "session",
+            f"Session ended for PC {pc_number:02d}"
+            f"{f' by {actor}' if actor else ''}"
+        )
         self._db.commit()
         return True
 
     def get_today_earnings(self, pc_number: int | None = None) -> dict:
         """
-        Returns today's session earnings (since midnight UTC) for a specific PC
-        or for all PCs if pc_number is None.
+        Returns today's session earnings for a specific PC or for all PCs if
+        pc_number is None. "Today" starts at midnight in the café's configured
+        timezone (see timeutil), not UTC — otherwise the business day rolls over
+        mid-morning and pre-dawn trade is booked to the day before.
 
         The earnings are derived from CoinTransaction records — amount_php is the
         peso amount collected, seconds_added / 60 gives approximate minutes.
 
         Returns {"total_pesos": int, "total_sessions": int, "total_minutes": int}.
         """
-        today_midnight = datetime.utcnow().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        today_midnight = timeutil.local_day_start_utc()
 
         query = self._db.query(CoinTransaction).filter(
             CoinTransaction.created_at >= today_midnight
@@ -324,26 +341,31 @@ class SessionService:
 
     def get_all_pcs_today_earnings(self) -> list[dict]:
         """
-        Returns yesterday's (UTC) earnings for every PC — used by the nightly
-        archive task to sync to pisonex.com.
+        Returns yesterday's earnings for every PC — used by the nightly archive
+        task to sync to pisonex.com. "Yesterday" is the café's local calendar
+        day, so the figure the portal receives matches the one the owner saw on
+        their own dashboard.
+        """
+        return self.get_earnings_for_local_date(days_ago=1)
+
+    def get_earnings_for_local_date(self, days_ago: int = 0) -> list[dict]:
+        """
+        Returns per-PC earnings for one café-local calendar day.
+        days_ago=0 is today, 1 is yesterday, and so on.
 
         Returns a list of dicts:
           {"pc_number": int, "total_pesos": int, "total_sessions": int, "total_minutes": int}
         """
-        from datetime import timedelta
-        today_midnight = datetime.utcnow().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        yesterday_start = today_midnight - timedelta(days=1)
-        yesterday_end = today_midnight
+        day_start = timeutil.local_day_start_utc(days_ago)
+        day_end = timeutil.local_day_start_utc(days_ago - 1)
 
         pcs = self.get_all_pcs()
         result = []
         for pc in pcs:
             tx_rows = self._db.query(CoinTransaction).filter(
                 CoinTransaction.pc_id == pc.id,
-                CoinTransaction.created_at >= yesterday_start,
-                CoinTransaction.created_at < yesterday_end,
+                CoinTransaction.created_at >= day_start,
+                CoinTransaction.created_at < day_end,
             ).all()
 
             total_pesos = sum(r.amount_php for r in tx_rows)
@@ -351,8 +373,8 @@ class SessionService:
 
             total_sessions = self._db.query(func.count(Session.id)).filter(
                 Session.pc_id == pc.id,
-                Session.started_at >= yesterday_start,
-                Session.started_at < yesterday_end,
+                Session.started_at >= day_start,
+                Session.started_at < day_end,
             ).scalar() or 0
 
             result.append({

@@ -167,6 +167,13 @@ class ServerConfig(Base):
     # visible) are unaffected until an admin explicitly opts in.
     traditional_mode_enabled = Column(Boolean, nullable=False, default=False)
 
+    # What to do with pesos no combination of configured rates can consume —
+    # e.g. a ₱1 coin when the cheapest configured rate is ₱5.
+    #   "prorate" — credit them at the smallest denomination's per-peso value
+    #               (the behaviour every install had before this was a setting)
+    #   "discard" — credit nothing for them
+    coin_leftover_mode = Column(String(10), nullable=False, default="prorate")
+
     # ── Monitoring ────────────────────────────────────────────────────────────
     # When True (default), the server requests FFmpeg live-streaming when admin
     # opens fullscreen. Set False to fall back to 1-second JPEG snapshots.

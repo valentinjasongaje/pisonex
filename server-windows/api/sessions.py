@@ -47,7 +47,9 @@ def add_time(body: AddTimeRequest, db: Session = Depends(get_db), admin=AdminDep
         command_store.clear_idle_since(body.pc_number)
 
     try:
-        seconds, session = svc.add_time_by_pesos(body.pc_number, body.pesos, user_id=user_id)
+        seconds, session = svc.add_time_by_pesos(
+            body.pc_number, body.pesos, user_id=user_id, actor=admin.username
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
 
@@ -87,7 +89,7 @@ def get_session(pc_number: int, db: Session = Depends(get_db)):
 def end_session(pc_number: int, db: Session = Depends(get_db), admin=AdminDep):
     """Admin: end the current session and lock the PC."""
     svc = SessionService(db)
-    ok = svc.end_session(pc_number)
+    ok = svc.end_session(pc_number, actor=admin.username)
     if not ok:
         raise HTTPException(404, f"PC {pc_number} not found")
     return {"status": "session ended", "pc_number": pc_number}

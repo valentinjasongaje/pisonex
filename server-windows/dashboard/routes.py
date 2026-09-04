@@ -27,6 +27,7 @@ from services.wol_service import wake_pc, wake_all
 from services.rate_service import pesos_to_seconds, pesos_for_seconds
 from config import settings
 import command_store
+import timeutil
 
 # Fixed amounts shown as quick-add presets in the "Add Time" modal. The modal
 # lets the admin switch between Amount (pesos) and Time (minutes) presets;
@@ -352,11 +353,11 @@ def _pc_overview_data(db: Session):
 
     db.commit()
 
-    today = datetime.utcnow().date()
+    today_start = timeutil.local_day_start_utc()
     today_row = db.query(
         func.coalesce(func.sum(CoinTransaction.amount_php), 0)
     ).filter(
-        func.date(CoinTransaction.created_at) == today
+        CoinTransaction.created_at >= today_start
     ).scalar()
 
     return pc_data, online_count, active_count, int(today_row)
@@ -450,12 +451,20 @@ def rates_page(
         .order_by(CoinRate.pesos.asc())
         .all()
     )
+    from services.rate_service import find_worse_value_rates
+    srv_cfg = db.query(ServerConfig).first()
     return templates.TemplateResponse("rates.html", {
         "request": request,
         "rates": rates,
         "profiles": profiles,
         "selected_profile": selected_profile,
         "selected_id": selected_id,
+        # Denominations that are worse value per peso than a smaller coin. Not a
+        # payout bug — the solver always pays the best combination — but almost
+        # always an unintended price, so the owner should see it.
+        "value_warnings": find_worse_value_rates(rates),
+        "leftover_mode": getattr(srv_cfg, "coin_leftover_mode", "prorate") or "prorate",
+        "smallest_rate": rates[0] if rates else None,
     })
 
 
@@ -532,6 +541,33 @@ def save_rate(
         "rates": rates,
         "selected_id": profile_id,
     })
+
+
+class LeftoverModeBody(BaseModel):
+    mode: str
+
+
+@router.post("/api/rates/leftover-mode", dependencies=[Depends(_require_active_license)])
+def save_leftover_mode(
+    body: LeftoverModeBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Set what happens to pesos no combination of rates can consume."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if body.mode not in ("prorate", "discard"):
+        raise HTTPException(status_code=422, detail="Mode must be 'prorate' or 'discard'")
+
+    srv_cfg = db.query(ServerConfig).first()
+    if not srv_cfg:
+        srv_cfg = ServerConfig(id=1)
+        db.add(srv_cfg)
+    srv_cfg.coin_leftover_mode = body.mode
+    db.commit()
+    return {"status": "ok", "mode": body.mode}
 
 
 @router.delete("/rates/{rate_id}", response_class=HTMLResponse)
@@ -811,7 +847,9 @@ def dashboard_add_time(
         raise HTTPException(status_code=422, detail="Minutes must be greater than 0")
 
     seconds = body.minutes * 60
-    session = svc.add_time_seconds(body.pc_number, seconds)
+    session = svc.add_time_seconds(
+        body.pc_number, seconds, actor=current_user["username"]
+    )
     return {
         "pc_number": body.pc_number,
         "seconds_added": seconds,
@@ -837,7 +875,9 @@ def dashboard_add_time_pesos(
         raise HTTPException(status_code=404, detail=f"PC {body.pc_number} not found")
 
     try:
-        seconds_added, session = svc.add_time_by_pesos(body.pc_number, body.pesos)
+        seconds_added, session = svc.add_time_by_pesos(
+            body.pc_number, body.pesos, actor=current_user["username"]
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -860,7 +900,7 @@ def dashboard_lock_pc(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     svc = SessionService(db)
-    ok = svc.end_session(pc_number)
+    ok = svc.end_session(pc_number, actor=current_user["username"])
     if not ok:
         raise HTTPException(status_code=404, detail=f"PC {pc_number} not found")
     return {"status": "locked", "pc_number": pc_number}
@@ -1264,9 +1304,10 @@ def pcs_page(
 
 def _reports_data(days: int, db):
     """Shared helper — compute all aggregate data for the reports page/export."""
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start  = today_start - timedelta(days=today_start.weekday())
-    month_start = today_start.replace(day=1)
+    # Day boundaries follow the CAFÉ's timezone, not UTC — see timeutil.
+    today_start = timeutil.local_day_start_utc()
+    week_start  = timeutil.local_week_start_utc()
+    month_start = timeutil.local_month_start_utc()
 
     def _sum(q):
         row = q.with_entities(
