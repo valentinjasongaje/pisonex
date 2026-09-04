@@ -611,14 +611,18 @@ async function saveKeypadConfig() {
   });
   if (res.ok) {
     const data = await res.json();
-    if (data.hardware_active) {
-      el.textContent = 'Saved — hardware reloaded.';
-    } else if (data.detail) {
+    if (data.detail) {
+      // Saved, but something didn't come up (bad pin, no hardware). Not a
+      // success — an amber warning, so it isn't mistaken for a working keypad.
       el.textContent = data.detail;
+      el.style.color = 'var(--amber, #f59e0b)';
+    } else if (data.hardware_active) {
+      el.textContent = 'Saved — hardware reloaded.';
+      el.style.color = 'var(--green, #22c55e)';
     } else {
       el.textContent = 'Saved (no hardware detected on this server).';
+      el.style.color = 'var(--green, #22c55e)';
     }
-    el.style.color = 'var(--green, #22c55e)';
   } else {
     let msg = 'Failed to save.';
     try { const d = await res.json(); if (d.detail) msg = d.detail; } catch (e) {}

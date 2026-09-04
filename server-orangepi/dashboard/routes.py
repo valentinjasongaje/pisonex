@@ -2207,9 +2207,31 @@ def save_keypad_config(
             "detail": f"Settings saved but hardware reload failed: {e}",
         }
 
+    # The pins passed validation above, but claiming them can still fail on the
+    # board (already exported, not a usable GPIO, wrong numbering base). Report
+    # that instead of a bare "ok" — otherwise the admin walks away from a green
+    # message with a keypad that does nothing.
+    keypad_active = False
+    try:
+        import main
+        keypad_active = bool(getattr(main.hw_controller, "keypad_active", False))
+    except Exception:
+        pass
+
+    if body.enabled and hardware_active and not keypad_active:
+        return {
+            "status": "saved",
+            "hardware_active": hardware_active,
+            "keypad_active": False,
+            "detail": "Settings saved, but the keypad did not respond on those pins — "
+                      "the coin slot is still working. Check the pin numbers "
+                      "(BCM on Orange Pi, not the coin slot's SUNXI numbers).",
+        }
+
     return {
         "status": "ok",
         "hardware_active": hardware_active,
+        "keypad_active": keypad_active,
         "keypad_enabled": body.enabled,
         "row_pins": row_str,
         "col_pins": col_str,

@@ -48,12 +48,35 @@ class HardwareController:
 
         self._lcd: LCD | None = None
         self._keypad: Keypad | None = None
+        # True when the keypad was asked for AND actually claimed its pins.
+        # Reported back to the dashboard so a failed keypad isn't shown as saved-OK.
+        self.keypad_active: bool = False
         if settings.KEYPAD_ENABLED:
-            self._lcd = LCD()
-            self._lcd.show(Screen.idle())
-            self._keypad = Keypad(on_key_press=self._on_key_press)
-            self._keypad.start()
-            logger.info("HardwareController: started (coin-slot + keypad/LCD enabled)")
+            # The keypad and LCD are an optional bolt-on; the coin slot above is
+            # the money path. Nothing that goes wrong here may prevent this
+            # constructor from returning, or a bad keypad pin would leave the
+            # whole café unable to accept coins.
+            try:
+                self._lcd = LCD()
+                self._lcd.show(Screen.idle())
+                self._keypad = Keypad(on_key_press=self._on_key_press)
+                self._keypad.start()
+                self.keypad_active = bool(getattr(self._keypad, "ready", False))
+            except Exception as e:
+                logger.error(
+                    "HardwareController: keypad/LCD failed to start: %s — continuing "
+                    "with the coin slot only. Check Settings → Keypad.", e,
+                )
+                self._keypad = None
+                self._lcd = None
+
+            if self.keypad_active:
+                logger.info("HardwareController: started (coin-slot + keypad/LCD enabled)")
+            else:
+                logger.warning(
+                    "HardwareController: started (coin-slot OK — keypad enabled but "
+                    "NOT responding; see the error above)"
+                )
         else:
             logger.info("HardwareController: started (coin-slot only — keypad & LCD disabled)")
 

@@ -30,25 +30,46 @@ class Keypad:
         self._callback = on_key_press
         self._running = False
         self._thread: threading.Thread | None = None
+        # True only when every row/col pin was claimed successfully. False means
+        # the scanner runs inert — see _setup_gpio.
+        self.ready = False
 
         self._setup_gpio()
 
     def _setup_gpio(self):
         try:
             import OPi.GPIO as GPIO
+        except ImportError:
+            self._GPIO = None
+            logger.warning("Keypad: OPi.GPIO not available — running in simulation mode")
+            return
+
+        # Claiming a pin can fail for reasons a pin-number check can't catch: the
+        # pin is already exported by something else, the kernel won't export it,
+        # or the number is valid but not a usable GPIO on this board. None of
+        # that may take down the HardwareController — the coin slot shares it,
+        # and a keypad typo must never stop the café taking money. Degrade to an
+        # inert keypad and say so loudly, the same way CoinSlot handles its pins.
+        try:
             self._GPIO = GPIO
             GPIO.setmode(GPIO.BCM)
             for row_pin in settings.KEYPAD_ROWS:
                 GPIO.setup(row_pin, GPIO.OUT, initial=GPIO.LOW)
             for col_pin in settings.KEYPAD_COLS:
                 GPIO.setup(col_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            self.ready = True
             logger.info(
                 "Keypad: rows=%s cols=%s",
                 settings.KEYPAD_ROWS, settings.KEYPAD_COLS,
             )
-        except (ImportError, RuntimeError):
+        except Exception as e:
             self._GPIO = None
-            logger.warning("Keypad: OPi.GPIO not available — running in simulation mode")
+            logger.error(
+                "Keypad: pin setup FAILED (rows=%s cols=%s): %s — keypad will not "
+                "respond. Check the pins in Settings → Keypad; on Orange Pi these "
+                "are BCM numbers, not the SUNXI numbers the coin slot uses.",
+                settings.KEYPAD_ROWS, settings.KEYPAD_COLS, e,
+            )
 
     def start(self):
         self._running = True
