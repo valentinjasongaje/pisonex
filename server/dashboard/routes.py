@@ -2240,6 +2240,143 @@ def save_keypad_config(
     }
 
 
+
+
+# ── Keypad tester ─────────────────────────────────────────────────────────────
+# The dashboard equivalent of test_keypad.py. That script has to be run over SSH
+# with the service stopped, because it claims the GPIO pins itself. This taps the
+# key stream of the scanner the server is already running, so the admin can test
+# the keypad from the Settings page with the café still open.
+
+def _keypad_pin_for_key(key: str) -> dict:
+    """Which configured row/col pin a key sits on — so a dead key points at the
+    wire to check, the way the CLI tester's output does."""
+    from hardware.keypad import KEY_MAP
+    for r_idx, row in enumerate(KEY_MAP):
+        for c_idx, k in enumerate(row):
+            if k == key:
+                rows = list(settings.KEYPAD_ROWS or [])
+                cols = list(settings.KEYPAD_COLS or [])
+                return {
+                    "row": r_idx + 1,
+                    "col": c_idx + 1,
+                    "row_pin": rows[r_idx] if r_idx < len(rows) else None,
+                    "col_pin": cols[c_idx] if c_idx < len(cols) else None,
+                }
+    return {"row": None, "col": None, "row_pin": None, "col_pin": None}
+
+
+def _keypad_test_diagnosis(missing: list[str]) -> list[str]:
+    """Turn a set of dead keys into wiring advice.
+
+    One dead wire kills its whole line, so an ENTIRE row or column failing points
+    at that wire (or a wrong pin number) rather than at the keys. A line only
+    partly dead does not — a 3x4 pad has 4 keys per column and 3 per row, so
+    "3 of this column is dead" still leaves a working key proving the wire is
+    fine. Only a fully dead line is claimed here; anything else is reported as
+    individual keys.
+    """
+    if not missing:
+        return []
+
+    from hardware.keypad import KEY_MAP
+    missing_set = set(missing)
+
+    col_keys: dict[int, list[str]] = {}
+    row_keys: dict[int, list[str]] = {}
+    for r_idx, row in enumerate(KEY_MAP):
+        for c_idx, k in enumerate(row):
+            pos = _keypad_pin_for_key(k)
+            if pos["col_pin"] is not None:
+                col_keys.setdefault(pos["col_pin"], []).append(k)
+            if pos["row_pin"] is not None:
+                row_keys.setdefault(pos["row_pin"], []).append(k)
+
+    notes: list[str] = []
+    explained: set[str] = set()
+
+    for pin, keys in sorted(col_keys.items()):
+        if keys and missing_set.issuperset(keys):
+            notes.append(f"Every key on column pin {pin} is dead ({' '.join(keys)}) "
+                         f"— check that wire and that {pin} is the right pin number.")
+            explained.update(keys)
+    for pin, keys in sorted(row_keys.items()):
+        if keys and missing_set.issuperset(keys):
+            notes.append(f"Every key on row pin {pin} is dead ({' '.join(keys)}) "
+                         f"— check that wire and that {pin} is the right pin number.")
+            explained.update(keys)
+
+    leftover = [k for k in missing if k not in explained]
+    if leftover:
+        notes.append(f"Not explained by a dead row or column: {' '.join(leftover)} "
+                     f"— likely those keys themselves or their solder joints.")
+    return notes
+
+
+@router.post("/api/settings/keypad-test/start")
+def keypad_test_start(current_user: Optional[dict] = Depends(_validate_session)):
+    """Begin capturing keypad presses for the tester."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if not settings.KEYPAD_ENABLED:
+        raise HTTPException(
+            status_code=409,
+            detail="Enable the keypad first, then save, before testing it.",
+        )
+
+    keypad_active = False
+    try:
+        import main
+        keypad_active = bool(getattr(main.hw_controller, "keypad_active", False))
+    except Exception:
+        pass
+    if not keypad_active:
+        raise HTTPException(
+            status_code=409,
+            detail="The keypad is not responding on the configured pins, so there "
+                   "is nothing to capture. Fix the pins and save first.",
+        )
+
+    command_store.start_keypad_test()
+    return {"status": "started", **command_store.get_keypad_test_state()}
+
+
+@router.get("/api/settings/keypad-test/status")
+def keypad_test_status(current_user: Optional[dict] = Depends(_validate_session)):
+    """Poll for detected keys. Polling also keeps the capture alive."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    state = command_store.get_keypad_test_state(extend=True)
+    state["pins"] = {k: _keypad_pin_for_key(k) for k in command_store.KEYPAD_ALL_KEYS}
+    state["complete"] = not state["missing"]
+    if state["complete"]:
+        command_store.stop_keypad_test()
+        state["active"] = False
+    return state
+
+
+@router.post("/api/settings/keypad-test/stop")
+def keypad_test_stop(current_user: Optional[dict] = Depends(_validate_session)):
+    """End the capture and return a summary with wiring advice."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    state = command_store.get_keypad_test_state()
+    command_store.stop_keypad_test()
+    state["active"] = False
+    state["complete"] = not state["missing"]
+    state["diagnosis"] = _keypad_test_diagnosis(state["missing"])
+    return state
+
+
 @router.get("/membership", response_class=HTMLResponse)
 def membership_page(
     request: Request,

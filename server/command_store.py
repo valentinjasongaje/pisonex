@@ -434,3 +434,90 @@ def check_login_rate(username: str) -> bool:
             return False
         attempts.append(now)
         return True
+
+
+# ── Keypad self-test ──────────────────────────────────────────────────────────
+# Backs the dashboard's Settings → Keypad tester. The server already owns the
+# GPIO pins through the running Keypad scanner, so the test taps that live key
+# stream instead of claiming the pins itself — which is why, unlike
+# test_keypad.py, this needs no service stop.
+#
+# While a test is running the controller SWALLOWS key presses (see
+# HardwareController._on_key_press): during a test, typing a PC number and '#'
+# must not open the coin slot on a real PC.
+#
+# _keypad_test_expires_at is a dead-man switch. If the admin closes the tab
+# mid-test the capture would otherwise stay on forever and the kiosk keypad
+# would be dead; polling the status endpoint pushes the deadline out, so the
+# test only stays alive while someone is actually watching it.
+
+KEYPAD_ALL_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
+
+_KEYPAD_TEST_TTL_SECONDS = 180
+
+_keypad_test_active: bool = False
+_keypad_test_expires_at: float = 0.0
+_keypad_test_detected: set[str] = set()
+_keypad_test_events: list[dict] = []      # [{"key": str, "at": float}, ...]
+_keypad_test_started_at: float = 0.0
+
+
+def start_keypad_test() -> None:
+    """Begin capturing key presses, clearing any previous run."""
+    global _keypad_test_active, _keypad_test_expires_at, _keypad_test_started_at
+    with _lock:
+        _keypad_test_active = True
+        _keypad_test_started_at = _time.monotonic()
+        _keypad_test_expires_at = _keypad_test_started_at + _KEYPAD_TEST_TTL_SECONDS
+        _keypad_test_detected.clear()
+        _keypad_test_events.clear()
+
+
+def stop_keypad_test() -> None:
+    """End capture. Detected keys are kept so the summary can still be read."""
+    global _keypad_test_active
+    with _lock:
+        _keypad_test_active = False
+
+
+def is_keypad_test_active() -> bool:
+    """True while a test is capturing. Self-expires once the TTL lapses so a
+    closed browser tab can never leave the kiosk keypad swallowing presses."""
+    global _keypad_test_active
+    with _lock:
+        if _keypad_test_active and _time.monotonic() > _keypad_test_expires_at:
+            _keypad_test_active = False
+        return _keypad_test_active
+
+
+def record_keypad_test_key(key: str) -> None:
+    """Record one key press. Called from the keypad scanner thread."""
+    with _lock:
+        if not _keypad_test_active:
+            return
+        _keypad_test_detected.add(key)
+        _keypad_test_events.append({
+            "key": key,
+            "at": round(_time.monotonic() - _keypad_test_started_at, 3),
+        })
+        # Bound the log — a stuck key must not grow this without limit.
+        if len(_keypad_test_events) > 200:
+            del _keypad_test_events[:-200]
+
+
+def get_keypad_test_state(extend: bool = False) -> dict:
+    """Snapshot of the current test. `extend` renews the dead-man deadline,
+    so only an actively-polling dashboard keeps the capture alive."""
+    global _keypad_test_active, _keypad_test_expires_at
+    with _lock:
+        if _keypad_test_active and _time.monotonic() > _keypad_test_expires_at:
+            _keypad_test_active = False
+        if _keypad_test_active and extend:
+            _keypad_test_expires_at = _time.monotonic() + _KEYPAD_TEST_TTL_SECONDS
+        return {
+            "active": _keypad_test_active,
+            "detected": [k for k in KEYPAD_ALL_KEYS if k in _keypad_test_detected],
+            "missing": [k for k in KEYPAD_ALL_KEYS if k not in _keypad_test_detected],
+            "events": list(_keypad_test_events[-12:]),
+            "total_keys": len(KEYPAD_ALL_KEYS),
+        }

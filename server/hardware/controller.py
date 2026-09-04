@@ -227,7 +227,15 @@ class HardwareController:
         Already accepting: '#' and '*' are treated identically — both finish
         the session via close_coins_for_pc(), which flushes and credits any
         coins already inserted. There's no "cancel and lose the money" path.
+
+        While the dashboard's keypad tester is running, presses are recorded
+        and go no further: a test must never open the coin slot on a real PC
+        just because the admin pressed a digit and '#'.
         """
+        if command_store.is_keypad_test_active():
+            command_store.record_keypad_test_key(key)
+            return
+
         with self._lock:
             accepting = self._accepting
             pc = self._selected_pc

@@ -320,6 +320,36 @@
     <button class="btn btn-primary" onclick="saveKeypadConfig()">Save</button>
     <span id="keypad-status" style="font-size:.85rem;"></span>
   </div>
+
+    <!-- Keypad tester — same check as test_keypad.py, but without stopping
+         the service: the server's own scanner feeds it. -->
+    <div id="keypad-test-wrap" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border,#2a2f3a);">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button class="btn keypad-dependent-field" id="keypad-test-btn"
+                onclick="toggleKeypadTest()">Test keypad</button>
+        <span id="keypad-test-msg" style="font-size:.85rem;color:var(--gray);">
+          Press every key on the physical keypad — each one lights up here.
+        </span>
+      </div>
+
+      <div id="keypad-test-panel" style="display:none;margin-top:.9rem;">
+        <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;">
+          <div>
+            <div id="keypad-test-grid"
+                 style="display:grid;grid-template-columns:repeat(3,52px);gap:8px;"></div>
+            <p id="keypad-test-count"
+               style="font-size:.85rem;color:var(--gray);margin:.6rem 0 0;"></p>
+          </div>
+          <div style="flex:1;min-width:220px;">
+            <p style="font-size:.78rem;color:var(--gray);margin:0 0 .3rem;">Recent presses</p>
+            <div id="keypad-test-log"
+                 style="font-family:ui-monospace,Menlo,monospace;font-size:.78rem;
+                        color:var(--text-dim,#9aa4b2);min-height:70px;line-height:1.5;"></div>
+            <div id="keypad-test-summary" style="font-size:.82rem;margin-top:.6rem;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 </div>
 
 <!-- Monitoring -->
@@ -634,6 +664,132 @@ async function saveFfmpegSetting() {
     el.style.color = 'var(--red)';
   }
 }
+
+// ── Keypad tester ───────────────────────────────────────────────────────────
+const KEYPAD_TEST_KEYS = ['1','2','3','4','5','6','7','8','9','*','0','#'];
+let keypadTestTimer = null;
+let keypadTestPins  = {};
+
+function renderKeypadGrid(detected) {
+  const grid = document.getElementById('keypad-test-grid');
+  grid.innerHTML = '';
+  KEYPAD_TEST_KEYS.forEach(k => {
+    const hit = detected.includes(k);
+    const pin = keypadTestPins[k] || {};
+    const cell = document.createElement('div');
+    cell.textContent = k;
+    cell.title = (pin.row_pin != null)
+      ? `Row ${pin.row} (pin ${pin.row_pin}) / Col ${pin.col} (pin ${pin.col_pin})`
+      : k;
+    cell.style.cssText =
+      'height:52px;display:flex;align-items:center;justify-content:center;' +
+      'border-radius:8px;font-size:1.1rem;font-weight:600;transition:all .12s;' +
+      (hit
+        ? 'background:rgba(34,197,94,.18);color:#22c55e;border:1px solid rgba(34,197,94,.45);'
+        : 'background:var(--bg-dim,rgba(255,255,255,.03));color:var(--text-dim,#6b7280);' +
+          'border:1px solid var(--border,#2a2f3a);');
+    grid.appendChild(cell);
+  });
+}
+
+function renderKeypadTest(data) {
+  if (data.pins) keypadTestPins = data.pins;
+  renderKeypadGrid(data.detected || []);
+
+  const n = (data.detected || []).length;
+  document.getElementById('keypad-test-count').textContent =
+    `${n} of ${data.total_keys || 12} keys detected`;
+
+  const log = (data.events || []).slice().reverse()
+    .map(e => `${e.at.toFixed(2)}s   key ${e.key}`).join('<br>');
+  document.getElementById('keypad-test-log').innerHTML =
+    log || 'Waiting for a key press…';
+}
+
+function renderKeypadSummary(data) {
+  const el = document.getElementById('keypad-test-summary');
+  if (data.complete) {
+    el.innerHTML = '<span style="color:var(--green,#22c55e);">All 12 keys working.</span>';
+    return;
+  }
+  let html = `<span style="color:var(--amber,#f59e0b);">Not detected: ` +
+             `${(data.missing || []).join(' ')}</span>`;
+  (data.diagnosis || []).forEach(d => {
+    html += `<div style="color:var(--gray);margin-top:.35rem;">${d}</div>`;
+  });
+  el.innerHTML = html;
+}
+
+async function toggleKeypadTest() {
+  const btn = document.getElementById('keypad-test-btn');
+  if (keypadTestTimer) { await stopKeypadTest(); return; }
+
+  const msg = document.getElementById('keypad-test-msg');
+  const res = await fetch('/dashboard/api/settings/keypad-test/start', { method: 'POST' });
+  if (!res.ok) {
+    let m = 'Could not start the test.';
+    try { const d = await res.json(); if (d.detail) m = d.detail; } catch (e) {}
+    msg.textContent = m;
+    msg.style.color = 'var(--amber, #f59e0b)';
+    return;
+  }
+  const data = await res.json();
+
+  document.getElementById('keypad-test-panel').style.display = 'block';
+  document.getElementById('keypad-test-summary').innerHTML = '';
+  msg.textContent = 'Listening — press every key on the keypad.';
+  msg.style.color = 'var(--gray)';
+  btn.textContent = 'Stop test';
+  renderKeypadTest(data);
+
+  keypadTestTimer = setInterval(pollKeypadTest, 500);
+  pollKeypadTest();
+}
+
+async function pollKeypadTest() {
+  const res = await fetch('/dashboard/api/settings/keypad-test/status');
+  if (!res.ok) { await stopKeypadTest(); return; }
+  const data = await res.json();
+  renderKeypadTest(data);
+
+  // Server ends the capture itself once all 12 are in, or when the dead-man
+  // timer lapses. Either way, stop polling and show the summary.
+  if (!data.active) {
+    clearInterval(keypadTestTimer);
+    keypadTestTimer = null;
+    document.getElementById('keypad-test-btn').textContent = 'Test keypad';
+    if (data.complete) {
+      document.getElementById('keypad-test-msg').textContent = 'Test complete.';
+      renderKeypadSummary(data);
+    } else {
+      await stopKeypadTest();
+    }
+  }
+}
+
+async function stopKeypadTest() {
+  if (keypadTestTimer) { clearInterval(keypadTestTimer); keypadTestTimer = null; }
+  document.getElementById('keypad-test-btn').textContent = 'Test keypad';
+  document.getElementById('keypad-test-msg').textContent =
+    'Press every key on the physical keypad — each one lights up here.';
+  document.getElementById('keypad-test-msg').style.color = 'var(--gray)';
+  try {
+    const res = await fetch('/dashboard/api/settings/keypad-test/stop', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      renderKeypadTest(data);
+      renderKeypadSummary(data);
+    }
+  } catch (e) {}
+}
+
+// Leaving the page mid-test would otherwise keep the keypad swallowing presses
+// until the server-side dead-man timer lapses.
+window.addEventListener('beforeunload', () => {
+  if (keypadTestTimer) {
+    navigator.sendBeacon('/dashboard/api/settings/keypad-test/stop');
+  }
+});
 
 async function generateKey() {
   const el = document.getElementById('key-action-status');
