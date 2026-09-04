@@ -45,6 +45,12 @@ class PCHeartbeatResponse(BaseModel):
     coin_progress_pesos: int = 0
     coin_progress_seconds: int = 0
     minimum_logout_minutes: int = 0
+    # Loyalty points — live balance, so the client tray can show it and gate the
+    # Rewards Menu item without an extra round trip. Per-item costs come from the
+    # reward catalog (GET /api/member/rewards), so the old flat redeem rate is not
+    # sent here.
+    points_enabled: bool = False
+    member_loyalty_points: int = 0
     # Live-stream hint for monitoring: >0 means server wants client to capture
     # screenshots at this rate (ms); 0 means client uses its own configured
     # interval.  Not actively driven by this server variant — always 0 —
@@ -158,6 +164,7 @@ class MemberLoginResponse(BaseModel):
     balance_seconds: int = 0
     absorbed_seconds: int = 0
     must_change_password: bool = False
+    loyalty_points: int = 0
     error: Optional[str] = None
 
 class MemberChangePasswordRequest(BaseModel):
@@ -178,6 +185,37 @@ class MemberLogoutResponse(BaseModel):
     deducted_seconds: int = 0
     error: Optional[str] = None
 
+class RewardItemResponse(BaseModel):
+    id: int
+    name: str
+    kind: str
+    points_cost: int
+    minutes: Optional[int] = None
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+
+class MemberRedeemRewardRequest(BaseModel):
+    pc_number: int
+    reward_item_id: int
+
+class MemberRedeemRewardResponse(BaseModel):
+    success: bool
+    item_name: Optional[str] = None
+    kind: Optional[str] = None
+    points_spent: int = 0
+    minutes_granted: Optional[int] = None
+    remaining_points: int = 0
+    status: Optional[str] = None  # "fulfilled" | "pending"
+    error: Optional[str] = None
+
+class MemberLogoutResponse(BaseModel):
+    success: bool
+    remaining_seconds: int = 0
+    deducted_seconds: int = 0
+    error: Optional[str] = None
+
 class MemberStatusResponse(BaseModel):
     membership_enabled: bool = False
     absorption_enabled: bool = False
@@ -185,6 +223,9 @@ class MemberStatusResponse(BaseModel):
     balance_seconds: int = 0
     can_logout: bool = False
     logout_denied_reason: Optional[str] = None
+    points_enabled: bool = False
+    loyalty_points: int = 0
+    points_per_minute_redeem: int = 0
 
 class MembershipConfigResponse(BaseModel):
     membership_enabled: bool
@@ -194,6 +235,10 @@ class MembershipConfigResponse(BaseModel):
     zero_time_auto_logout_seconds: int
     idle_auto_shutdown_minutes: int
     member_heartbeat_timeout_minutes: int
+    points_enabled: bool = False
+    points_per_10_pesos: int = 1
+    points_streak_bonus: int = 5
+    points_per_minute_redeem: int = 2
 
     class Config:
         from_attributes = True
@@ -207,6 +252,10 @@ class MembershipConfigUpdate(BaseModel):
     idle_auto_shutdown_minutes: Optional[int] = None
     member_heartbeat_timeout_minutes: Optional[int] = None
     preset_amounts_enabled: Optional[bool] = None
+    points_enabled: Optional[bool] = None
+    points_per_10_pesos: Optional[int] = None
+    points_streak_bonus: Optional[int] = None
+    points_per_minute_redeem: Optional[int] = None
 
 
 class AdminAddPesosRequest(BaseModel):
@@ -222,6 +271,7 @@ class MemberListResponse(BaseModel):
     last_login_at: Optional[datetime]
     created_at: datetime
     must_change_password: bool = False
+    loyalty_points: int = 0
 
     class Config:
         from_attributes = True

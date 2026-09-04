@@ -32,6 +32,11 @@
           {% if config.absorption_enabled %}checked{% endif %} />
         <span>Allow Session Absorption</span>
       </label>
+      <label class="toggle-label">
+        <input type="checkbox" id="cfg-points-enabled"
+          {% if config.points_enabled %}checked{% endif %} />
+        <span>Enable Loyalty Points</span>
+      </label>
     </div>
 
     <!-- Number inputs grid -->
@@ -95,6 +100,14 @@
           <span class="suffix">min</span>
         </div>
       </div>
+
+      <div class="form-group">
+        <label for="cfg-points-per-10-pesos">Points Earned</label>
+        <div class="input-suffix">
+          <input type="number" id="cfg-points-per-10-pesos" min="0" max="1000"
+            value="{{ config.points_per_10_pesos }}" />
+          <span class="suffix">pts / ₱10</span>
+    
     </div>
 
     <div class="membership-actions">
@@ -153,6 +166,7 @@
         <tr>
           <th>Username</th>
           <th>Balance</th>
+          <th>Points</th>
           <th>Status</th>
           <th>Logged In</th>
           <th>Remaining</th>
@@ -196,6 +210,7 @@
                 title="Can't adjust balance while logged in — the session's remaining time overwrites the balance on logout, so any change here would be silently lost. Force Logout first, or wait until they log out normally.">Adjust Balance</button>
             {% else %}
               <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+            <button class="btn btn-sm btn-primary" onclick="adjustPoints({{ m.id }}, '{{ m.username }}')">Adjust Points</button>
             {% endif %}
             <button class="btn btn-sm btn-warning" onclick="resetMemberPassword({{ m.id }}, '{{ m.username }}')">Reset Password</button>
             <button class="btn btn-sm btn-danger" onclick="deleteMember({{ m.id }}, '{{ m.username }}')">Delete</button>
@@ -263,6 +278,7 @@
           <button class="btn btn-sm btn-danger" onclick="forceLogout({{ m.id }})">Force Logout</button>
         {% endif %}
         <button class="btn btn-sm btn-primary" onclick="adjustBalance({{ m.id }}, '{{ m.username }}')">Adjust Balance</button>
+            <button class="btn btn-sm btn-primary" onclick="adjustPoints({{ m.id }}, '{{ m.username }}')">Adjust Points</button>
         <button class="btn btn-sm btn-warning" onclick="resetMemberPassword({{ m.id }}, '{{ m.username }}')">Reset Password</button>
         <button class="btn btn-sm btn-danger" onclick="deleteMember({{ m.id }}, '{{ m.username }}')">Delete</button>
       </div>
@@ -683,6 +699,9 @@ async function saveMembershipConfig(e) {
     minimum_logout_minutes: parseInt(document.getElementById('cfg-min-logout').value),
     zero_time_auto_logout_seconds: parseInt(document.getElementById('cfg-zero-time').value),
     member_heartbeat_timeout_minutes: parseInt(document.getElementById('cfg-heartbeat-timeout').value),
+    points_enabled: document.getElementById('cfg-points-enabled').checked,
+    points_per_10_pesos: parseInt(document.getElementById('cfg-points-per-10-pesos').value),
+    points_streak_bonus: parseInt(document.getElementById('cfg-points-streak-bonus').value),
   };
   const res = await fetch('/dashboard/api/membership/config', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
@@ -782,6 +801,55 @@ async function forceLogout(id) {
 
 // ── Adjust Balance modal ──────────────────────────────────────────────────
 let _adjustBalanceMemberId = null;
+
+function adjustPoints(id, username) {
+  const input = prompt(`Adjust loyalty points for ${username}.\nEnter points to add (negative to subtract):`);
+  if (input === null) return;
+  const points = parseInt(input);
+  if (isNaN(points)) { alert('Invalid number'); return; }
+  fetch(`/dashboard/api/membership/members/${id}/adjust-points`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({points})
+  }).then(() => location.reload());
+}
+
+async function createMember() {
+  const input = document.getElementById('new-member-username');
+  const username = input.value.trim();
+  const minutesInput = document.getElementById('new-member-initial-minutes');
+  const initialMinutes = parseInt(minutesInput.value) || 0;
+  const statusEl = document.getElementById('create-member-status');
+  if (!username) {
+    statusEl.textContent = 'Username is required.';
+    statusEl.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  if (initialMinutes < 0) {
+    statusEl.textContent = 'Initial time cannot be negative.';
+    statusEl.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  const res = await fetch('/dashboard/api/membership/create-member', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username, initial_minutes: initialMinutes})
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    statusEl.textContent = data.detail || 'Failed to create member.';
+    statusEl.style.color = 'var(--red, #ef4444)';
+    return;
+  }
+  const data = await res.json();
+  document.getElementById('new-member-username-label').textContent = data.username;
+  document.getElementById('new-member-password').value = data.temp_password;
+  document.getElementById('new-member-box').style.display = 'block';
+  statusEl.textContent = data.balance_seconds > 0
+    ? `Member created with ${Math.floor(data.balance_seconds / 60)}m initial time.`
+    : 'Member created.';
+  statusEl.style.color = 'var(--green, #22c55e)';
+  input.value = '';
+  minutesInput.value = '';
+}
 
 function adjustBalance(id, username) {
   _adjustBalanceMemberId = id;

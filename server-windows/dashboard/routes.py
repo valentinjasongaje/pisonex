@@ -1,4 +1,5 @@
 import asyncio
+import re
 import csv
 import hashlib
 import io
@@ -20,7 +21,12 @@ import bcrypt
 from pydantic import BaseModel
 
 from database import get_db
-from models import AdminUser, CoinTransaction, SystemLog, CoinRate, RateProfile, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
+from models import (
+    AdminUser, CoinTransaction, SystemLog, CoinRate, RateProfile, PC,
+    Session as SessionModel, User, MembershipConfig, ServerConfig,
+    CoinSchedule, RateSchedule, ScheduledAnnouncement,
+    PointsTransaction, RewardItem, RewardRedemption,
+)
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from services.wol_service import wake_pc, wake_all
@@ -874,18 +880,36 @@ def dashboard_add_time_pesos(
     if not pc:
         raise HTTPException(status_code=404, detail=f"PC {body.pc_number} not found")
 
+    # Attribute the sale to whoever is logged in on that PC, and award loyalty
+    # points for it. On the coin-acceptor variants the hardware ISR is the earn
+    # path, but this install has no acceptor — the cashier crediting from the
+    # dashboard IS the paid-time path here, so points would never be earned at
+    # all if this route didn't award them.
+    user_id = command_store.get_member_for_pc(body.pc_number)
+    if user_id is not None:
+        command_store.clear_zero_time_since(body.pc_number)
+        command_store.clear_idle_since(body.pc_number)
+
     try:
         seconds_added, session = svc.add_time_by_pesos(
-            body.pc_number, body.pesos, actor=current_user["username"]
+            body.pc_number, body.pesos, user_id=user_id,
+            actor=current_user["username"],
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+    points_awarded = 0
+    if user_id is not None:
+        points_awarded = MembershipService(db).award_coin_points(
+            user_id, session.pc_id, body.pesos
+        )
 
     return {
         "pc_number": body.pc_number,
         "pesos_added": body.pesos,
         "seconds_added": seconds_added,
         "total_seconds": session.granted_seconds,
+        "points_awarded": points_awarded,
     }
 
 
@@ -2002,6 +2026,7 @@ def membership_page(
             "must_change_password": m.must_change_password,
             "total_pesos": total_pesos,
             "total_seconds": total_seconds,
+            "loyalty_points": m.loyalty_points,
         })
 
     return templates.TemplateResponse("membership.html", {
@@ -2077,6 +2102,10 @@ def update_membership_config(
         "zero_time_auto_logout_seconds": cfg.zero_time_auto_logout_seconds,
         "idle_auto_shutdown_minutes": cfg.idle_auto_shutdown_minutes,
         "member_heartbeat_timeout_minutes": cfg.member_heartbeat_timeout_minutes,
+        "points_enabled": cfg.points_enabled,
+        "points_per_10_pesos": cfg.points_per_10_pesos,
+        "points_streak_bonus": cfg.points_streak_bonus,
+        "points_per_minute_redeem": cfg.points_per_minute_redeem,
     }}
 
 
@@ -2138,6 +2167,27 @@ def adjust_member_balance(
     user.balance_seconds = max(0, user.balance_seconds + body.seconds)
     db.commit()
     return {"status": "ok", "balance_seconds": user.balance_seconds}
+
+
+class AdjustPointsBody(BaseModel):
+    points: int
+
+
+@router.post("/api/membership/members/{member_id}/adjust-points", dependencies=[Depends(_require_active_license)])
+def adjust_member_points(
+    member_id: int,
+    body: AdjustPointsBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_adjust_points(member_id, body.points)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"status": "ok", "loyalty_points": result["loyalty_points"]}
 
 
 @router.post("/api/membership/members/{member_id}/force-logout", dependencies=[Depends(_require_active_license)])
@@ -2224,6 +2274,140 @@ def reset_member_password(
     }
 
 
+# ── Reward catalog + redemption queue (admin only) ────────────────────────────
+
+class CreateRewardBody(BaseModel):
+    name: str
+    kind: str  # "time" | "food"
+    points_cost: int
+    minutes: Optional[int] = None
+
+
+@router.get("/rewards", response_class=HTMLResponse)
+def rewards_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
+
+    msvc = MembershipService(db)
+    items = db.query(RewardItem).order_by(RewardItem.points_cost).all()
+    pending = msvc.list_pending_redemptions()
+
+    return templates.TemplateResponse("rewards.html", {
+        "request": request,
+        "items": items,
+        "pending": pending,
+    })
+
+
+@router.get("/api/rewards/pending", dependencies=[Depends(_require_active_license)])
+def get_pending_redemptions(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """JSON snapshot of the pending queue, for the Rewards page's auto-refresh."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    msvc = MembershipService(db)
+    pending = msvc.list_pending_redemptions()
+    result = []
+    for r in pending:
+        user = db.query(User).filter(User.id == r.user_id).first()
+        pc = db.query(PC).filter(PC.id == r.pc_id).first() if r.pc_id else None
+        result.append({
+            "id": r.id,
+            "username": user.username if user else "?",
+            "item_name": r.item_name,
+            "points_spent": r.points_spent,
+            "pc_number": pc.pc_number if pc else None,
+            "created_at": r.created_at.strftime("%m/%d %H:%M"),
+        })
+    return result
+
+
+@router.post("/api/rewards", dependencies=[Depends(_require_active_license)])
+def create_reward(
+    body: CreateRewardBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_create_reward(body.name, body.kind, body.points_cost, body.minutes)
+    if not result["success"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+    item = result["item"]
+    return {
+        "id": item.id, "name": item.name, "kind": item.kind,
+        "points_cost": item.points_cost, "minutes": item.minutes,
+        "is_active": item.is_active,
+    }
+
+
+@router.post("/api/rewards/{reward_id}/toggle", dependencies=[Depends(_require_active_license)])
+def toggle_reward(
+    reward_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_toggle_reward(reward_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"id": reward_id, "is_active": result["is_active"]}
+
+
+@router.delete("/api/rewards/{reward_id}", dependencies=[Depends(_require_active_license)])
+def delete_reward(
+    reward_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_delete_reward(reward_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"status": "deleted", "id": reward_id}
+
+
+@router.post("/api/rewards/redemptions/{redemption_id}/fulfill", dependencies=[Depends(_require_active_license)])
+def fulfill_redemption(
+    redemption_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.fulfill_redemption(redemption_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return {"status": "fulfilled", "id": redemption_id}
+
+
 # ── Staff management (admin only) ────────────────────────────────────────────
 
 class CreateStaffBody(BaseModel):
@@ -2304,3 +2488,331 @@ def delete_staff_user(
     db.delete(target)
     db.commit()
     return {"status": "deleted", "user_id": user_id}
+
+
+# ── Schedule management ───────────────────────────────────────────────────────
+
+_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+_DOW_RE  = re.compile(r"^[0-6]+$")
+
+
+def _validate_time(t: str, field: str):
+    if not _TIME_RE.match(t):
+        raise HTTPException(status_code=400, detail=f"{field} must be in HH:MM format")
+
+
+def _validate_dow(dow: str):
+    if not dow or not _DOW_RE.match(dow):
+        raise HTTPException(status_code=400, detail="days_of_week must contain only digits 0-6")
+
+
+class CoinScheduleBody(BaseModel):
+    label:        str = ""
+    start_time:   str          # "HH:MM"
+    end_time:     str          # "HH:MM"
+    days_of_week: str = "0123456"
+
+
+class ScheduledAnnouncementBody(BaseModel):
+    label:        str = ""
+    fire_time:    str          # "HH:MM"
+    message:      str
+    days_of_week: str = "0123456"
+
+
+@router.get("/schedule", response_class=HTMLResponse)
+def schedule_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
+
+    coin_schedules = db.query(CoinSchedule).order_by(CoinSchedule.created_at).all()
+    announcements  = db.query(ScheduledAnnouncement).order_by(ScheduledAnnouncement.fire_time).all()
+    rate_schedules = db.query(RateSchedule).order_by(RateSchedule.id.asc()).all()
+
+    from services.rate_service import get_all_profiles
+    profiles = get_all_profiles(db)
+
+    active_profile_id = command_store.get_active_rate_schedule_profile_id()
+    active_profile = (
+        next((p for p in profiles if p.id == active_profile_id), None)
+        if active_profile_id is not None else None
+    )
+
+    return templates.TemplateResponse("schedule.html", {
+        "request": request,
+        "coin_schedules": coin_schedules,
+        "announcements": announcements,
+        "schedule_blocked_now": command_store.is_schedule_blocked(),
+        "rate_schedules": rate_schedules,
+        "profiles": profiles,
+        "active_happy_hour_profile": active_profile,
+    })
+
+
+# ── Coin block CRUD ───────────────────────────────────────────────────────────
+
+@router.post("/api/schedule/coin-blocks")
+def create_coin_block(
+    body: CoinScheduleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.start_time, "start_time")
+    _validate_time(body.end_time, "end_time")
+    _validate_dow(body.days_of_week)
+
+    sched = CoinSchedule(
+        label=body.label.strip(),
+        start_time=body.start_time,
+        end_time=body.end_time,
+        days_of_week=body.days_of_week,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return {
+        "id": sched.id,
+        "label": sched.label,
+        "start_time": sched.start_time,
+        "end_time": sched.end_time,
+        "days_of_week": sched.days_of_week,
+        "is_active": sched.is_active,
+    }
+
+
+@router.delete("/api/schedule/coin-blocks/{sched_id}")
+def delete_coin_block(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(CoinSchedule).filter(CoinSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    db.delete(sched)
+    db.commit()
+    return {"status": "deleted", "id": sched_id}
+
+
+@router.post("/api/schedule/coin-blocks/{sched_id}/toggle")
+def toggle_coin_block(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(CoinSchedule).filter(CoinSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    sched.is_active = not sched.is_active
+    db.commit()
+    return {"id": sched_id, "is_active": sched.is_active}
+
+
+# ── Scheduled announcement CRUD ───────────────────────────────────────────────
+
+@router.post("/api/schedule/announcements")
+def create_scheduled_announcement(
+    body: ScheduledAnnouncementBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.fire_time, "fire_time")
+    _validate_dow(body.days_of_week)
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+
+    ann = ScheduledAnnouncement(
+        label=body.label.strip(),
+        fire_time=body.fire_time,
+        message=body.message.strip(),
+        days_of_week=body.days_of_week,
+    )
+    db.add(ann)
+    db.commit()
+    db.refresh(ann)
+    return {
+        "id": ann.id,
+        "label": ann.label,
+        "fire_time": ann.fire_time,
+        "message": ann.message,
+        "days_of_week": ann.days_of_week,
+        "is_active": ann.is_active,
+    }
+
+
+@router.delete("/api/schedule/announcements/{ann_id}")
+def delete_scheduled_announcement(
+    ann_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    ann = db.query(ScheduledAnnouncement).filter(ScheduledAnnouncement.id == ann_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    db.delete(ann)
+    db.commit()
+    return {"status": "deleted", "id": ann_id}
+
+
+@router.post("/api/schedule/announcements/{ann_id}/toggle")
+def toggle_scheduled_announcement(
+    ann_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    ann = db.query(ScheduledAnnouncement).filter(ScheduledAnnouncement.id == ann_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    ann.is_active = not ann.is_active
+    db.commit()
+    return {"id": ann_id, "is_active": ann.is_active}
+
+
+# ── Happy Hour rate schedule CRUD ─────────────────────────────────────────────
+
+class RateScheduleBody(BaseModel):
+    label:        str = ""
+    profile_id:   int
+    start_time:   str          # "HH:MM"
+    end_time:     str          # "HH:MM"
+    days_of_week: str = "0123456"
+
+
+def _rate_schedule_dict(sched: RateSchedule, profile: RateProfile | None) -> dict:
+    return {
+        "id": sched.id,
+        "label": sched.label,
+        "profile_id": sched.profile_id,
+        "profile_name": profile.name if profile else "(deleted profile)",
+        "profile_color": profile.color if profile else "#6b7280",
+        "start_time": sched.start_time,
+        "end_time": sched.end_time,
+        "days_of_week": sched.days_of_week,
+        "is_active": sched.is_active,
+    }
+
+
+@router.post("/api/schedule/rate-schedules")
+def create_rate_schedule(
+    body: RateScheduleBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    _validate_time(body.start_time, "start_time")
+    _validate_time(body.end_time, "end_time")
+    _validate_dow(body.days_of_week)
+
+    profile = db.query(RateProfile).filter(RateProfile.id == body.profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Rate profile not found")
+
+    sched = RateSchedule(
+        label=body.label.strip(),
+        profile_id=body.profile_id,
+        start_time=body.start_time,
+        end_time=body.end_time,
+        days_of_week=body.days_of_week,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return _rate_schedule_dict(sched, profile)
+
+
+@router.delete("/api/schedule/rate-schedules/{sched_id}")
+def delete_rate_schedule(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(RateSchedule).filter(RateSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    db.delete(sched)
+    db.commit()
+    return {"status": "deleted", "id": sched_id}
+
+
+@router.post("/api/schedule/rate-schedules/{sched_id}/toggle")
+def toggle_rate_schedule(
+    sched_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    sched = db.query(RateSchedule).filter(RateSchedule.id == sched_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    sched.is_active = not sched.is_active
+    db.commit()
+    return {"id": sched_id, "is_active": sched.is_active}
+
+
+@router.get("/api/schedule/status")
+def get_schedule_status(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Return current schedule-blocked state and the label of the active block, if any."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    now      = timeutil.local_now()
+    cur_time = now.strftime("%H:%M")
+    cur_dow  = str(now.weekday())
+
+    active_label = None
+    if command_store.is_schedule_blocked():
+        # Find the label of the matching schedule
+        from main import _time_in_range
+        schedules = db.query(CoinSchedule).filter(CoinSchedule.is_active == True).all()
+        for s in schedules:
+            if cur_dow in s.days_of_week and _time_in_range(s.start_time, s.end_time, cur_time):
+                active_label = s.label or f"{s.start_time}–{s.end_time}"
+                break
+
+    return {
+        "schedule_blocked": command_store.is_schedule_blocked(),
+        "active_block_label": active_label,
+    }

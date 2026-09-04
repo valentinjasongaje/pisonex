@@ -13,7 +13,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base, SessionLocal
-from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig
+from models import (
+    AdminUser, CoinRate, CoinSchedule, MembershipConfig, RateProfile,
+    RateSchedule, ScheduledAnnouncement, ServerConfig,
+)
+import timeutil
 from api import auth, pc, sessions, admin
 from api.license import router as license_router
 from api.member import router as member_router
@@ -190,6 +194,9 @@ async def lifespan(app: FastAPI):
     # Background task: membership auto-expiry (heartbeat timeout, zero-time, idle shutdown)
     membership_task = asyncio.create_task(_membership_expiry_loop())
 
+    # Background task: coin-block schedules, timed announcements, Happy Hour
+    schedule_task = asyncio.create_task(_schedule_loop())
+
     # Background task: nightly earnings archive to pisonex.com
     earnings_task = asyncio.create_task(_nightly_earnings_sync_loop())
 
@@ -202,6 +209,7 @@ async def lifespan(app: FastAPI):
     expire_task.cancel()
     license_task.cancel()
     membership_task.cancel()
+    schedule_task.cancel()
     earnings_task.cancel()
     status_task.cancel()
     logger.info("Pisonex server shut down")
@@ -264,6 +272,17 @@ def _migrate_schema():
         )
         migrated.append("users.must_change_password (added)")
 
+    # Loyalty points
+    new_points_user_columns = [
+        ("loyalty_points", "INTEGER NOT NULL DEFAULT 0"),
+        ("login_streak_days", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_login_date", "VARCHAR(10)"),
+    ]
+    for col_name, col_type in new_points_user_columns:
+        if not has_column("users", col_name):
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+            migrated.append(f"users.{col_name} (added)")
+
     # Add role column to admin_users if missing
     if not has_column("admin_users", "role"):
         cursor.execute("ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'")
@@ -276,6 +295,18 @@ def _migrate_schema():
     for col_name, col_type in new_membership_columns:
         if not has_column("membership_config", col_name):
             cursor.execute(f"ALTER TABLE membership_config ADD COLUMN {col_name} {col_type} DEFAULT 0")
+            migrated.append(f"membership_config.{col_name} (added)")
+
+    # Loyalty points config
+    new_points_config_columns = [
+        ("points_enabled", "INTEGER NOT NULL DEFAULT 0"),
+        ("points_per_10_pesos", "INTEGER NOT NULL DEFAULT 1"),
+        ("points_streak_bonus", "INTEGER NOT NULL DEFAULT 5"),
+        ("points_per_minute_redeem", "INTEGER NOT NULL DEFAULT 2"),
+    ]
+    for col_name, col_type in new_points_config_columns:
+        if not has_column("membership_config", col_name):
+            cursor.execute(f"ALTER TABLE membership_config ADD COLUMN {col_name} {col_type}")
             migrated.append(f"membership_config.{col_name} (added)")
 
     # Traditional Café Mode toggle (formerly "coins_enabled", inverted).
@@ -494,6 +525,119 @@ async def _membership_expiry_loop():
                 db.close()
         except Exception as e:
             logger.error("Membership expiry error: %s", e)
+
+
+def _time_in_range(start: str, end: str, current: str) -> bool:
+    """Return True if current HH:MM falls within [start, end]. Handles midnight crossings."""
+    if start <= end:
+        return start <= current <= end
+    # Crosses midnight e.g. "22:00" to "06:00"
+    return current >= start or current <= end
+
+
+def _next_minute(t: str) -> str:
+    """Return HH:MM for t + 1 minute (used to build a 1-minute fire window)."""
+    h, m = map(int, t.split(":"))
+    m += 1
+    if m >= 60:
+        m, h = 0, (h + 1) % 24
+    return f"{h:02d}:{m:02d}"
+
+
+def _run_schedule_tick():
+    """
+    Called every 30 s from _schedule_loop.
+
+    1. Evaluates all active CoinSchedule rows → sets command_store._schedule_blocked.
+    2. Fires any ScheduledAnnouncement whose fire_time window is now and hasn't
+       fired today yet.
+    3. Evaluates all active RateSchedule rows ("Happy Hour") → sets
+       command_store._active_rate_schedule_profile_id.
+
+    Uses timeutil.local_now() (the café's configured TIMEZONE), NOT UTC or the
+    server OS clock, so schedules match the timezone the owner actually set —
+    the same source of "now" the reports on the dashboard use.
+    """
+    import command_store
+    now      = timeutil.local_now()
+    cur_time = now.strftime("%H:%M")
+    cur_date = now.strftime("%Y-%m-%d")
+    cur_dow  = str(now.weekday())   # "0"=Mon … "6"=Sun
+
+    with SessionLocal() as db:
+        # ── Coin block ────────────────────────────────────────────────────────
+        schedules = db.query(CoinSchedule).filter(CoinSchedule.is_active == True).all()
+        blocked = any(
+            cur_dow in s.days_of_week
+            and _time_in_range(s.start_time, s.end_time, cur_time)
+            for s in schedules
+        )
+        old_blocked = command_store.is_schedule_blocked()
+        if blocked != old_blocked:
+            command_store.set_schedule_blocked(blocked)
+            logger.info(
+                "Coin slot %s by schedule at %s",
+                "BLOCKED" if blocked else "UNBLOCKED",
+                cur_time,
+            )
+
+        # ── Announcements ─────────────────────────────────────────────────────
+        announcements = db.query(ScheduledAnnouncement).filter(
+            ScheduledAnnouncement.is_active == True
+        ).all()
+        for ann in announcements:
+            if cur_dow not in ann.days_of_week:
+                continue
+            if ann.last_fired_date == cur_date:
+                continue   # already fired today
+            # Fire if we're within the 1-minute window of fire_time
+            if ann.fire_time <= cur_time < _next_minute(ann.fire_time):
+                command_store.set_announcement(ann.message)
+                ann.last_fired_date = cur_date
+                db.commit()
+                logger.info(
+                    "Scheduled announcement fired: %s",
+                    ann.label or ann.message[:50],
+                )
+
+        # ── Happy Hour rate schedule ─────────────────────────────────────────
+        # First match wins (lowest id / oldest-created), so two overlapping
+        # windows resolve deterministically rather than racing on dict order.
+        rate_schedules = (
+            db.query(RateSchedule)
+            .filter(RateSchedule.is_active == True)
+            .order_by(RateSchedule.id.asc())
+            .all()
+        )
+        matched_profile_id = None
+        matched_label = None
+        for rs in rate_schedules:
+            if rs.days_of_week and cur_dow in rs.days_of_week \
+                    and _time_in_range(rs.start_time, rs.end_time, cur_time):
+                matched_profile_id = rs.profile_id
+                matched_label = rs.label or f"{rs.start_time}–{rs.end_time}"
+                break
+
+        old_rate_profile_id = command_store.get_active_rate_schedule_profile_id()
+        if matched_profile_id != old_rate_profile_id:
+            command_store.set_active_rate_schedule_profile_id(matched_profile_id)
+            if matched_profile_id is not None:
+                logger.info(
+                    "Happy Hour rate schedule active: %r (profile_id=%s) at %s",
+                    matched_label, matched_profile_id, cur_time,
+                )
+            else:
+                logger.info("Happy Hour rate schedule ended at %s", cur_time)
+
+
+async def _schedule_loop():
+    """Background task: enforce coin schedules and fire timed announcements."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            _run_schedule_tick()
+        except Exception as exc:
+            logger.error("_schedule_loop error: %s", exc)
 
 
 async def _nightly_earnings_sync_loop():

@@ -1,0 +1,528 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>Schedule</h1>
+</div>
+
+{% if schedule_blocked_now %}
+<div style="display:flex;align-items:center;gap:.6rem;padding:.75rem 1rem;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:8px;margin-bottom:1.25rem;color:#ef4444;font-size:.9rem;font-weight:600;">
+  <span style="font-size:1.1rem;">&#9940;</span>
+  Coin slot is currently blocked by a schedule
+</div>
+{% endif %}
+
+{% if active_happy_hour_profile %}
+<div style="display:flex;align-items:center;gap:.6rem;padding:.75rem 1rem;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);border-radius:8px;margin-bottom:1.25rem;color:#22c55e;font-size:.9rem;font-weight:600;">
+  <span style="font-size:1.1rem;">&#9889;</span>
+  Happy Hour is active — PCs without a pinned profile are pricing on
+  <span style="display:inline-flex;align-items:center;gap:.3rem;">
+    <span class="profile-dot" style="background:{{ active_happy_hour_profile.color }};width:8px;height:8px;border-radius:50%;display:inline-block;"></span>
+    {{ active_happy_hour_profile.name }}
+  </span>
+</div>
+{% endif %}
+
+<!-- ── Section 1: Coin Block Schedules ────────────────────────────────────── -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+    <div>
+      <h2 style="margin:0 0 .2rem;">Coin Block Schedules</h2>
+      <p style="font-size:.82rem;color:var(--gray);margin:0;">
+        Automatically disable coin acceptance during defined time windows.
+        Days use Monday=0 … Sunday=6.
+      </p>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="toggleBlockForm()">+ Add Block</button>
+  </div>
+
+  <!-- Inline add form -->
+  <div id="block-form-wrap" style="display:none;background:var(--surface-2,rgba(255,255,255,.04));border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem;">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Label (optional)</label>
+        <input type="text" id="bf-label" maxlength="120" placeholder="e.g. Night block"
+          style="width:100%;margin-top:.3rem;" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Days of Week</label>
+        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.4rem;" id="bf-days">
+          {% for d, name in [("0","Mon"),("1","Tue"),("2","Wed"),("3","Thu"),("4","Fri"),("5","Sat"),("6","Sun")] %}
+          <label style="display:flex;align-items:center;gap:.25rem;font-size:.78rem;cursor:pointer;">
+            <input type="checkbox" name="bf-dow" value="{{ d }}" checked
+              style="accent-color:var(--blue,#3b82f6);width:14px;height:14px;" />
+            {{ name }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.75rem;align-items:end;">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Start Time</label>
+        <input type="time" id="bf-start" style="width:100%;margin-top:.3rem;" value="22:00" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">End Time</label>
+        <input type="time" id="bf-end" style="width:100%;margin-top:.3rem;" value="08:00" />
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;">
+        <button class="btn btn-primary" onclick="addCoinBlock()">Add</button>
+        <button class="btn btn-default" onclick="toggleBlockForm()">Cancel</button>
+      </div>
+    </div>
+    <div id="bf-status" style="font-size:.82rem;margin-top:.5rem;"></div>
+  </div>
+
+  <!-- Schedules table -->
+  <div id="coin-blocks-table">
+    {% if coin_schedules %}
+    <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Label</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Days</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Start</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">End</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Status</th>
+          <th style="text-align:right;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="coin-blocks-body">
+        {% for s in coin_schedules %}
+        <tr id="cb-row-{{ s.id }}" style="border-bottom:1px solid rgba(255,255,255,.05);">
+          <td style="padding:.55rem .75rem;color:var(--text);">{{ s.label or "—" }}</td>
+          <td style="padding:.55rem .75rem;">
+            <div style="display:flex;gap:.25rem;flex-wrap:wrap;">
+              {% for d, name in [("0","Mon"),("1","Tue"),("2","Wed"),("3","Thu"),("4","Fri"),("5","Sat"),("6","Sun")] %}
+              <span style="font-size:.7rem;padding:.15rem .4rem;border-radius:4px;
+                {% if d in s.days_of_week %}
+                  background:rgba(59,130,246,.2);color:#3b82f6;border:1px solid rgba(59,130,246,.3);
+                {% else %}
+                  background:var(--surface-2,rgba(255,255,255,.04));color:var(--text-dim);border:1px solid var(--border);opacity:.5;
+                {% endif %}
+              ">{{ name }}</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td style="padding:.55rem .75rem;color:var(--text);font-family:monospace;">{{ s.start_time }}</td>
+          <td style="padding:.55rem .75rem;color:var(--text);font-family:monospace;">{{ s.end_time }}</td>
+          <td style="padding:.55rem .75rem;">
+            {% if s.is_active %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:99px;font-weight:600;">Active</span>
+            {% else %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(148,163,184,.1);color:var(--text-dim);border:1px solid var(--border);border-radius:99px;font-weight:600;">Paused</span>
+            {% endif %}
+          </td>
+          <td style="padding:.55rem .75rem;text-align:right;">
+            <button class="btn btn-sm btn-secondary" style="font-size:.75rem;"
+              onclick="toggleCoinBlock({{ s.id }}, {{ 'false' if s.is_active else 'true' }})">
+              {{ "Pause" if s.is_active else "Resume" }}
+            </button>
+            <button class="btn btn-sm btn-danger" style="font-size:.75rem;margin-left:.35rem;"
+              onclick="deleteCoinBlock({{ s.id }})">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p id="coin-blocks-empty" style="font-size:.85rem;color:var(--text-dim);margin:0;">
+      No coin block schedules configured yet.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Section 2: Happy Hour Rate Schedules ────────────────────────────────── -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+    <div>
+      <h2 style="margin:0 0 .2rem;">Happy Hour Rates</h2>
+      <p style="font-size:.82rem;color:var(--gray);margin:0;">
+        Automatically switch which rate profile is active during set hours. Only
+        affects PCs with no profile explicitly pinned on the
+        <a href="/dashboard/pcs">PC Management</a> page — a PC you've deliberately
+        priced (e.g. a VIP machine) always keeps its own rates.
+        {% if rate_schedules|length > 1 %}
+        If two windows overlap, the one added first wins.
+        {% endif %}
+      </p>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="toggleHhForm()">+ Add Happy Hour</button>
+  </div>
+
+  {% if not profiles or profiles|length < 2 %}
+  <p style="font-size:.82rem;color:var(--text-dim);margin:0 0 1rem;">
+    You only have one rate profile. Create another on the
+    <a href="/dashboard/rates">Coin Rates</a> page first — Happy Hour switches
+    <em>between</em> profiles, so there needs to be a second one to switch to.
+  </p>
+  {% endif %}
+
+  <!-- Inline add form -->
+  <div id="hh-form-wrap" style="display:none;background:var(--surface-2,rgba(255,255,255,.04));border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem;">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Label (optional)</label>
+        <input type="text" id="hh-label" maxlength="120" placeholder="e.g. Weekday Happy Hour"
+          style="width:100%;margin-top:.3rem;" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Rate Profile</label>
+        <select id="hh-profile" style="width:100%;margin-top:.3rem;">
+          {% for p in profiles %}
+          <option value="{{ p.id }}">{{ p.name }}{% if p.is_default %} (default){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:.75rem;">
+      <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Days of Week</label>
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.4rem;" id="hh-days">
+        {% for d, name in [("0","Mon"),("1","Tue"),("2","Wed"),("3","Thu"),("4","Fri"),("5","Sat"),("6","Sun")] %}
+        <label style="display:flex;align-items:center;gap:.25rem;font-size:.78rem;cursor:pointer;">
+          <input type="checkbox" name="hh-dow" value="{{ d }}" checked
+            style="accent-color:var(--blue,#3b82f6);width:14px;height:14px;" />
+          {{ name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.75rem;align-items:end;">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Start Time</label>
+        <input type="time" id="hh-start" style="width:100%;margin-top:.3rem;" value="08:00" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">End Time</label>
+        <input type="time" id="hh-end" style="width:100%;margin-top:.3rem;" value="12:00" />
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;">
+        <button class="btn btn-primary" onclick="addHappyHour()">Add</button>
+        <button class="btn btn-default" onclick="toggleHhForm()">Cancel</button>
+      </div>
+    </div>
+    <div id="hh-status" style="font-size:.82rem;margin-top:.5rem;"></div>
+  </div>
+
+  <!-- Schedules table -->
+  <div id="hh-table">
+    {% if rate_schedules %}
+    <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Label</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Profile</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Days</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Start</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">End</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Status</th>
+          <th style="text-align:right;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);white-space:nowrap;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="hh-body">
+        {% for s in rate_schedules %}
+        <tr id="hh-row-{{ s.id }}" style="border-bottom:1px solid rgba(255,255,255,.05);">
+          <td style="padding:.55rem .75rem;color:var(--text);">{{ s.label or "—" }}</td>
+          <td style="padding:.55rem .75rem;">
+            <span style="display:inline-flex;align-items:center;gap:.35rem;">
+              <span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:{{ s.profile.color if s.profile else '#6b7280' }};"></span>
+              {{ s.profile.name if s.profile else "(deleted profile)" }}
+            </span>
+          </td>
+          <td style="padding:.55rem .75rem;">
+            <div style="display:flex;gap:.25rem;flex-wrap:wrap;">
+              {% for d, name in [("0","Mon"),("1","Tue"),("2","Wed"),("3","Thu"),("4","Fri"),("5","Sat"),("6","Sun")] %}
+              <span style="font-size:.7rem;padding:.15rem .4rem;border-radius:4px;
+                {% if d in s.days_of_week %}
+                  background:rgba(34,197,94,.2);color:#22c55e;border:1px solid rgba(34,197,94,.3);
+                {% else %}
+                  background:var(--surface-2,rgba(255,255,255,.04));color:var(--text-dim);border:1px solid var(--border);opacity:.5;
+                {% endif %}
+              ">{{ name }}</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td style="padding:.55rem .75rem;color:var(--text);font-family:monospace;">{{ s.start_time }}</td>
+          <td style="padding:.55rem .75rem;color:var(--text);font-family:monospace;">{{ s.end_time }}</td>
+          <td style="padding:.55rem .75rem;">
+            {% if s.is_active %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:99px;font-weight:600;">Active</span>
+            {% else %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(148,163,184,.1);color:var(--text-dim);border:1px solid var(--border);border-radius:99px;font-weight:600;">Paused</span>
+            {% endif %}
+          </td>
+          <td style="padding:.55rem .75rem;text-align:right;">
+            <button class="btn btn-sm btn-secondary" style="font-size:.75rem;"
+              onclick="toggleHappyHour({{ s.id }})">
+              {{ "Pause" if s.is_active else "Resume" }}
+            </button>
+            <button class="btn btn-sm btn-danger" style="font-size:.75rem;margin-left:.35rem;"
+              onclick="deleteHappyHour({{ s.id }})">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p id="hh-empty" style="font-size:.85rem;color:var(--text-dim);margin:0;">
+      No Happy Hour schedules configured yet.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Section 3: Scheduled Announcements ────────────────────────────────── -->
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+    <div>
+      <h2 style="margin:0 0 .2rem;">Scheduled Announcements</h2>
+      <p style="font-size:.82rem;color:var(--gray);margin:0;">
+        Automatically broadcast a message to all PCs at a set time each day.
+        Each announcement fires once per day within a 1-minute window of the configured time.
+      </p>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="toggleAnnForm()">+ Add Announcement</button>
+  </div>
+
+  <!-- Inline add form -->
+  <div id="ann-form-wrap" style="display:none;background:var(--surface-2,rgba(255,255,255,.04));border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem;">
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Label (optional)</label>
+        <input type="text" id="af-label" maxlength="120" placeholder="e.g. Closing reminder"
+          style="width:100%;margin-top:.3rem;" />
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Fire Time</label>
+        <input type="time" id="af-time" style="width:100%;margin-top:.3rem;" value="22:00" />
+      </div>
+    </div>
+    <div style="margin-bottom:.75rem;">
+      <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Days of Week</label>
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.4rem;" id="af-days">
+        {% for d, name in [("0","Mon"),("1","Tue"),("2","Wed"),("3","Thu"),("4","Fri"),("5","Sat"),("6","Sun")] %}
+        <label style="display:flex;align-items:center;gap:.25rem;font-size:.78rem;cursor:pointer;">
+          <input type="checkbox" name="af-dow" value="{{ d }}" checked
+            style="accent-color:var(--blue,#3b82f6);width:14px;height:14px;" />
+          {{ name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="form-group" style="margin:0 0 .75rem;">
+      <label style="font-size:.78rem;font-weight:600;color:var(--text-dim);">Message</label>
+      <textarea id="af-message" rows="2" maxlength="500"
+        placeholder="e.g. Shop closing in 30 minutes — please save your work."
+        style="width:100%;margin-top:.3rem;resize:vertical;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.4rem .6rem;font-size:.85rem;"></textarea>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center;">
+      <button class="btn btn-primary" onclick="addAnnouncement()">Add</button>
+      <button class="btn btn-default" onclick="toggleAnnForm()">Cancel</button>
+      <span id="af-status" style="font-size:.82rem;"></span>
+    </div>
+  </div>
+
+  <!-- Announcements table -->
+  <div id="ann-table">
+    {% if announcements %}
+    <table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Label</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Time</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Days</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Message</th>
+          <th style="text-align:left;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Status</th>
+          <th style="text-align:right;padding:.5rem .75rem;font-size:.75rem;font-weight:600;color:var(--text-dim);">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="ann-body">
+        {% for a in announcements %}
+        <tr id="ann-row-{{ a.id }}" style="border-bottom:1px solid rgba(255,255,255,.05);">
+          <td style="padding:.55rem .75rem;color:var(--text);">{{ a.label or "—" }}</td>
+          <td style="padding:.55rem .75rem;color:var(--text);font-family:monospace;">{{ a.fire_time }}</td>
+          <td style="padding:.55rem .75rem;">
+            <div style="display:flex;gap:.25rem;flex-wrap:wrap;">
+              {% for d, name in [("0","Mon"),("1","Tue"),("2","Wed"),("3","Thu"),("4","Fri"),("5","Sat"),("6","Sun")] %}
+              <span style="font-size:.7rem;padding:.15rem .4rem;border-radius:4px;
+                {% if d in a.days_of_week %}
+                  background:rgba(59,130,246,.2);color:#3b82f6;border:1px solid rgba(59,130,246,.3);
+                {% else %}
+                  background:var(--surface-2,rgba(255,255,255,.04));color:var(--text-dim);border:1px solid var(--border);opacity:.5;
+                {% endif %}
+              ">{{ name }}</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td style="padding:.55rem .75rem;color:var(--text);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+            title="{{ a.message }}">{{ a.message }}</td>
+          <td style="padding:.55rem .75rem;">
+            {% if a.is_active %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:99px;font-weight:600;">Active</span>
+            {% else %}
+            <span style="font-size:.72rem;padding:.2rem .55rem;background:rgba(148,163,184,.1);color:var(--text-dim);border:1px solid var(--border);border-radius:99px;font-weight:600;">Paused</span>
+            {% endif %}
+          </td>
+          <td style="padding:.55rem .75rem;text-align:right;">
+            <button class="btn btn-sm btn-secondary" style="font-size:.75rem;"
+              onclick="toggleAnn({{ a.id }}, {{ 'false' if a.is_active else 'true' }})">
+              {{ "Pause" if a.is_active else "Resume" }}
+            </button>
+            <button class="btn btn-sm btn-danger" style="font-size:.75rem;margin-left:.35rem;"
+              onclick="deleteAnn({{ a.id }})">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p id="ann-empty" style="font-size:.85rem;color:var(--text-dim);margin:0;">
+      No scheduled announcements configured yet.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function _getDow(groupName) {
+  return [...document.querySelectorAll(`input[name="${groupName}"]:checked`)]
+    .map(el => el.value).join('');
+}
+
+function _statusEl(id, msg, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok ? 'var(--green,#22c55e)' : 'var(--red,#ef4444)';
+  if (ok) setTimeout(() => el.textContent = '', 3500);
+}
+
+// ── Coin Block Schedules ──────────────────────────────────────────────────────
+function toggleBlockForm() {
+  const w = document.getElementById('block-form-wrap');
+  w.style.display = w.style.display === 'none' ? '' : 'none';
+}
+
+async function addCoinBlock() {
+  const label = document.getElementById('bf-label').value.trim();
+  const start = document.getElementById('bf-start').value;
+  const end   = document.getElementById('bf-end').value;
+  const dow   = _getDow('bf-dow');
+  if (!start || !end) { _statusEl('bf-status', 'Start and end time are required.', false); return; }
+  if (!dow) { _statusEl('bf-status', 'Select at least one day.', false); return; }
+
+  const res = await fetch('/dashboard/api/schedule/coin-blocks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, start_time: start, end_time: end, days_of_week: dow }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    _statusEl('bf-status', d.detail || 'Failed.', false); return;
+  }
+  // Reload page to show new row
+  location.reload();
+}
+
+async function deleteCoinBlock(id) {
+  if (!confirm('Delete this coin block schedule?')) return;
+  const res = await fetch(`/dashboard/api/schedule/coin-blocks/${id}`, { method: 'DELETE' });
+  if (res.ok) {
+    const row = document.getElementById(`cb-row-${id}`);
+    if (row) row.remove();
+  }
+}
+
+async function toggleCoinBlock(id, newActive) {
+  const res = await fetch(`/dashboard/api/schedule/coin-blocks/${id}/toggle`, { method: 'POST' });
+  if (res.ok) location.reload();
+}
+
+// ── Scheduled Announcements ───────────────────────────────────────────────────
+function toggleAnnForm() {
+  const w = document.getElementById('ann-form-wrap');
+  w.style.display = w.style.display === 'none' ? '' : 'none';
+}
+
+async function addAnnouncement() {
+  const label   = document.getElementById('af-label').value.trim();
+  const time    = document.getElementById('af-time').value;
+  const message = document.getElementById('af-message').value.trim();
+  const dow     = _getDow('af-dow');
+  if (!time) { _statusEl('af-status', 'Fire time is required.', false); return; }
+  if (!message) { _statusEl('af-status', 'Message cannot be empty.', false); return; }
+  if (!dow) { _statusEl('af-status', 'Select at least one day.', false); return; }
+
+  const res = await fetch('/dashboard/api/schedule/announcements', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, fire_time: time, message, days_of_week: dow }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    _statusEl('af-status', d.detail || 'Failed.', false); return;
+  }
+  location.reload();
+}
+
+async function deleteAnn(id) {
+  if (!confirm('Delete this scheduled announcement?')) return;
+  const res = await fetch(`/dashboard/api/schedule/announcements/${id}`, { method: 'DELETE' });
+  if (res.ok) {
+    const row = document.getElementById(`ann-row-${id}`);
+    if (row) row.remove();
+  }
+}
+
+async function toggleAnn(id, newActive) {
+  const res = await fetch(`/dashboard/api/schedule/announcements/${id}/toggle`, { method: 'POST' });
+  if (res.ok) location.reload();
+}
+
+// ── Happy Hour Rate Schedules ──────────────────────────────────────────────
+function toggleHhForm() {
+  const w = document.getElementById('hh-form-wrap');
+  w.style.display = w.style.display === 'none' ? '' : 'none';
+}
+
+async function addHappyHour() {
+  const label     = document.getElementById('hh-label').value.trim();
+  const profileId = parseInt(document.getElementById('hh-profile').value, 10);
+  const start     = document.getElementById('hh-start').value;
+  const end       = document.getElementById('hh-end').value;
+  const dow       = _getDow('hh-dow');
+  if (!start || !end) { _statusEl('hh-status', 'Start and end time are required.', false); return; }
+  if (!dow) { _statusEl('hh-status', 'Select at least one day.', false); return; }
+  if (!profileId) { _statusEl('hh-status', 'Choose a rate profile.', false); return; }
+
+  const res = await fetch('/dashboard/api/schedule/rate-schedules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, profile_id: profileId, start_time: start, end_time: end, days_of_week: dow }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    _statusEl('hh-status', d.detail || 'Failed.', false); return;
+  }
+  location.reload();
+}
+
+async function deleteHappyHour(id) {
+  if (!confirm('Delete this Happy Hour schedule?')) return;
+  const res = await fetch(`/dashboard/api/schedule/rate-schedules/${id}`, { method: 'DELETE' });
+  if (res.ok) {
+    const row = document.getElementById(`hh-row-${id}`);
+    if (row) row.remove();
+  }
+}
+
+async function toggleHappyHour(id) {
+  const res = await fetch(`/dashboard/api/schedule/rate-schedules/${id}/toggle`, { method: 'POST' });
+  if (res.ok) location.reload();
+}
+</script>
+
+{% endblock %}

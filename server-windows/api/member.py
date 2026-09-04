@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import verify_client_key
 from schemas import (
+    RewardItemResponse,
+    MemberRedeemRewardRequest, MemberRedeemRewardResponse,
     MemberLoginRequest, MemberLoginResponse,
     MemberLogoutRequest, MemberLogoutResponse,
     MemberStatusResponse,
@@ -56,3 +58,16 @@ def change_password(req: MemberChangePasswordRequest, db: Session = Depends(get_
     svc = MembershipService(db)
     result = svc.change_password(req.pc_number, req.new_password, old_password=req.old_password)
     return MemberChangePasswordResponse(**result)
+
+
+@router.get("/rewards", response_model=list[RewardItemResponse], dependencies=[_ClientAuth])
+def list_rewards(db: Session = Depends(get_db)):
+    svc = MembershipService(db)
+    return svc.list_active_rewards()
+
+
+@router.post("/redeem-reward", response_model=MemberRedeemRewardResponse, dependencies=[_ClientAuth])
+def redeem_reward(req: MemberRedeemRewardRequest, db: Session = Depends(get_db)):
+    svc = MembershipService(db)
+    result = svc.redeem_reward(req.pc_number, req.reward_item_id)
+    return MemberRedeemRewardResponse(**result)

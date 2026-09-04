@@ -43,6 +43,13 @@ class User(Base):
     # POST /api/member/change-password on first successful password change.
     must_change_password = Column(Boolean, default=False, nullable=False)
 
+    # Loyalty points — earned by paying for time while logged in and by
+    # logging in on consecutive days, redeemed for bonus time or catalog
+    # items. See services/membership_service.py.
+    loyalty_points    = Column(Integer, default=0, nullable=False)
+    login_streak_days = Column(Integer, default=0, nullable=False)
+    last_login_date   = Column(String(10), nullable=True)  # "YYYY-MM-DD", café-local date
+
     sessions     = relationship("Session", back_populates="user")
     transactions = relationship("CoinTransaction", back_populates="user")
     logged_in_pc = relationship("PC", foreign_keys=[logged_in_pc_id])
@@ -99,6 +106,52 @@ class CoinTransaction(Base):
     user = relationship("User", back_populates="transactions")
 
 
+class PointsTransaction(Base):
+    """Audit log of every loyalty-points earn/redeem/admin-adjust event."""
+    __tablename__ = "points_transactions"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    user_id          = Column(Integer, ForeignKey("users.id"), nullable=False)
+    pc_id            = Column(Integer, ForeignKey("pcs.id"), nullable=True)
+    kind             = Column(String(20), nullable=False)  # "earn_coin"|"earn_streak"|"redeem"|"admin_adjust"
+    points_delta     = Column(Integer, nullable=False)     # +/-
+    seconds_redeemed = Column(Integer, nullable=True)      # only set for "redeem" rows
+    created_at       = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class RewardItem(Base):
+    """Admin-defined catalog entry a member can redeem loyalty points for."""
+    __tablename__ = "reward_items"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    name        = Column(String(120), nullable=False)     # "30 Minutes Bonus", "Chips"
+    kind        = Column(String(10), nullable=False)      # "time" | "food"
+    points_cost = Column(Integer, nullable=False)
+    minutes     = Column(Integer, nullable=True)           # only meaningful for kind="time"
+    is_active   = Column(Boolean, default=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class RewardRedemption(Base):
+    """One member's claim against the reward catalog. Snapshots the item's
+    name/kind/cost at redemption time so editing or deleting a catalog item
+    later never corrupts history — this is a receipt, not a live join.
+    """
+    __tablename__ = "reward_redemptions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=False)
+    pc_id           = Column(Integer, ForeignKey("pcs.id"), nullable=True)
+    reward_item_id  = Column(Integer, ForeignKey("reward_items.id"), nullable=True)  # nullable: item may be deleted later
+    item_name       = Column(String(120), nullable=False)
+    kind            = Column(String(10), nullable=False)
+    points_spent    = Column(Integer, nullable=False)
+    minutes_granted = Column(Integer, nullable=True)       # set only for "time" kind
+    status          = Column(String(10), nullable=False, default="pending")  # "pending" | "fulfilled"
+    created_at      = Column(DateTime, default=datetime.utcnow, index=True)
+    fulfilled_at    = Column(DateTime, nullable=True)
+
+
 class CoinRate(Base):
     __tablename__ = "coin_rates"
 
@@ -126,6 +179,12 @@ class MembershipConfig(Base):
     idle_auto_shutdown_minutes      = Column(Integer, default=5, nullable=False)
     member_heartbeat_timeout_minutes = Column(Integer, default=60, nullable=False)
     preset_amounts_enabled          = Column(Boolean, default=False, nullable=False)
+
+    # ── Loyalty points ────────────────────────────────────────────────────────
+    points_enabled          = Column(Boolean, default=False, nullable=False)
+    points_per_10_pesos      = Column(Integer, default=1, nullable=False)
+    points_streak_bonus      = Column(Integer, default=5, nullable=False)
+    points_per_minute_redeem = Column(Integer, default=2, nullable=False)
 
 
 class SystemLog(Base):
@@ -178,3 +237,55 @@ class ServerConfig(Base):
     # When True (default), the server requests FFmpeg live-streaming when admin
     # opens fullscreen. Set False to fall back to 1-second JPEG snapshots.
     ffmpeg_streaming_enabled = Column(Boolean, default=True, nullable=False)
+
+
+class CoinSchedule(Base):
+    """Time ranges when the coin slot is automatically blocked."""
+    __tablename__ = "coin_schedules"
+
+    id           = Column(Integer, primary_key=True)
+    label        = Column(String(120), default="")        # human name e.g. "Night block"
+    start_time   = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    end_time     = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    days_of_week = Column(String(7),  default="0123456")  # subset of "0123456" (Mon=0…Sun=6)
+    is_active    = Column(Boolean, default=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class RateSchedule(Base):
+    """Time-window override of which RateProfile is active — "Happy Hour".
+
+    Only applies to PCs with rate_profile_id = NULL (the common case — no
+    per-PC profile assignment). A PC explicitly pinned to a profile (e.g. a
+    VIP-lounge machine priced on purpose) always keeps its own rates and is
+    never swapped out by a schedule meant for the rest of the shop.
+
+    When multiple active schedules overlap the same moment, the lowest id
+    (oldest-created) wins — see _run_schedule_tick in main.py.
+    """
+    __tablename__ = "rate_schedules"
+
+    id           = Column(Integer, primary_key=True)
+    label        = Column(String(120), default="")        # human name e.g. "Weekday Happy Hour"
+    profile_id   = Column(Integer, ForeignKey("rate_profiles.id"), nullable=False)
+    start_time   = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    end_time     = Column(String(5),  nullable=False)     # "HH:MM" 24h
+    days_of_week = Column(String(7),  default="0123456")  # subset of "0123456" (Mon=0…Sun=6)
+    is_active    = Column(Boolean, default=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    profile = relationship("RateProfile")
+
+
+class ScheduledAnnouncement(Base):
+    """Announcements that fire automatically at a set time each day."""
+    __tablename__ = "scheduled_announcements"
+
+    id              = Column(Integer, primary_key=True)
+    label           = Column(String(120), default="")
+    fire_time       = Column(String(5),   nullable=False)  # "HH:MM" 24h
+    message         = Column(String(500), nullable=False)
+    days_of_week    = Column(String(7),   default="0123456")
+    is_active       = Column(Boolean, default=True)
+    last_fired_date = Column(String(10),  nullable=True)   # "YYYY-MM-DD", prevents double-fire
+    created_at      = Column(DateTime, default=datetime.utcnow)

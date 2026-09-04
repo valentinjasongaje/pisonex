@@ -12,11 +12,16 @@ import secrets
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session as DBSession
+from typing import Optional
 
-from models import User, Session, PC, MembershipConfig, SystemLog
+from models import (
+    User, Session, PC, MembershipConfig, SystemLog, PointsTransaction,
+    RewardItem, RewardRedemption,
+)
 from services.session_service import SessionService
 from api.auth import hash_password, verify_password
 import command_store
+import timeutil
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +278,8 @@ class MembershipService:
         command_store.bind_member(pc_number, user.id)
         command_store.clear_idle_since(pc_number)
 
+        streak_bonus = self._award_login_streak(user, cfg)
+
         self._db.commit()
 
         return {
@@ -280,7 +287,245 @@ class MembershipService:
             "balance_seconds": user.balance_seconds,
             "absorbed_seconds": absorbed_seconds,
             "must_change_password": user.must_change_password,
+            "streak_bonus": streak_bonus,
+            "login_streak_days": user.login_streak_days,
+            "loyalty_points": user.loyalty_points,
         }
+
+    # ── Loyalty points ────────────────────────────────────────────
+
+    def _award_login_streak(self, user: User, cfg: MembershipConfig) -> int:
+        """Called from inside login_member(), right before its commit — shares
+        that transaction rather than starting its own. Awards points once per
+        café-local calendar day, and only when the previous login was exactly
+        the day before; any bigger gap resets the streak to 1.
+
+        The day boundary is the café's TIMEZONE (see timeutil), not the server
+        OS clock — on a box left on UTC those differ by 8 hours in the
+        Philippines, which would roll the streak over mid-morning.
+        """
+        if not cfg.points_enabled:
+            return 0
+
+        today = timeutil.local_date_str()
+        if user.last_login_date == today:
+            return 0  # already logged in today — no double-dip
+
+        if user.last_login_date:
+            try:
+                prev = datetime.strptime(user.last_login_date, "%Y-%m-%d").date()
+                gap_days = (timeutil.local_now().date() - prev).days
+            except ValueError:
+                gap_days = None
+            user.login_streak_days = user.login_streak_days + 1 if gap_days == 1 else 1
+        else:
+            user.login_streak_days = 1
+
+        user.last_login_date = today
+
+        bonus = cfg.points_streak_bonus
+        if bonus > 0:
+            user.loyalty_points += bonus
+            self._db.add(PointsTransaction(
+                user_id=user.id, pc_id=None,
+                kind="earn_streak", points_delta=bonus,
+            ))
+        return bonus
+
+    def award_coin_points(self, user_id: Optional[int], pc_id: Optional[int], pesos: int) -> int:
+        """Called right after a paid time credit for a logged-in member.
+        No-op if points are disabled or nobody is logged in. Returns the
+        number of points awarded. Commits on its own — unlike the streak
+        bonus, this isn't already inside another method's transaction.
+        """
+        if user_id is None or pesos <= 0:
+            return 0
+        cfg = self.get_config()
+        if not cfg.points_enabled:
+            return 0
+
+        points = (pesos * cfg.points_per_10_pesos) // 10
+        if points <= 0:
+            return 0
+
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return 0
+
+        user.loyalty_points += points
+        self._db.add(PointsTransaction(
+            user_id=user.id, pc_id=pc_id,
+            kind="earn_coin", points_delta=points,
+        ))
+        self._db.commit()
+        return points
+
+    # ── Reward catalog ────────────────────────────────────────────
+
+    def list_active_rewards(self) -> list:
+        """Client-facing catalog — only items an admin has left active."""
+        return (
+            self._db.query(RewardItem)
+            .filter(RewardItem.is_active == True)
+            .order_by(RewardItem.points_cost)
+            .all()
+        )
+
+    def redeem_reward(self, pc_number: int, reward_item_id: int) -> dict:
+        """Member-facing, self-service: identifies the member via the PC
+        binding set by login_member() (no re-auth needed — same as
+        change_password). A catalog item has one fixed points cost.
+
+        "time" items fulfill themselves immediately, splitting between the
+        live session and the stored balance. "food" items can't be
+        auto-dispensed: points are deducted now (so they can't be spent
+        twice), but the RewardRedemption row is created "pending" for staff
+        to fulfill at the counter from the Rewards dashboard page.
+        """
+        cfg = self.get_config()
+        if not cfg.points_enabled:
+            return {"success": False, "error": "Loyalty points are not enabled"}
+
+        item = self._db.query(RewardItem).filter(
+            RewardItem.id == reward_item_id, RewardItem.is_active == True
+        ).first()
+        if not item:
+            return {"success": False, "error": "Reward not found"}
+
+        user_id = command_store.get_member_for_pc(pc_number)
+        if user_id is None:
+            return {"success": False, "error": "No member logged in on this PC"}
+
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return {"success": False, "error": "Member not found"}
+
+        if item.points_cost > user.loyalty_points:
+            return {"success": False, "error": f"Not enough points (you have {user.loyalty_points})"}
+
+        user.loyalty_points -= item.points_cost
+
+        minutes_granted = None
+        status = "pending"
+        fulfilled_at = None
+
+        if item.kind == "time":
+            minutes_granted = item.minutes or 0
+            seconds = minutes_granted * 60
+            svc = SessionService(self._db)
+            pc = svc.get_pc(pc_number)
+            session = svc.get_active_session(pc_number) if pc else None
+            if session and session.user_id == user.id:
+                session.granted_seconds += seconds
+            else:
+                user.balance_seconds += seconds
+            status = "fulfilled"
+            fulfilled_at = datetime.utcnow()
+
+        pc = self._db.query(PC).filter(PC.pc_number == pc_number).first()
+        redemption = RewardRedemption(
+            user_id=user.id,
+            pc_id=pc.id if pc else None,
+            reward_item_id=item.id,
+            item_name=item.name,
+            kind=item.kind,
+            points_spent=item.points_cost,
+            minutes_granted=minutes_granted,
+            status=status,
+            fulfilled_at=fulfilled_at,
+        )
+        self._db.add(redemption)
+        self._log("INFO", "membership",
+                   f"Member {user.username} redeemed '{item.name}' ({item.points_cost} pts) on PC {pc_number:02d}"
+                   + (" — pending staff fulfillment" if status == "pending" else ""))
+        self._db.commit()
+
+        return {
+            "success": True,
+            "item_name": item.name,
+            "kind": item.kind,
+            "points_spent": item.points_cost,
+            "minutes_granted": minutes_granted,
+            "remaining_points": user.loyalty_points,
+            "status": status,
+        }
+
+    def admin_create_reward(self, name: str, kind: str, points_cost: int, minutes: int = None) -> dict:
+        name = name.strip()
+        if not name:
+            return {"success": False, "error": "Name cannot be empty"}
+        if kind not in ("time", "food"):
+            return {"success": False, "error": "kind must be 'time' or 'food'"}
+        if points_cost <= 0:
+            return {"success": False, "error": "Points cost must be greater than 0"}
+        if kind == "time" and (not minutes or minutes <= 0):
+            return {"success": False, "error": "Minutes must be greater than 0 for a time reward"}
+
+        item = RewardItem(
+            name=name, kind=kind, points_cost=points_cost,
+            minutes=minutes if kind == "time" else None,
+        )
+        self._db.add(item)
+        self._db.commit()
+        self._db.refresh(item)
+        return {"success": True, "item": item}
+
+    def admin_toggle_reward(self, reward_item_id: int) -> dict:
+        item = self._db.query(RewardItem).filter(RewardItem.id == reward_item_id).first()
+        if not item:
+            return {"success": False, "error": "Reward not found"}
+        item.is_active = not item.is_active
+        self._db.commit()
+        return {"success": True, "is_active": item.is_active}
+
+    def admin_delete_reward(self, reward_item_id: int) -> dict:
+        item = self._db.query(RewardItem).filter(RewardItem.id == reward_item_id).first()
+        if not item:
+            return {"success": False, "error": "Reward not found"}
+        self._db.delete(item)
+        self._db.commit()
+        return {"success": True}
+
+    def list_pending_redemptions(self) -> list:
+        return (
+            self._db.query(RewardRedemption)
+            .filter(RewardRedemption.status == "pending")
+            .order_by(RewardRedemption.created_at)
+            .all()
+        )
+
+    def fulfill_redemption(self, redemption_id: int) -> dict:
+        """Admin/staff: mark a food redemption as handed over at the counter."""
+        redemption = self._db.query(RewardRedemption).filter(
+            RewardRedemption.id == redemption_id
+        ).first()
+        if not redemption:
+            return {"success": False, "error": "Redemption not found"}
+        if redemption.status == "fulfilled":
+            return {"success": False, "error": "Already fulfilled"}
+
+        redemption.status = "fulfilled"
+        redemption.fulfilled_at = datetime.utcnow()
+        self._db.commit()
+        return {"success": True}
+
+    def admin_adjust_points(self, user_id: int, points_delta: int) -> dict:
+        """Admin dashboard: mirrors adjust_member_balance but for loyalty
+        points. Allows negative adjustments; never lets the balance go
+        below 0."""
+        user = self._db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return {"success": False, "error": "Member not found"}
+
+        applied = max(-user.loyalty_points, points_delta)
+        user.loyalty_points += applied
+        if applied != 0:
+            self._db.add(PointsTransaction(
+                user_id=user.id, pc_id=None,
+                kind="admin_adjust", points_delta=applied,
+            ))
+        self._db.commit()
+        return {"success": True, "loyalty_points": user.loyalty_points}
 
     # ── Logout ────────────────────────────────────────────────────
 
@@ -357,6 +602,9 @@ class MembershipService:
             "balance_seconds": 0,
             "can_logout": False,
             "logout_denied_reason": None,
+            "points_enabled": cfg.points_enabled,
+            "loyalty_points": 0,
+            "points_per_minute_redeem": cfg.points_per_minute_redeem,
         }
 
         if user_id is None:
@@ -372,6 +620,7 @@ class MembershipService:
 
         result["logged_in_user"] = user.username
         result["balance_seconds"] = user.balance_seconds
+        result["loyalty_points"] = user.loyalty_points
 
         # Can logout? Zero-time always allowed (Case 26)
         if not session or remaining == 0:

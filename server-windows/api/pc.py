@@ -117,6 +117,7 @@ def heartbeat(
     absorption_enabled = False
     member_username = None
     member_balance_seconds = 0
+    member_loyalty_points = 0
     member_can_logout = False
     zero_time_logout_seconds = 0
     idle_shutdown_seconds = 0
@@ -132,6 +133,7 @@ def heartbeat(
         if member_user:
             member_username = member_user.username
             member_balance_seconds = member_user.balance_seconds
+            member_loyalty_points = member_user.loyalty_points
 
             # Update last_activity_at (heartbeat = activity proof)
             member_user.last_activity_at = datetime.utcnow()
@@ -187,6 +189,8 @@ def heartbeat(
         traditional_mode_enabled=traditional_mode_enabled,
         wallpaper_url=wp_url,
         wallpaper_hash=wp_hash,
+        points_enabled=cfg.points_enabled if cfg else False,
+        member_loyalty_points=member_loyalty_points,
         membership_enabled=membership_enabled,
         absorption_enabled=absorption_enabled,
         member_username=member_username,

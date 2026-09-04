@@ -1,8 +1,26 @@
 from sqlalchemy.orm import Session as DBSession
-from models import CoinRate, RateProfile, ServerConfig
+from models import CoinRate, PC, RateProfile, ServerConfig
 from config import settings
+import command_store
 
 _DEFAULT_PROFILE_ID = 1  # The seed always assigns id=1 to the Default profile
+
+
+def resolve_profile_id(pc: PC, db: DBSession) -> int:
+    """The rate profile that should price this PC's time right now.
+
+    A PC explicitly pinned to a profile (pc.rate_profile_id) always uses it —
+    a Happy Hour RateSchedule only affects PCs left on "whatever's active", so
+    a machine someone deliberately priced (e.g. a VIP lounge PC) never gets
+    swapped out by a schedule meant for the rest of the shop.
+
+    `db` is accepted (unused) to keep this a drop-in replacement for the old
+    `pc.rate_profile_id or 1` call sites, and in case a future revision needs
+    to look anything up.
+    """
+    if pc.rate_profile_id:
+        return pc.rate_profile_id
+    return command_store.get_active_rate_schedule_profile_id() or _DEFAULT_PROFILE_ID
 
 # Above this peso amount the exact solver would allocate a needlessly large
 # table, so the bulk is filled with the best-value rate (which is always optimal
