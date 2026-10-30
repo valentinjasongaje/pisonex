@@ -187,6 +187,10 @@ def _git(*args: str, cwd: Path = ROOT) -> str:
 
 def release_notes(version: str) -> str:
     last_tag = _git("describe", "--tags", "--abbrev=0", "--match", "v*")
+    if last_tag == f"v{version}":
+        # Rebuilding an already-tagged version: describe it against the tag
+        # BEFORE it, not against itself (that would list almost nothing).
+        last_tag = _git("describe", "--tags", "--abbrev=0", "--match", "v*", f"{last_tag}^")
     rng = f"{last_tag}..HEAD" if last_tag else "-30"
     log = _git("log", "--no-merges", "--format=- %s (%h)", *([rng] if last_tag else ["-30"]))
     head = _git("rev-parse", "--short", "HEAD") or "unknown"
