@@ -148,8 +148,14 @@ def heartbeat(
                     elapsed = time.time() - zt_since
                     zero_time_logout_seconds = max(0, int(cfg.zero_time_auto_logout_seconds - elapsed))
 
-    # Idle auto-shutdown countdown (only when no session, no member, PC locked)
-    if is_locked and session is None and member_user_id is None and cfg:
+    # Idle auto-shutdown countdown (only when no session, no member, PC locked).
+    # Must use the SAME rules as MembershipService.check_idle_shutdown(), which
+    # owns the actual shutdown and clears the timer for a PC that hasn't had a
+    # session since it booted. Without the pc_had_session() check here, this
+    # heartbeat restarted the timer every second and the 30 s background loop
+    # cleared it again — the client's 5:00 countdown reset every 30 seconds.
+    if (is_locked and session is None and member_user_id is None and cfg
+            and command_store.pc_had_session(pc_number)):
         idle_since = command_store.get_idle_since(pc_number)
         if idle_since is None:
             command_store.set_idle_since(pc_number, time.time())
