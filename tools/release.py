@@ -12,7 +12,9 @@ Everything else either reads that file at build time or is regenerated from it:
     build/PisoNetClientSetup.iss      pisonex-web admin docs pages (if present)
     build/build*.bat                  deploy/make-release.sh reads it on the Pi
 
-Commands (run from anywhere):
+Commands — run from the pisonex REPO folder (www/pisonex/pisonex). From the
+workspace folder (www/pisonex) use the shortcut instead: `release status`,
+`release bump patch`, ... (release.cmd forwards to this script).
 
     python tools/release.py status              show the version + any drift
     python tools/release.py bump 1.0.5          set an exact version
@@ -328,7 +330,10 @@ def main() -> int:
         problems = check(new, verbose=False)
         for p in problems:
             print("  ! ", p)
-        print("\nNext:  review `git diff`, commit, then  python tools/release.py build")
+        print(f"\nNext:  review the changes, commit, then build:")
+        print(f'  git -C "{ROOT}" commit -am "chore: release v{new}"')
+        print(f'  git -C "{ROOT}" push')
+        print(f'  python "{Path(__file__).resolve()}" build --server   (or no flag for both installers)')
         return 1 if problems else 0
 
     if args.cmd == "sync":
