@@ -231,6 +231,10 @@ Namespace Forms
         Private _hookCallback As LowLevelKeyboardProc   ' Held to prevent GC
         Private _altDown      As Boolean = False
         Private _winDown      As Boolean = False
+        Private _ctrlDown     As Boolean = False
+        ' True while we are swallowing a Windows-key press, so we also swallow its
+        ' release (see KeyboardHookProc).
+        Private _winSwallowed As Boolean = False
 
         ' ── Focus-recapture timer ─────────────────────────────────────────────
 
@@ -814,6 +818,7 @@ Namespace Forms
                 MinimizeAllOtherWindows()     ' Minimize ALL apps so fullscreen games release the display
                 InstallHook()
                 StartFocusTimer()
+                Services.AudioControl.OnLocked()   ' no time → no sound
 
                 ' DirectX exclusive-fullscreen apps (e.g. CS:S) need ~400 ms to release
                 ' the display before another window can paint over them.
@@ -828,6 +833,11 @@ Namespace Forms
             Else
                 UninstallHook()
                 StopFocusTimer()
+                ' Unmute at the configured volume BEFORE the time-added voice plays:
+                ' every unlock path hides this form before announcing (SessionManager
+                ' calls UnlockPC before raising TimeAdded; the coin path completes
+                ' the deferred unlock before firing its held-back notification).
+                Services.AudioControl.OnUnlocked()
             End If
         End Sub
 
@@ -850,6 +860,8 @@ Namespace Forms
             _hookHandle = IntPtr.Zero
             _altDown = False
             _winDown = False
+            _ctrlDown = False
+            _winSwallowed = False
         End Sub
 
         Private Function KeyboardHookProc(nCode As Integer, wParam As IntPtr, lParam As IntPtr) As IntPtr
@@ -866,15 +878,43 @@ Namespace Forms
                 Dim wpInt = wParam.ToInt32()
                 Dim isDown = (wpInt = WM_KEYDOWN OrElse wpInt = WM_SYSKEYDOWN)
 
-                ' Track Alt and Win modifier state
+                ' Track Alt, Ctrl and Win modifier state
                 Select Case vk
                     Case Keys.Menu          ' VK_MENU — the Alt key
                         _altDown = isDown
+                    Case Keys.ControlKey, Keys.LControlKey, Keys.RControlKey
+                        _ctrlDown = isDown
                     Case Keys.LWin, Keys.RWin
                         _winDown = isDown
                 End Select
 
+                ' ── Windows key alone → Start menu ────────────────────────
+                ' Start opens when the key is RELEASED, so swallow the press
+                ' and the release. Only swallow a release whose press we
+                ' swallowed: a Win key already held when the lock appeared must
+                ' be released normally, or Windows thinks it is stuck down and
+                ' turns every later key press into a Win+ shortcut.
+                If vk = Keys.LWin OrElse vk = Keys.RWin Then
+                    If isDown Then
+                        _winSwallowed = True
+                        Return New IntPtr(1)
+                    ElseIf _winSwallowed Then
+                        _winSwallowed = False
+                        Return New IntPtr(1)
+                    End If
+                End If
+
                 If isDown Then
+                    ' Ctrl+Esc — the other keyboard shortcut for the Start menu
+                    If vk = Keys.Escape AndAlso _ctrlDown Then Return New IntPtr(1)
+
+                    ' Volume / mute keys — a locked PC is kept muted (see
+                    ' OnVisibleChanged), so don't let the keyboard undo that.
+                    If AppConfig.MuteWhenLocked AndAlso
+                       (vk = Keys.VolumeMute OrElse vk = Keys.VolumeUp OrElse vk = Keys.VolumeDown) Then
+                        Return New IntPtr(1)
+                    End If
+
                     ' ── Block all window-switching shortcuts ──────────────────
 
                     ' Alt+Tab / Alt+Shift+Tab — the main culprit

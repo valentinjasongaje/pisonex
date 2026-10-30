@@ -46,6 +46,8 @@ Namespace Forms
         Private _chkNotifs      As CheckBox
         Private _chkVoice       As CheckBox
         Private _nudVolume      As NumericUpDown
+        Private _chkMuteLocked  As CheckBox
+        Private _nudUnlockVol   As NumericUpDown
         Private _cmbVoice       As ComboBox
         Private _currentBgColor As Color
 
@@ -1162,6 +1164,22 @@ Namespace Forms
 
             page.Controls.Add(voiceCard) : y += 180
 
+            ' PC sound card — mute while locked, restore when time is added
+            Dim soundCard = CardPanel(New Point(LM, y), New Size(IW, 148))
+            cy = 14
+            soundCard.Controls.Add(SectionLabel("PC Sound", New Point(14, cy))) : cy += 26
+            _chkMuteLocked = DarkCheck(
+                "Mute the PC while it is locked (no time)",
+                New Point(14, cy), AppConfig.MuteWhenLocked)
+            soundCard.Controls.Add(_chkMuteLocked) : cy += 30
+            soundCard.Controls.Add(SmallLabel("Volume when time is added (10-100 %)", New Point(14, cy))) : cy += 18
+            _nudUnlockVol = DarkNud(New Point(14, cy), 80, AppConfig.UnlockVolumePercent, 10, 100)
+            soundCard.Controls.Add(_nudUnlockVol) : cy += 32
+            soundCard.Controls.Add(InfoLabel(
+                "Set when the lock screen closes, so the time-added voice can be heard.",
+                New Point(14, cy)))
+            page.Controls.Add(soundCard) : y += 158
+
             Dim noteCard = CardPanel(New Point(LM, y), New Size(IW, 44))
             noteCard.Controls.Add(InfoLabel(
                 "Voice works even when toasts are disabled -- ideal for full-screen games.",
@@ -1459,6 +1477,8 @@ Namespace Forms
             AppConfig.SaveNotificationsEnabled(_chkNotifs.Checked)
             AppConfig.SaveVoiceEnabled(_chkVoice.Checked)
             AppConfig.SaveVoiceVolume(CInt(_nudVolume.Value))
+            AppConfig.SaveMuteWhenLocked(_chkMuteLocked.Checked)
+            AppConfig.SaveUnlockVolumePercent(CInt(_nudUnlockVol.Value))
             Dim selectedVoice = If(_cmbVoice.SelectedIndex <= 0, "",
                                    _cmbVoice.SelectedItem?.ToString())
             AppConfig.SaveVoiceName(If(selectedVoice, ""))

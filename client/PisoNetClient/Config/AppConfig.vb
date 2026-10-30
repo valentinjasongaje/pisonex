@@ -207,6 +207,27 @@ Namespace Config
             End Get
         End Property
 
+        ''' <summary>Mute the PC's speakers while it is locked (no time). Default on.</summary>
+        Public ReadOnly Property MuteWhenLocked As Boolean
+            Get
+                Return ReadBool("MuteWhenLocked", defaultVal:=True)
+            End Get
+        End Property
+
+        ''' <summary>
+        ''' System volume (10–100 %) set when the lock screen closes because time was
+        ''' added, so the "time added" voice is audible. Only applied when the PC was
+        ''' muted by MuteWhenLocked.
+        ''' </summary>
+        Public ReadOnly Property UnlockVolumePercent As Integer
+            Get
+                Dim val = ReadReg("UnlockVolumePercent")
+                Dim n As Integer
+                If Integer.TryParse(val, n) AndAlso n >= 10 AndAlso n <= 100 Then Return n
+                Return 50
+            End Get
+        End Property
+
         ''' <summary>
         ''' Partial name of the preferred SAPI voice (e.g. "Zira", "David", "Aria").
         ''' Empty string = auto-select: prefer the first female voice, then first available.
@@ -459,6 +480,12 @@ Namespace Config
         End Sub
         Public Sub SaveVoiceEnabled(v As Boolean)
             WriteReg("VoiceEnabled", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveMuteWhenLocked(v As Boolean)
+            WriteReg("MuteWhenLocked", If(v, "1", "0"))
+        End Sub
+        Public Sub SaveUnlockVolumePercent(n As Integer)
+            WriteReg("UnlockVolumePercent", n.ToString())
         End Sub
         Public Sub SaveVoiceVolume(n As Integer)
             WriteReg("VoiceVolume", n.ToString())

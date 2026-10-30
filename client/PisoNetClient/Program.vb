@@ -101,7 +101,10 @@ Module Program
         WindowsPolicy.Apply()
 
         ' Ensure restrictions are removed even if the process crashes
-        AddHandler Application.ApplicationExit, Sub(s, e) WindowsPolicy.RemoveAll()
+        AddHandler Application.ApplicationExit, Sub(s, e)
+                                                    WindowsPolicy.RemoveAll()
+                                                    AudioControl.RestoreOnExit()   ' never leave the PC muted behind us
+                                                End Sub
 
         ' ── Create all UI objects on the STA thread ───────────────────────
         _api = New ApiService(AppConfig.ServerUrl, AppConfig.PCNumber)

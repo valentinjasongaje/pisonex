@@ -38,7 +38,10 @@ Namespace Services
             menu.ForeColor = Color.White
             menu.Renderer  = New DarkMenuRenderer()
 
-            Dim title = CType(menu.Items.Add("Pisonex Client v1.0"), ToolStripMenuItem)
+            ' Version comes from the assembly, which is stamped from pisonex/VERSION at
+            ' build time. ProductVersion may carry a "+<git-hash>" suffix — drop it.
+            Dim version = Application.ProductVersion.Split("+"c)(0)
+            Dim title = CType(menu.Items.Add($"Pisonex Client v{version}"), ToolStripMenuItem)
             title.Enabled  = False
             title.ForeColor = Color.FromArgb(100, 116, 139)
 
