@@ -1,4 +1,4 @@
-"""
+r"""
 Pisonex release tool — one place to bump the version and build installers.
 
 The ONLY place a version number is typed by hand is  pisonex/VERSION.
@@ -13,8 +13,9 @@ Everything else either reads that file at build time or is regenerated from it:
     build/build*.bat                  deploy/make-release.sh reads it on the Pi
 
 Commands — run from the pisonex REPO folder (www/pisonex/pisonex). From the
-workspace folder (www/pisonex) use the shortcut instead: `release status`,
-`release bump patch`, ... (release.cmd forwards to this script).
+workspace folder (www/pisonex) use the shortcut instead: `.\release status`,
+`.\release bump patch`, ... (release.cmd forwards to this script; PowerShell
+needs the `.\` prefix).
 
     python tools/release.py status              show the version + any drift
     python tools/release.py bump 1.0.5          set an exact version
