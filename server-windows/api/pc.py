@@ -10,11 +10,14 @@ from schemas import PCHeartbeatResponse, PCStatusResponse
 from services.session_service import SessionService
 from config import settings
 from dependencies import verify_client_key
+from api.auth import get_current_admin
 import command_store
 
 router = APIRouter(prefix="/api/pc", tags=["pc"])
 
 _ClientAuth = Depends(verify_client_key)
+# Admin JWT (from POST /api/auth/token) for the non-client endpoints below.
+_AdminAuth = Depends(get_current_admin)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -207,7 +210,7 @@ def heartbeat(
     )
 
 
-@router.get("/status", response_model=list[PCStatusResponse])
+@router.get("/status", response_model=list[PCStatusResponse], dependencies=[_AdminAuth])
 def all_pc_status(db: Session = Depends(get_db)):
     """Returns status of all registered PCs. Used by the admin dashboard."""
     timeout_cutoff = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
@@ -270,7 +273,7 @@ async def upload_screenshot(pc_number: int, request: Request):
     return {"status": "ok"}
 
 
-@router.post("/{pc_number}/lock")
+@router.post("/{pc_number}/lock", dependencies=[_AdminAuth])
 def lock_pc(pc_number: int, db: Session = Depends(get_db)):
     """Admin: immediately lock a PC and end its session."""
     svc = SessionService(db)
@@ -302,7 +305,7 @@ def request_coins(pc_number: int, db: Session = Depends(get_db)):
     if hw_controller is None:
         raise HTTPException(
             status_code=503,
-            detail="No coin slot hardware on this server. Use the keypad unit instead.",
+            detail="No coin slot hardware on this server — ask the cashier to add time.",
         )
     ok, message = hw_controller.request_coins_for_pc(pc_number)
     if not ok:
@@ -323,7 +326,7 @@ def done_coins(pc_number: int):
     if hw_controller is None:
         raise HTTPException(
             status_code=503,
-            detail="No coin slot hardware on this server. Use the keypad unit instead.",
+            detail="No coin slot hardware on this server — ask the cashier to add time.",
         )
     ok, message = hw_controller.close_coins_for_pc(pc_number)
     if not ok:

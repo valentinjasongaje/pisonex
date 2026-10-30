@@ -20,6 +20,10 @@ class User(Base):
     logged_in_pc_id  = Column(Integer, ForeignKey("pcs.id"), nullable=True)
     last_login_at    = Column(DateTime, nullable=True)
     last_activity_at = Column(DateTime, nullable=True)
+    # True for admin-issued accounts until the member sets their own password.
+    # Set on creation by the dashboard "Create Member" flow; cleared by
+    # POST /api/member/change-password on first successful password change.
+    must_change_password = Column(Boolean, default=False, nullable=False)
 
     sessions     = relationship("Session", back_populates="user")
     transactions = relationship("CoinTransaction", back_populates="user")

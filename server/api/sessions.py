@@ -2,11 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
+from api.auth import get_current_admin
 from schemas import AddTimeRequest, AddTimeResponse, SessionStatusResponse
 from services.session_service import SessionService
 import command_store
 
-router = APIRouter(prefix="/api/session", tags=["session"])
+router = APIRouter(
+    prefix="/api/session",
+    tags=["session"],
+    # Admin JWT required: without it anyone on the cafe LAN could grant
+    # themselves free time. The dashboard uses its own /dashboard/api/*
+    # routes; this REST API is for scripts/integrations only.
+    dependencies=[Depends(get_current_admin)],
+)
 
 
 @router.post("/add-time", response_model=AddTimeResponse)

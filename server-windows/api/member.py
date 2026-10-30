@@ -19,8 +19,8 @@ _ClientAuth = Depends(verify_client_key)
 # Member accounts are now created only by an admin via the dashboard
 # (see dashboard/routes.py: POST /dashboard/api/membership/create-member),
 # which issues a temp password and sets must_change_password=True. See
-# docs/admin-only-membership-migration.md for the full rationale and the
-# checklist to replicate this in server/ and server-orangepi/.
+# docs/admin-only-membership-migration.md for the full rationale. All three
+# server variants (server/, server-orangepi/, server-windows/) now share it.
 
 
 @router.post("/login", response_model=MemberLoginResponse, dependencies=[_ClientAuth])

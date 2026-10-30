@@ -20,6 +20,10 @@ class PCHeartbeatResponse(BaseModel):
     admin_message:    Optional[str] = None   # per-PC message (popped on delivery)
     announcement:     Optional[str] = None   # shop-wide broadcast (persistent)
     coin_slot_enabled: bool = True           # combined global + per-PC coin slot state
+    # "Traditional Café Mode" lives only in server-windows (no coin hardware).
+    # This variant always has a coin slot, so it always reports False; the
+    # field is here so the heartbeat contract is identical across variants.
+    traditional_mode_enabled: bool = False
     # Server-pushed wallpaper — optional, ignored by older clients
     wallpaper_url:  Optional[str] = None   # full URL to download wallpaper image
     wallpaper_hash: Optional[str] = None   # MD5 hex — client compares to cached hash
@@ -136,30 +140,31 @@ class LogResponse(BaseModel):
 
 # ── Member ────────────────────────────────────────────────────────
 
-class MemberRegisterRequest(BaseModel):
-    username: str
-    password: str
-    pc_number: int
-
 class MemberLoginRequest(BaseModel):
     pc_number: int
     username: str
     password: str
 
+class MemberChangePasswordRequest(BaseModel):
+    pc_number: int
+    new_password: str
+    # Required for a voluntary change (tray icon "Change Password" while
+    # already logged in) — not required for the forced first-login change,
+    # where the login that just happened already proved identity.
+    old_password: Optional[str] = None
+
+class MemberChangePasswordResponse(BaseModel):
+    success: bool
+    error: Optional[str] = None
+
 class MemberLogoutRequest(BaseModel):
     pc_number: int
-
-class MemberRegisterResponse(BaseModel):
-    success: bool
-    user_id: int = 0
-    username: str = ""
-    absorbed_seconds: int = 0
-    error: Optional[str] = None
 
 class MemberLoginResponse(BaseModel):
     success: bool
     balance_seconds: int = 0
     absorbed_seconds: int = 0
+    must_change_password: bool = False
     error: Optional[str] = None
 
 class MemberLogoutResponse(BaseModel):

@@ -29,6 +29,12 @@ PROJECT_DIR="/opt/pisonex/server-orangepi"
 VENV_PY="/opt/pisonex/venv/bin/python"
 SYSTEMD_UNIT="/etc/systemd/system/pisonex.service"
 SERVICE_NAME="pisonex"
+# Defaults to the repo's VERSION file (single source of truth — bump it on the
+# dev machine with `python tools/release.py bump X.Y.Z`, push, git pull here).
+# Override with RELEASE_VERSION=vX.Y.Z for a one-off.
+if [ -z "${RELEASE_VERSION:-}" ] && [ -f /opt/pisonex/VERSION ]; then
+    RELEASE_VERSION="v$(tr -d '[:space:]' < /opt/pisonex/VERSION)"
+fi
 RELEASE_VERSION="${RELEASE_VERSION:-v1.0}"
 
 DRY_RUN=true

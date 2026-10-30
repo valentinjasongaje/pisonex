@@ -1,5 +1,14 @@
 # Admin-Only Membership Migration
 
+> **Status (2026-10-30): DONE in all three variants.** `server/` and
+> `server-orangepi/` now share server-windows' `services/membership_service.py`,
+> `api/member.py` and `dashboard/templates/membership.html`, plus the
+> create-member / reset-password / delete-member dashboard routes, the
+> `users.must_change_password` migration, and the dashboard `localtime` filter
+> (`TIMEZONE` setting). `tools/smoke_test.py` exercises create → login →
+> forced change-password → logout on every variant and checks that
+> `/api/member/register` is gone. The checklist below is kept as history.
+
 Self-service member registration from the client lock screen has been removed
 in `server-windows/` + `client/PisoNetClient/`. Members can no longer create
 their own account — only an admin can, via the dashboard. This was done to

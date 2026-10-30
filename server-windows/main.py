@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
+from version import __version__
 from database import engine, Base, SessionLocal
 from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig
 from api import auth, pc, sessions, admin
@@ -34,6 +35,9 @@ logging.basicConfig(
             "pisonet.log",
             maxBytes=5 * 1024 * 1024,  # 5 MB
             backupCount=3,
+            # Explicit UTF-8: on Windows the default is cp1252, which cannot
+            # encode "₱" and silently drops every log line that contains it.
+            encoding="utf-8",
         ),
     ],
 )
@@ -217,6 +221,14 @@ def _migrate_schema():
     def has_column(table: str, column: str) -> bool:
         cursor.execute(f"PRAGMA table_info({table})")
         return any(row[1] == column for row in cursor.fetchall())
+
+    # A DB file that exists but has no tables yet (first boot interrupted,
+    # 0-byte file) is effectively a fresh install: create_all() builds the
+    # full current schema, and ALTER TABLE below would fail on missing tables.
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if cursor.fetchone() is None:
+        conn.close()
+        return
 
     renames = [
         # (table, old_column, new_column)
@@ -640,7 +652,7 @@ async def _hourly_status_ping_loop():
 
 app = FastAPI(
     title="Pisonex Server",
-    version="1.0.4",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -761,7 +773,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.0.4"}
+    return {"status": "ok", "version": __version__}
 
 
 # ── Dev entry point ───────────────────────────────────────────────────────────────────────

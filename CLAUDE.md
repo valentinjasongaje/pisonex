@@ -10,8 +10,27 @@ deploy/           ← Raspberry Pi install script + systemd service
 docs/             ← API and hardware wiring docs
 server/           ← FastAPI server (runs on Raspberry Pi or Windows)
 server-orangepi/  ← FastAPI server variant for Orange Pi (OPi.GPIO, SUNXI mode) ← PRODUCTION
-server-windows/   ← Windows service variant
+server-windows/   ← Windows service variant (shipped as the installer)
+tools/            ← release.py (version bump + installer build) and smoke_test.py
+VERSION           ← the ONLY place the app version is typed
 ```
+
+The three server folders are copies — apply fixes to every variant they concern and run
+`python tools/smoke_test.py` afterwards.
+
+## Versioning, testing & releases
+
+```bash
+python tools/smoke_test.py                       # boots all 3 servers, ~60 end-to-end checks each
+python tools/smoke_test.py --upgrade-from HEAD   # migrate a DB created by the last commit
+python tools/release.py status                   # every file in sync with VERSION?
+python tools/release.py bump patch               # or major / minor / build / 1.2.3
+python tools/release.py build                    # tests + both Windows installers → ../build/output/v<ver>/
+```
+
+Never hand-edit a version: `client/Directory.Build.props`, the Inno Setup scripts and
+`server*/version.py` all derive from `VERSION` (`release.py sync` regenerates the
+derived files). The installer scripts themselves live outside this repo in `../build/`.
 
 ## Orange Pi server — production deployment
 
@@ -87,10 +106,10 @@ journalctl -u pisonex -f   # confirm clean startup
 cd server-orangepi        # or server/ for the RPi variant
 python -m venv venv && source venv/bin/activate   # first time only
 pip install -r requirements.txt                   # first time only
-python main.py                                    # starts on :8000
+python main.py                                    # SERVER_PORT defaults to 80; set 8000 in .env for dev
 ```
 
-Dashboard: `http://localhost:8000/dashboard`
+Dashboard: `http://localhost:<port>/dashboard` (login `admin` / `admin123`)
 
 ## Building the VB.NET client
 
@@ -114,12 +133,12 @@ The watchdog (`client/PnxSystem/`) is a separate VB.NET project — install with
 ### Server-side data flow
 
 `main.py` wires everything at startup:
-1. Runs `_enforce_secure_defaults()` — auto-generates `SECRET_KEY`, `ADMIN_PASSWORD`, `LICENSE_HMAC_SECRET` if still at insecure defaults (writes to `.env`)
+1. Runs `_enforce_secure_defaults()` — auto-generates `SECRET_KEY` and `LICENSE_HMAC_SECRET` if still at insecure defaults (writes to `.env`). `ADMIN_PASSWORD` is NOT generated — fresh installs use `admin123`
 2. Runs `_migrate_schema()` — safe idempotent SQLite column renames (v2 minutes → v3 seconds)
 3. Creates tables (`Base.metadata.create_all`) and seeds defaults (including `ServerConfig` singleton)
 4. Loads `CLIENT_API_KEY` from `ServerConfig` DB table into `settings` (not from `.env`)
 5. Starts `HardwareController` (skipped on non-OPi/RPi)
-6. Launches background asyncio tasks: session expiry (30 s), license verification (1 h), membership auto-expiry (30 s)
+6. Launches background asyncio tasks: session expiry (30 s), license verification (hourly, acts every 6 h), membership auto-expiry (30 s), hourly status ping + nightly earnings sync to pisonex.com, schedules (OPi)
 
 **Session lifecycle:** Coins inserted → `HardwareController._process_coin()` calls `SessionService.add_time_by_pesos()` → creates/extends a `Session` row and sets `pc.is_locked = False` → client's next heartbeat response includes `is_locked=False` and `remaining_seconds` → client unlocks.
 
@@ -147,8 +166,8 @@ Key services:
 - `WatchdogService` (`PnxSystem` project) — checks every 5 s whether `PisoNetClient.exe` is running; restarts it if gone
 
 **Client configuration:**
-- **Registry** (`HKLM\SOFTWARE\PisoNet\Client`): `ServerUrl`, `PCNumber`, `ApiKey`, UI settings. Managed by `AppConfig.vb`. Default `ServerUrl` is `http://192.168.1.21`.
-- **DPAPI-encrypted file** (`%ProgramData%\PisoNet\license.dat`): license data + admin PIN hash. Managed by `LicenseStore.vb`.
+- **Registry** (`HKLM\SOFTWARE\PisoNet\Client`): `ServerUrl`, `PCNumber`, `ApiKey`, UI settings. Managed by `AppConfig.vb`. Default `ServerUrl` is `http://pisonex.local`.
+- **DPAPI-encrypted file** (`%ProgramData%\PisoNet\license.dat`): admin password hash only (licensing is server-only; the client has no license code). Managed by `LicenseStore.vb`.
 
 ### "Add Time" coin flow (client-side)
 
@@ -156,15 +175,16 @@ Key services:
 2. Client calls `POST /api/pc/{n}/request-coins` → server opens slot
 3. Heartbeat returns `receiving_coins=True` → overlay shows receiving card + countdown bar
 4. Each coin: `COIN_PULSE_TIMEOUT` (3 s) fires → coin credited → `time_added_seconds` in heartbeat → voice/toast deferred until slot closes
-5. User clicks "Done inserting Coins" or countdown hits 0 → `POST /api/pc/{n}/done-inserting-coins`
+5. User clicks "Done inserting Coins" or countdown hits 0 → `POST /api/pc/{n}/done-coins`
 6. Slot closes → `receiving_coins=False` → `LockManager` completes deferred unlock → voice fires
 
 ### Dashboard (`server-orangepi/dashboard/routes.py`)
 
 Server-rendered with Jinja2 + HTMX — no JS framework. Authentication uses a JWT in a `pisonet_session` cookie (HS256).
 
+Server health (CPU/RAM/disk/temp/uptime via psutil, 10 s refresh) is on the Overview page.
+
 Settings page cards:
-- **Server Health** — OPi CPU/RAM/disk/temp/uptime via psutil (auto-refreshes 10 s)
 - **Network** — DHCP ↔ static IP via nmcli or `/etc/network/interfaces`
 - **Branch**, **General** (idle shutdown + coin slot idle timeout), **PC Management Presets**
 - **Coin Slot Hardware** — GPIO pins, relay, edge, debounce, pulse timeout (live reload)
@@ -173,10 +193,17 @@ Settings page cards:
 
 ## Key configuration
 
-`server-orangepi/.env` (copy from `.env.example`). On first startup, `_enforce_secure_defaults()` auto-generates `SECRET_KEY`, `ADMIN_PASSWORD`, and `LICENSE_HMAC_SECRET`.
+`server-orangepi/.env` (copy from `.env.example`). On first startup, `_enforce_secure_defaults()` auto-generates `SECRET_KEY` and `LICENSE_HMAC_SECRET`. Set `ADMIN_PASSWORD`, `BRANCH_NAME` and `TIMEZONE` (dashboard display, default `Asia/Manila`) yourself.
 
 `CLIENT_API_KEY` — managed via dashboard Settings → Security (stored in `server_config` DB table). Changes apply immediately without restart.
 
 ## Schema migrations
 
-No Alembic. `_migrate_schema()` in `main.py` handles all renames/additions via raw SQLite `ALTER TABLE`. Each is guarded by a column-existence check so it's safe to run on every startup.
+No Alembic. `_migrate_schema()` in `main.py` handles all renames/additions via raw SQLite `ALTER TABLE`. Each is guarded by a column-existence check so it's safe to run on every startup. Add new columns in every variant's `models.py` + `_migrate_schema()`, then verify with `python tools/smoke_test.py --upgrade-from HEAD`.
+
+## Members & admin API
+
+Members are created only by an admin (dashboard → Membership → Create Member, one-time temp
+password, forced change on first login) in all variants — `/api/member/register` no longer
+exists. `/api/admin/*`, `/api/session/*`, `GET /api/pc/status` and `POST /api/pc/{n}/lock`
+require the Bearer token from `POST /api/auth/token`.

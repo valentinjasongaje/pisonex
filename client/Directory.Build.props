@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    Applies to every project under client/ (PisoNetClient + PnxSystem watchdog).
+    The version is read from pisonex/VERSION — the single source of truth.
+    Change it with:  python tools/release.py bump <new-version>
+  -->
+  <PropertyGroup>
+    <PisonexVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</PisonexVersion>
+    <Version>$(PisonexVersion)</Version>
+    <AssemblyVersion>$(PisonexVersion)</AssemblyVersion>
+    <FileVersion>$(PisonexVersion)</FileVersion>
+    <InformationalVersion>$(PisonexVersion)</InformationalVersion>
+    <Company>Pisonex</Company>
+    <Product>Pisonex</Product>
+  </PropertyGroup>
+</Project>

@@ -25,6 +25,7 @@ from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from services.rate_service import pesos_to_seconds, pesos_for_seconds
 from config import settings
+from version import __version__
 import command_store
 
 # Fixed amounts shown as quick-add presets in the "Add Time" modal. The modal
@@ -76,6 +77,8 @@ class CoinSlotBody(BaseModel):
 router = APIRouter(prefix="/dashboard")
 _BUNDLE_DIR = Path(os.environ.get('PISONEX_BUNDLE_DIR', Path(__file__).parent.parent))
 templates = Jinja2Templates(directory=str(_BUNDLE_DIR / "dashboard" / "templates"))
+# Shown in the sidebar footer and the API docs page.
+templates.env.globals["app_version"] = __version__
 
 # All timestamps are stored as naive UTC (datetime.utcnow()) -- that's correct
 # and unchanged. This filter only affects what the dashboard displays: convert

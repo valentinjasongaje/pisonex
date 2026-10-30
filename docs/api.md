@@ -10,6 +10,7 @@
 - [General](#general)
 - [Authentication](#authentication)
 - [PC Endpoints](#pc-endpoints)
+- [Client Coin & Member Endpoints](#client-coin--member-endpoints)
 - [Session Endpoints](#session-endpoints)
 - [Admin Endpoints](#admin-endpoints)
 - [Dashboard Endpoints](#dashboard-endpoints)
@@ -164,9 +165,19 @@ curl -X POST http://192.168.1.100/api/pc/heartbeat/1
   "zero_time_logout_seconds": 0,
   "idle_shutdown_seconds": 0,
   "receiving_coins": false,
-  "minimum_logout_minutes": 10
+  "coin_progress_pesos": 0,
+  "coin_progress_seconds": 0,
+  "traditional_mode_enabled": false,
+  "minimum_logout_minutes": 10,
+  "capture_interval_ms": 0
 }
 ```
+
+> Every field above is read by the client (`client/PisoNetClient/Services/ApiService.vb`,
+> class `HeartbeatResponse`) and **all three server variants return all of them** —
+> `tools/smoke_test.py` fails if one goes missing. `traditional_mode_enabled` is only ever
+> `true` on server-windows; `coin_progress_*` stay `0` there (no coin hardware);
+> `capture_interval_ms` is `33` while an admin watches the PC live with FFmpeg streaming on.
 
 > **Branch/earnings telemetry** (changed): the per-PC `branch_name`/`today_pesos`/`today_sessions`/`today_minutes` and `server_licensed` fields were removed from this response. The server now POSTs branch totals directly to `pisonex.com/api/status` on an hourly background loop (see `_hourly_status_ping_loop` in `main.py`), so the client no longer needs to forward them.
 
@@ -205,11 +216,13 @@ curl -X POST http://192.168.1.100/api/pc/heartbeat/1
 
 ### GET `/api/pc/status`
 
+> **Auth:** admin Bearer token (`POST /api/auth/token`). Anonymous calls get `401`.
+
 Returns a list of all registered PCs with their current online/lock status. PCs that missed a heartbeat for more than `PC_HEARTBEAT_TIMEOUT` (30s) are automatically marked offline.
 
 **Example Request**
 ```bash
-curl http://192.168.1.100/api/pc/status
+curl http://192.168.1.100/api/pc/status -H "Authorization: Bearer <token>"
 ```
 
 **Response `200 OK`**
@@ -281,7 +294,9 @@ curl -X POST http://192.168.1.100/api/pc/1/screenshot \
 
 ### POST `/api/pc/{pc_number}/lock`
 
-Ends the active session and immediately locks the PC. Can be called by admin or dashboard.
+> **Auth:** admin Bearer token. Anonymous calls get `401` (previously anyone on the LAN could lock PCs).
+
+Ends the active session and immediately locks the PC.
 
 **Path Parameters**
 
@@ -291,7 +306,7 @@ Ends the active session and immediately locks the PC. Can be called by admin or 
 
 **Example Request**
 ```bash
-curl -X POST http://192.168.1.100/api/pc/1/lock
+curl -X POST http://192.168.1.100/api/pc/1/lock -H "Authorization: Bearer <token>"
 ```
 
 **Response `200 OK`**
@@ -304,13 +319,40 @@ curl -X POST http://192.168.1.100/api/pc/1/lock
 
 ---
 
+## Client Coin & Member Endpoints
+
+All of these are called by the VB.NET client and use the same optional
+`X-API-Key` header as register/heartbeat.
+
+| Method | Path | Body | Notes |
+|--------|------|------|-------|
+| POST | `/api/pc/{n}/request-coins` | — | User pressed "Insert Coin" / "＋ Add Time". Opens the coin slot for this PC. `503` when the server has no coin hardware (Windows / dev), `409` when the slot is busy with another PC, `403` in Traditional Café Mode (server-windows). |
+| POST | `/api/pc/{n}/done-coins` | — | User pressed "Done inserting coins". Flushes pending pulses and closes the slot. |
+| POST | `/api/pc/{n}/metrics` | JSON object | Performance snapshot (~every 10 s). Stored in memory only. |
+| POST | `/api/pc/{n}/screenshot` | JPEG bytes (≤ 2 MB) | Monitoring snapshot (default every 1 s). Stored in memory only. |
+| POST | `/api/member/login` | `{pc_number, username, password}` | Returns `{success, balance_seconds, absorbed_seconds, must_change_password, error}`. |
+| POST | `/api/member/change-password` | `{pc_number, new_password, old_password?}` | Forced after first login with an admin-issued temp password (`old_password` omitted), or voluntary from the tray (`old_password` required). 6–128 chars. |
+| POST | `/api/member/logout` | `{pc_number}` | Returns `{success, remaining_seconds, deducted_seconds, error}`. |
+| GET | `/api/member/status/{n}` | — | Member bound to that PC, if any. |
+
+> **Removed:** `POST /api/member/register`. Members are created only by an admin from
+> the dashboard (`POST /dashboard/api/membership/create-member`), which returns a
+> one-time temp password. This now applies to **all three** server variants.
+
+---
+
 ## Session Endpoints
+
+> **Auth:** every `/api/session/*` endpoint requires an admin Bearer token
+> (`POST /api/auth/token`). They used to be open, which let anyone on the café LAN
+> grant themselves free time. Nothing in the client, dashboard or hardware code calls
+> them — they exist for scripts/integrations.
 
 ---
 
 ### POST `/api/session/add-time`
 
-Adds time to a PC by converting pesos to seconds using the configured coin rates (greedy algorithm). Called by the **hardware controller** when coins are inserted, or by admin.
+Adds time to a PC by converting pesos to seconds using the configured coin rates (greedy algorithm). For scripts/integrations (the hardware controller calls `SessionService` directly, not this endpoint).
 
 **Content-Type:** `application/json`
 
@@ -324,6 +366,7 @@ Adds time to a PC by converting pesos to seconds using the configured coin rates
 **Example Request**
 ```bash
 curl -X POST http://192.168.1.100/api/session/add-time \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"pc_number": 1, "pesos": 5}'
 ```

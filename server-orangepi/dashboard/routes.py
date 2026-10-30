@@ -7,9 +7,10 @@ import socket as _socket
 import subprocess
 import sys
 import time
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import asyncio
 
@@ -28,6 +29,7 @@ from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, RateProf
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
 from config import settings
+from version import __version__
 import command_store
 
 
@@ -50,6 +52,28 @@ class CoinSlotBody(BaseModel):
 router = APIRouter(prefix="/dashboard")
 _BUNDLE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(_BUNDLE_DIR / "dashboard" / "templates"))
+# Shown in the sidebar footer and the API docs page.
+templates.env.globals["app_version"] = __version__
+
+# All timestamps are stored as naive UTC (datetime.utcnow()) -- that's correct
+# and unchanged. This filter only affects what the dashboard displays: convert
+# to settings.TIMEZONE before formatting, so admins see local time instead of
+# raw UTC. Falls back to UTC if the configured zone name is invalid, so a
+# typo in .env can't break every page that shows a timestamp.
+try:
+    _LOCAL_TZ = ZoneInfo(settings.TIMEZONE)
+except Exception:
+    _LOCAL_TZ = ZoneInfo("UTC")
+
+
+def _localtime_filter(dt, fmt: str = "%Y-%m-%d %H:%M:%S"):
+    if dt is None:
+        return ""
+    aware_utc = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return aware_utc.astimezone(_LOCAL_TZ).strftime(fmt)
+
+
+templates.env.filters["localtime"] = _localtime_filter
 
 _ALGORITHM = "HS256"
 _COOKIE_NAME = "pisonet_session"
@@ -1892,6 +1916,25 @@ def membership_page(
         .all()
     )
 
+    # Lifetime totals per member — one aggregate query for all members rather
+    # than a query per row. Pulled from CoinTransaction, which already covers
+    # every way a member's balance grows: real coin inserts, admin peso-mode
+    # adds, and (in Traditional Café Mode) minutes-mode adds too, since those
+    # all write a CoinTransaction row (see SessionService.add_time_seconds /
+    # add_time_by_pesos). This is monitoring-only — it doesn't affect balance
+    # or session logic at all.
+    totals_rows = (
+        db.query(
+            CoinTransaction.user_id,
+            func.coalesce(func.sum(CoinTransaction.amount_php), 0).label("total_pesos"),
+            func.coalesce(func.sum(CoinTransaction.seconds_added), 0).label("total_seconds"),
+        )
+        .filter(CoinTransaction.user_id.isnot(None))
+        .group_by(CoinTransaction.user_id)
+        .all()
+    )
+    totals_by_user = {row.user_id: (row.total_pesos, row.total_seconds) for row in totals_rows}
+
     member_data = []
     svc = SessionService(db)
     for m in members:
@@ -1904,6 +1947,8 @@ def membership_page(
                 session = svc.get_active_session(pc.pc_number)
                 remaining_sec = svc.remaining_seconds(session) if session else 0
 
+        total_pesos, total_seconds = totals_by_user.get(m.id, (0, 0))
+
         member_data.append({
             "id": m.id,
             "username": m.username,
@@ -1913,6 +1958,9 @@ def membership_page(
             "remaining_seconds": remaining_sec,
             "last_login_at": m.last_login_at,
             "created_at": m.created_at,
+            "must_change_password": m.must_change_password,
+            "total_pesos": total_pesos,
+            "total_seconds": total_seconds,
         })
 
     return templates.TemplateResponse("membership.html", {
@@ -1920,6 +1968,53 @@ def membership_page(
         "config": cfg,
         "members": member_data,
     })
+
+
+class CreateMemberBody(BaseModel):
+    username: str
+    initial_minutes: int = 0  # optional time to seed at creation (e.g. membership sold with time included)
+
+
+@router.post("/api/membership/create-member", dependencies=[Depends(_require_active_license)])
+def create_member(
+    body: CreateMemberBody,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: create a member account with an auto-generated temp password.
+
+    Self-service registration from the client lock screen has been removed
+    (see api/member.py) — this is now the only way to create a member
+    account. The temp password is returned once in the JSON response for
+    the admin to copy; it is never stored in plaintext or logged.
+
+    initial_minutes seeds User.balance_seconds at creation (converted to
+    seconds here, same underlying unit as AdjustBalanceBody.seconds used by
+    POST .../members/{id}/adjust-balance) — used when a membership is sold
+    with time already included.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Username cannot be empty")
+    if body.initial_minutes < 0:
+        raise HTTPException(status_code=422, detail="Initial time cannot be negative")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_create_member(username, initial_minutes=body.initial_minutes)
+    if not result["success"]:
+        raise HTTPException(status_code=422, detail=result["error"])
+
+    return {
+        "status": "created",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+        "balance_seconds": result["balance_seconds"],
+    }
 
 
 @router.post("/api/membership/config", dependencies=[Depends(_require_active_license)])
@@ -2018,6 +2113,74 @@ def force_logout_member(
     if not ok:
         raise HTTPException(status_code=404, detail="Member not found or not logged in")
     return {"status": "logged_out", "member_id": member_id}
+
+
+@router.delete("/api/membership/members/{member_id}", dependencies=[Depends(_require_active_license)])
+def delete_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: permanently delete a member account.
+
+    Historical Sessions/CoinTransactions are preserved (their user_id is
+    cleared, not the rows themselves) so past earnings/reports stay
+    accurate. If the member is currently logged in, they are
+    force-logged-out first — same behavior as deactivate_member above.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    user = db.query(User).filter(User.id == member_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if user.logged_in_pc_id:
+        msvc = MembershipService(db)
+        msvc.force_logout_member(member_id)
+        db.refresh(user)
+
+    db.query(SessionModel).filter(SessionModel.user_id == member_id).update(
+        {"user_id": None}, synchronize_session=False
+    )
+    db.query(CoinTransaction).filter(CoinTransaction.user_id == member_id).update(
+        {"user_id": None}, synchronize_session=False
+    )
+
+    username = user.username
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted", "member_id": member_id, "username": username}
+
+
+@router.post("/api/membership/members/{member_id}/reset-password", dependencies=[Depends(_require_active_license)])
+def reset_member_password(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Admin-only: generate a new temp password for a member who forgot
+    theirs. They'll be required to set their own password on next login,
+    same as a freshly created account. Does not disturb an already-active
+    session — only their next login is affected.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    msvc = MembershipService(db)
+    result = msvc.admin_reset_password(member_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return {
+        "status": "reset",
+        "username": result["username"],
+        "temp_password": result["temp_password"],
+    }
 
 
 # ── Staff management (admin only) ────────────────────────────────────────────

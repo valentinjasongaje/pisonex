@@ -47,6 +47,7 @@ else:
     _APP_DIR = Path(__file__).resolve().parent.parent
 
 from config import settings as _settings
+from version import __version__
 
 # ── ES256 public key (matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com) ────
 # Generated 2026-05-28 (regenerated; the 2026-05-23 pair's private half was
@@ -312,7 +313,7 @@ class LicenseService:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/status",
-                    json={"device_id": device_id, **fps},
+                    json={"device_id": device_id, "app_version": __version__, **fps},
                 )
             if resp.status_code == 200:
                 data = resp.json()
@@ -390,6 +391,7 @@ class LicenseService:
                     "device_id": device_id,
                     "device_label": device_label,
                     "device_type": "server",
+                    "app_version": __version__,
                     **fps,
                 },
             )
@@ -440,7 +442,7 @@ class LicenseService:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{PISONEX_API}/api/license/verify",
-                    json={"license_key": key, "device_id": device_id, **fps},
+                    json={"license_key": key, "device_id": device_id, "app_version": __version__, **fps},
                 )
 
             try:

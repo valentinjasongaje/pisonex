@@ -119,6 +119,12 @@ and your starting point for the *next* release.
 
 Run [`make-release.sh`](make-release.sh) in dry-run mode first, then for real.
 
+> **Version:** bump it on the dev machine with `python tools/release.py bump <ver>`,
+> commit + push, and `git pull` on the Pi. `make-release.sh` then defaults
+> `RELEASE_VERSION` to `v$(cat /opt/pisonex/VERSION)`, so you can drop the
+> `RELEASE_VERSION=…` prefix below (it still works as an override). The confirm
+> prompt expects that same string.
+
 **Dry-run** (always do this first — it changes nothing):
 
 ```bash

@@ -47,6 +47,7 @@ else:
     _APP_DIR = Path(__file__).resolve().parent.parent
 
 from config import settings as _settings
+from version import __version__
 
 # ── ES256 public key (matches LICENSE_SIGNING_PRIVATE_KEY on pisonex.com) ────
 # Generated 2026-05-28 (regenerated; the 2026-05-23 pair's private half was
@@ -152,7 +153,7 @@ class LicenseService:
                 "device_id": device_id,
                 "device_type": "server",
                 "license_status": status_info["status"],
-                "app_version": "1.0.4",
+                "app_version": __version__,
                 "machine_name": platform.node(),
                 "trial_days_remaining": status_info["trial_days_remaining"],
             }
@@ -292,7 +293,7 @@ class LicenseService:
                         "device_id": device_id,
                         "device_type": "server",
                         "license_status": status_info["status"],
-                        "app_version": "1.0.4",
+                        "app_version": __version__,
                         "machine_name": platform.node(),
                         "trial_days_remaining": status_info["trial_days_remaining"],
                     },
