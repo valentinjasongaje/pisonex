@@ -4,4 +4,4 @@ The single source of truth is pisonex/VERSION. Change it with:
     python tools/release.py bump <new-version>
 """
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"
