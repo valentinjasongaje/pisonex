@@ -153,7 +153,11 @@ class PisoNetService(win32serviceutil.ServiceFramework):
             # Windows services have no console — sys.stdout/stderr are None.
             # Redirect them to the log file so uvicorn's logger doesn't crash
             # calling isatty() on NoneType.
-            log_path = _BASE_DIR / "pisonet.log"
+            # NOT pisonet.log: that file is owned by the RotatingFileHandler in
+            # main.py. Holding it open here made every rotation fail (WinError 32)
+            # so the log grew without limit. Only stray prints land in this file;
+            # all logging (incl. uvicorn, log_config=None) goes to pisonet.log.
+            log_path = _BASE_DIR / "service_console.log"
             _log_file = open(log_path, "a", encoding="utf-8", buffering=1)
             sys.stdout = _log_file
             sys.stderr = _log_file

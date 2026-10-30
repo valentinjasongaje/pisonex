@@ -13,6 +13,23 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from version import __version__
+
+
+class _QuietAccessLog(logging.Filter):
+    """Drop successful uvicorn access lines. Every PC heartbeats once a second
+    and uploads screenshots/metrics, so logging each 2xx request buries the
+    useful lines and cycles the whole log history in hours. 4xx/5xx are kept.
+    Set LOG_HTTP_ACCESS=true in .env to log every request while debugging."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if settings.LOG_HTTP_ACCESS:
+            return True
+        args = record.args if isinstance(record.args, tuple) else ()
+        status = args[4] if len(args) >= 5 else None
+        return not (isinstance(status, int) and status < 400)
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietAccessLog())
 from database import engine, Base, SessionLocal
 from models import AdminUser, CoinRate, MembershipConfig, RateProfile, ServerConfig
 from api import auth, pc, sessions, admin
@@ -26,14 +43,43 @@ from services.membership_service import MembershipService
 
 # ── Logging setup ───────────────────────────────────────────────────────────────
 
+_LOG_FILE = "pisonet.log"
+_LOG_MAX_BYTES = 5 * 1024 * 1024      # rotate at 5 MB, keep 3 old files (≤ 20 MB total)
+
+
+def _shrink_oversized_log(path: str = _LOG_FILE, limit: int = 50 * 1024 * 1024,
+                          keep: int = 2 * 1024 * 1024) -> None:
+    """Self-heal installs whose log grew past rotation (old builds could reach
+    hundreds of MB): keep only the last `keep` bytes. Runs once at import,
+    before any handler opens the file."""
+    try:
+        p = Path(path)
+        size = p.stat().st_size if p.exists() else 0
+        if size <= limit:
+            return
+        with open(p, "rb") as fh:
+            fh.seek(-keep, os.SEEK_END)
+            tail = fh.read()
+        tail = tail[tail.find(b"\n") + 1:]          # start on a line boundary
+        note = f"[log trimmed at startup: was {size / 1_048_576:.0f} MB, kept the last {keep // 1024} KB]\n"
+        p.write_bytes(note.encode("utf-8") + tail)
+    except OSError:
+        pass   # never block startup over a log file
+
+
+_shrink_oversized_log()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.StreamHandler(),
+        # No console when running as a Windows service (sys.stderr is None):
+        # a StreamHandler there fails on every record and floods the log file
+        # with "--- Logging error ---" tracebacks.
+        *([logging.StreamHandler()] if sys.stderr is not None else []),
         logging.handlers.RotatingFileHandler(
-            "pisonet.log",
-            maxBytes=5 * 1024 * 1024,  # 5 MB
+            _LOG_FILE,
+            maxBytes=_LOG_MAX_BYTES,
             backupCount=3,
             # Explicit UTF-8: on Windows the default is cp1252, which cannot
             # encode "₱" and silently drops every log line that contains it.

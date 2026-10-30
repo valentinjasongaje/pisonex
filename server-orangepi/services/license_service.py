@@ -58,8 +58,15 @@ pVBtuCV3iJrWgskL98kRiXaujl935uEhHtO/nCcL+qna9OsX4li5fevKVg==
 -----END PUBLIC KEY-----"""
 
 
-def _verify_license_token(token: str) -> Optional[dict]:
-    """Verify an ES256-signed token from pisonex.com. Returns claims or None."""
+# Returned by _verify_license_token for a genuine-but-expired token. Tokens are
+# short-lived (2 h) and refreshed by verify() every 6 h, so this is the normal
+# state most of the time — not an error worth logging.
+_TOKEN_EXPIRED = object()
+
+
+def _verify_license_token(token: str):
+    """Verify an ES256-signed token from pisonex.com.
+    Returns claims, _TOKEN_EXPIRED, or None (bad signature / malformed)."""
     try:
         claims = jwt.decode(
             token,
@@ -68,6 +75,8 @@ def _verify_license_token(token: str) -> Optional[dict]:
             options={"verify_aud": False},
         )
         return claims
+    except jose_exceptions.ExpiredSignatureError:
+        return _TOKEN_EXPIRED
     except Exception:
         return None
 
@@ -117,7 +126,14 @@ class LicenseStatus(str, Enum):
 class LicenseService:
     def __init__(self):
         self._data: dict = {}
+        self._warned: set = set()
         self._load()
+
+    def _warn_once(self, token: str, message: str) -> None:
+        key = (token[-16:], message)
+        if key not in self._warned:
+            self._warned.add(key)
+            logger.warning(message)
 
     # ── Persistence ──────────────────────────────────────────────────
 
@@ -203,12 +219,16 @@ class LicenseService:
         if not token:
             return None
         claims = _verify_license_token(token)
+        if claims is _TOKEN_EXPIRED:
+            return None   # normal between refreshes — fall back to timestamp checks
+        # This runs on nearly every request (license middleware, dashboard
+        # banner), so each problem is logged once per token, not per request.
         if claims is None:
-            logger.warning("license_token signature invalid — ignoring stored token")
+            self._warn_once(token, "license_token signature invalid — ignoring stored token")
             return None
         # Verify device binding: token must have been issued for this device
         if claims.get("did") != self.get_device_id():
-            logger.warning("license_token device_id mismatch — ignoring stored token")
+            self._warn_once(token, "license_token device_id mismatch — ignoring stored token")
             return None
         # Verify the token's license_key (sub) matches the stored license_key.
         # Blocks an attacker who pastes a token from a different (still-valid)
@@ -216,7 +236,7 @@ class LicenseService:
         local_key = self._data.get("license_key")
         token_sub = claims.get("sub")
         if local_key and token_sub and local_key.strip().upper() != str(token_sub).strip().upper():
-            logger.warning("license_token license_key mismatch — ignoring stored token")
+            self._warn_once(token, "license_token license_key mismatch — ignoring stored token")
             return None
         return claims
 
@@ -246,6 +266,12 @@ class LicenseService:
         if resp.status_code not in (200, 201):
             return {"success": False, "error": body.get("error", "Activation failed")}
 
+        # A successful activation supersedes any earlier rejection, offline
+        # period or token for a previous key. Without this, a server_rejected
+        # flag left by an old revoked/invalid license made the server report
+        # "Offline Locked" immediately after a successful activation.
+        for stale in ("server_rejected", "offline_since", "license_token"):
+            self._data.pop(stale, None)
         self._data["license_key"] = license_key
         self._data["activated_at"] = datetime.utcnow().isoformat()
         self._data["expires_at"] = body.get("expires_at")

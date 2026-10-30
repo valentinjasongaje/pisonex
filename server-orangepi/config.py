@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Timestamps are still stored as naive UTC in the database.
     TIMEZONE: str = "Asia/Manila"
 
+    # Log every HTTP request (uvicorn access log). Off by default: each PC
+    # heartbeats once a second, so successful requests would flood pisonet.log.
+    # Errors (4xx/5xx) are always logged.
+    LOG_HTTP_ACCESS: bool = False
+
     # PC client API key — shared secret sent in X-API-Key header by all clients.
     # Leave empty ("") to disable auth (default, backward-compatible).
     # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here
