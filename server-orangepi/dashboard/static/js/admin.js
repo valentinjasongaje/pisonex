@@ -321,7 +321,10 @@ function _countOnlinePcsFromDom() {
   if (grid) {
     return grid.querySelectorAll('.pc-card.pc-active, .pc-card.pc-locked').length;
   }
-  const rows = document.querySelectorAll('[data-pc-status]');
+  // PC Management renders every PC twice (table row + mobile tile), both tagged
+  // data-pc-status — count the table rows only, or each PC would count double.
+  let rows = document.querySelectorAll('tr[data-pc-status]');
+  if (rows.length === 0) rows = document.querySelectorAll('[data-pc-status]');
   if (rows.length === 0) return 0;
   let online = 0;
   rows.forEach((r) => {
