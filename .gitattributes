@@ -1,0 +1,4 @@
+# Files that run on the Orange Pi / Raspberry Pi must keep Linux line endings
+# (CRLF breaks bash: "$'': command not found"), whatever the committer's git setup.
+*.sh       text eol=lf
+*.service  text eol=lf
