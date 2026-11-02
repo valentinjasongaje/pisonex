@@ -44,8 +44,18 @@ python3 -c 'import sys; assert sys.version_info >= (3, 10), sys.version' \
 
 say 2/6 "Python environment ($VENV)"
 [ -d "$VENV" ] || python3 -m venv "$VENV"
-"$VENV/bin/pip" install --upgrade pip --quiet
-"$VENV/bin/pip" install -r "$SERVER_DIR/requirements.txt" --quiet
+# 32-bit ARM (Orange Pi One = armv7l): PyPI has no ready-made packages for
+# several of our dependencies on this CPU, and bcrypt would need a Rust compiler
+# to build (too much for 512 MB RAM). piwheels.org (the Raspberry Pi project's
+# package mirror) serves prebuilt armv7 wheels for Debian; pip still prefers PyPI.
+PIP_EXTRA=()
+if [ "$(uname -m)" = "armv7l" ]; then
+    PIP_EXTRA=(--extra-index-url https://www.piwheels.org/simple)
+    echo "    32-bit ARM: also using prebuilt packages from piwheels.org"
+fi
+echo "    Installing Python packages — can take 10-20 minutes on an Orange Pi One..."
+"$VENV/bin/pip" install --upgrade pip --quiet ${PIP_EXTRA[@]+"${PIP_EXTRA[@]}"}
+"$VENV/bin/pip" install -r "$SERVER_DIR/requirements.txt" --quiet ${PIP_EXTRA[@]+"${PIP_EXTRA[@]}"}
 
 say 3/6 "Configuration (.env)"
 if [ -f "$SERVER_DIR/.env" ]; then
