@@ -19,6 +19,13 @@
     </svg>
     Announce
   </button>
+  <button type="button" class="toolbar-btn toolbar-btn-ghost" onclick="wakeAllPcs(this)"
+          title="Turn on every offline PC (Wake-on-LAN)">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+      <path d="M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Wake All
+  </button>
   <button type="button" class="toolbar-btn toolbar-btn-danger" onclick="openShutdownAllModal()">
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
       <path d="M12 2v10M5.4 6.4a8 8 0 1 0 13.2 0"
@@ -120,6 +127,13 @@
               title="End session and lock"
             >Lock</button>
             {% endif %}
+            {% if not pc.is_online %}
+            <button
+              class="btn btn-sm btn-default"
+              onclick="wakePc({{ pc.pc_number }}, this)"
+              title="Turn this PC on (Wake-on-LAN)"
+            >Wake</button>
+            {% endif %}
           </div>
         </td>
       </tr>
@@ -188,6 +202,9 @@
       <button class="btn btn-sm btn-default" onclick="openRename({{ pc.pc_number }}, '{{ pc.name | replace("'", "\\'") }}')">Rename</button>
       {% if not pc.is_locked %}
       <button class="btn btn-sm btn-danger" onclick="lockPc({{ pc.pc_number }})">Lock</button>
+      {% endif %}
+      {% if not pc.is_online %}
+      <button class="btn btn-sm btn-default" onclick="wakePc({{ pc.pc_number }}, this)">Wake</button>
       {% endif %}
     </div>
 

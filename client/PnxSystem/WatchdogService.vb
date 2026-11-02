@@ -41,6 +41,8 @@ Public Class WatchdogService
 
     Protected Overrides Sub OnStart(args() As String)
         StartTimer()
+        ' Service mode only: needs SYSTEM rights to change network-card settings.
+        WakeOnLanSetup.RunInBackground(AddressOf Log)
     End Sub
 
     Protected Overrides Sub OnStop()

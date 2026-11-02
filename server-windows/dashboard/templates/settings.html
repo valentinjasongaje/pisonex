@@ -314,7 +314,7 @@ async function clearKey() {
 
 function copyKey() {
   const val = document.getElementById('new-key-value').value;
-  navigator.clipboard.writeText(val).then(() => {
+  copyText(val).then(() => {
     const el = document.getElementById('key-action-status');
     el.textContent = 'Copied to clipboard!';
     el.style.color = '#22c55e';

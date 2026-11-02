@@ -306,8 +306,30 @@ def _run_checks(base: str, r: Results):
                 "overview tile (traditional mode) shows Idle without customer wording")
         dash.post("/dashboard/api/settings/traditional-mode", json={"enabled": False})
 
+    _wake_checks(dash, pc, r)
     _membership_checks(api, dash, pc, r)
     _backup_checks(api, dash, r)
+
+
+def _wake_checks(dash: httpx.Client, pc: int, r: Results):
+    # Wake-on-LAN. PC 1's MAC (AA:BB:CC:DD:EE:01) is made up, so the broadcast
+    # this sends can't switch on a real machine. PC 5 lost its MAC to PC 6 in
+    # the renumber check above, so it has nothing to wake.
+    resp = dash.post(f"/dashboard/api/pc/{pc}/wake")
+    if resp.status_code == 404 and "not found" not in resp.text:
+        r.skip("Wake-on-LAN (not in this variant)")
+        return
+    r.check(resp.status_code == 200 and resp.json().get("status") == "sent",
+            "wake sends the magic packet", resp.text[:200])
+    resp = dash.post("/dashboard/api/pc/99/wake")
+    r.check(resp.status_code == 404, "wake unknown PC -> 404", f"HTTP {resp.status_code}")
+    resp = dash.post("/dashboard/api/pc/5/wake")
+    r.check(resp.status_code == 422, "wake PC without a MAC -> clear 422", f"HTTP {resp.status_code} {resp.text[:120]}")
+    resp = dash.post("/dashboard/api/pcs/wake-all")
+    data = resp.json() if resp.status_code == 200 else {}
+    r.check(isinstance(data.get("sent_count"), int) and isinstance(data.get("no_mac_count"), int),
+            "wake-all reports counts", resp.text[:200])
+    r.check("wakeAllPcs(" in dash.get("/dashboard/pcs").text, "PC Management has Wake All")
 
 
 def _backup_checks(api: httpx.Client, dash: httpx.Client, r: Results):

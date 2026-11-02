@@ -22,6 +22,7 @@ from database import get_db
 from models import AdminUser, CoinTransaction, SystemLog, CoinRate, PC, Session as SessionModel, User, MembershipConfig, ServerConfig
 from schemas import AdminAddTimeRequest, AdminAddPesosRequest
 from services.session_service import SessionService
+from services import wol
 from config import settings
 from version import __version__
 import command_store
@@ -1036,6 +1037,56 @@ def send_command_to_all_pcs(
         "queued_count": queued,
         "skipped_count": skipped,
     }
+
+
+# ── Wake-on-LAN ──────────────────────────────────────────────────────────────
+# Cashiers may wake PCs too (opening the shop); it can't end anyone's session.
+
+def _pc_is_online(pc: PC) -> bool:
+    timeout = datetime.utcnow() - timedelta(seconds=settings.PC_HEARTBEAT_TIMEOUT)
+    return bool(pc.is_online and pc.last_seen and pc.last_seen >= timeout)
+
+
+@router.post("/api/pc/{pc_number}/wake", dependencies=[Depends(_require_active_license)])
+def wake_pc(
+    pc_number: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    pc = db.query(PC).filter(PC.pc_number == pc_number).first()
+    if not pc:
+        raise HTTPException(status_code=404, detail=f"PC {pc_number:02d} not found")
+    if not wol.normalize_mac(pc.mac_address):
+        raise HTTPException(
+            status_code=422,
+            detail=f"PC {pc_number:02d} has no network card address yet — turn it on by hand once so the client can report it",
+        )
+    if not wol.wake(pc.mac_address, pc.ip_address):
+        raise HTTPException(status_code=500, detail="Could not send the wake signal from this server")
+    return {"status": "sent", "pc_number": pc_number, "already_online": _pc_is_online(pc)}
+
+
+@router.post("/api/pcs/wake-all", dependencies=[Depends(_require_active_license)])
+def wake_all_pcs(
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    """Send the wake signal to every PC that is offline and has a known MAC."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    sent = 0
+    no_mac = 0
+    for pc in SessionService(db).get_all_pcs():
+        if _pc_is_online(pc):
+            continue
+        if not wol.normalize_mac(pc.mac_address):
+            no_mac += 1
+            continue
+        if wol.wake(pc.mac_address, pc.ip_address):
+            sent += 1
+    return {"status": "sent", "sent_count": sent, "no_mac_count": no_mac}
 
 
 @router.post("/api/announcement", dependencies=[Depends(_require_active_license)])

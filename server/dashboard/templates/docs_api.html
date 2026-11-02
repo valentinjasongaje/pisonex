@@ -852,7 +852,7 @@ function scrollAndOpen(id) {
 // ── Copy to clipboard ─────────────────────────────────────────────
 function copyCode(btn) {
   const pre = btn.nextElementSibling;
-  navigator.clipboard.writeText(pre.innerText).then(() => {
+  copyText(pre.innerText).then(() => {
     btn.textContent = '✓ Copied';
     btn.classList.add('copied');
     setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1800);

@@ -738,7 +738,7 @@ async function createMember() {
 
 function copyMemberPassword() {
   const val = document.getElementById('new-member-password').value;
-  navigator.clipboard.writeText(val).then(() => {
+  copyText(val).then(() => {
     const el = document.getElementById('create-member-status');
     el.textContent = 'Copied to clipboard!';
     el.style.color = 'var(--green, #22c55e)';
@@ -908,7 +908,7 @@ async function confirmResetPassword() {
 
 function copyResetPassword() {
   const val = document.getElementById('reset-password-result-value').value;
-  navigator.clipboard.writeText(val);
+  copyText(val).then(() => showToast('Password copied', 'success')).catch(() => {});
 }
 
 // ── Click-outside-to-close for all modals ─────────────────────────────────

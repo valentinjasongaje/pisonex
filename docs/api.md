@@ -820,6 +820,19 @@ Same as `POST /api/admin/pc/{pc_number}/lock` but authenticated via session cook
 
 ---
 
+### POST `/dashboard/api/pc/{pc_number}/wake`
+
+Wake-on-LAN: broadcasts the magic packet to the MAC address the PC registered
+with. Admin or cashier. `200 {"status": "sent", "pc_number": 1, "already_online": false}`;
+`404` unknown PC; `422` the PC never reported a usable MAC (turn it on by hand once).
+
+### POST `/dashboard/api/pcs/wake-all`
+
+Sends the wake signal to every **offline** PC with a known MAC.
+`200 {"status": "sent", "sent_count": 3, "no_mac_count": 1}`.
+
+---
+
 ### POST `/dashboard/api/pc/{pc_number}/rename`
 
 Rename a PC from the dashboard.

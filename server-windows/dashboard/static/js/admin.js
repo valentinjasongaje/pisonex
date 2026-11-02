@@ -410,6 +410,75 @@ async function confirmShutdownAll() {
   closeShutdownAllModal();
 }
 
+// ── Clipboard ─────────────────────────────────────────────────────────────────
+// navigator.clipboard only exists on HTTPS or localhost. The dashboard is used
+// over plain http://pisonex.local or the server's IP, where it is undefined —
+// so every Copy button (new member password, API key, …) silently did nothing.
+// Fall back to the legacy copy command, which works on plain http.
+// Resolves when copied; rejects (after telling the user) when the browser refuses.
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).catch(() => _legacyCopy(text));
+  }
+  return _legacyCopy(text);
+}
+function _legacyCopy(text) {
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;left:0;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) { resolve(); return; }
+    showToast('The browser blocked copying — select the text and press Ctrl+C', 'error');
+    reject(new Error('copy failed'));
+  });
+}
+
+// ── Wake-on-LAN ───────────────────────────────────────────────────────────────
+// The server broadcasts the "magic packet"; the PC then shows up online by
+// itself once Windows and the client have started (usually within a minute).
+function _wakeButtonCooldown(btn) {
+  if (!btn) return;
+  btn.disabled = true;
+  setTimeout(() => { btn.disabled = false; }, 5000);
+}
+async function wakePc(pcNumber, btn) {
+  const label = `PC ${String(pcNumber).padStart(2, '0')}`;
+  _wakeButtonCooldown(btn);
+  const res = await apiPost(`/dashboard/api/pc/${pcNumber}/wake`, {});
+  if (!res) return;
+  if (res.ok) {
+    showToast(`Wake signal sent to ${label} — it should come online within a minute`, 'success');
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || `Failed to wake ${label}`, 'error');
+  }
+}
+async function wakeAllPcs(btn) {
+  _wakeButtonCooldown(btn);
+  const res = await apiPost('/dashboard/api/pcs/wake-all', {});
+  if (!res) return;
+  if (res.ok) {
+    const data = await res.json();
+    const sent = data.sent_count || 0;
+    const noMac = data.no_mac_count || 0;
+    let msg = sent > 0
+      ? `Wake signal sent to ${sent} offline PC${sent === 1 ? '' : 's'}`
+      : 'No offline PCs to wake';
+    if (noMac > 0) msg += ` (${noMac} skipped — never reported a network address)`;
+    showToast(msg, sent > 0 ? 'success' : 'error');
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || 'Failed to send wake signal', 'error');
+  }
+}
+
 // ── Message modal ─────────────────────────────────────────────────────────────
 let _msgPc = null;
 function openMessageModal(pcNumber) {

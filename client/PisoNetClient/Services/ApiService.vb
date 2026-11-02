@@ -251,13 +251,52 @@ Namespace Services
             End Try
         End Function
 
+        ' Adapter descriptions that are never the PC's real network card.
+        Private Shared ReadOnly VirtualNicHints As String() = {
+            "virtual", "hyper-v", "vmware", "virtualbox", "vpn", "tap-", "wan miniport",
+            "bluetooth", "loopback", "npcap", "zerotier", "tailscale", "wireguard"}
+
+        ''' <summary>
+        ''' MAC of the wired card that reaches the LAN. The server sends the
+        ''' Wake-on-LAN "magic packet" to this address, so a VPN / Hyper-V / Wi-Fi
+        ''' adapter (which the old "first adapter that is up" rule could pick)
+        ''' would make Wake silently do nothing.
+        ''' Preference: wired + gateway → wired → any real adapter with a gateway → any.
+        ''' </summary>
         Private Shared Function GetMacAddress() As String
-            For Each nic In NetworkInterface.GetAllNetworkInterfaces()
-                If nic.OperationalStatus = OperationalStatus.Up AndAlso
-                   nic.NetworkInterfaceType <> NetworkInterfaceType.Loopback Then
-                    Return nic.GetPhysicalAddress().ToString()
-                End If
-            Next
+            Try
+                Dim up = NetworkInterface.GetAllNetworkInterfaces().
+                    Where(Function(n) n.OperationalStatus = OperationalStatus.Up AndAlso
+                                      n.NetworkInterfaceType <> NetworkInterfaceType.Loopback AndAlso
+                                      n.NetworkInterfaceType <> NetworkInterfaceType.Tunnel AndAlso
+                                      n.GetPhysicalAddress().GetAddressBytes().Length = 6).
+                    ToList()
+
+                Dim isReal = Function(n As NetworkInterface) As Boolean
+                                 Dim d = (n.Description & " " & n.Name).ToLowerInvariant()
+                                 Return Not VirtualNicHints.Any(Function(h) d.Contains(h))
+                             End Function
+                Dim isWired = Function(n As NetworkInterface) As Boolean
+                                  Select Case n.NetworkInterfaceType
+                                      Case NetworkInterfaceType.Ethernet, NetworkInterfaceType.GigabitEthernet,
+                                           NetworkInterfaceType.FastEthernetT, NetworkInterfaceType.FastEthernetFx
+                                          Return True
+                                  End Select
+                                  Return False
+                              End Function
+                Dim hasGateway = Function(n As NetworkInterface) As Boolean
+                                     Return n.GetIPProperties().GatewayAddresses.Any(
+                                         Function(g) g.Address.AddressFamily = Net.Sockets.AddressFamily.InterNetwork AndAlso
+                                                     Not g.Address.Equals(Net.IPAddress.Any))
+                                 End Function
+
+                Dim pick = If(up.FirstOrDefault(Function(n) isWired(n) AndAlso isReal(n) AndAlso hasGateway(n)),
+                           If(up.FirstOrDefault(Function(n) isWired(n) AndAlso isReal(n)),
+                           If(up.FirstOrDefault(Function(n) isReal(n) AndAlso hasGateway(n)),
+                              up.FirstOrDefault())))
+                If pick IsNot Nothing Then Return pick.GetPhysicalAddress().ToString()
+            Catch
+            End Try
             Return "UNKNOWN"
         End Function
 
