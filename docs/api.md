@@ -1,7 +1,7 @@
 # PisoNet API Documentation
 
 > **Base URL:** `http://<raspberry-pi-ip>`
-> **Version:** 1.0.7
+> **Version:** 1.0.8
 
 ---
 
@@ -31,7 +31,7 @@ Returns server status. No authentication required.
 ```json
 {
   "status": "ok",
-  "version": "1.0.7"
+  "version": "1.0.8"
 }
 ```
 
