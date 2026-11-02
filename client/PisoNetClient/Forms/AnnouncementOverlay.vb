@@ -20,6 +20,12 @@ Namespace Forms
         Private _btnDismiss   As Button
         Private _btnClose     As Label
 
+        ' Auto-close: the overlay dims the whole screen, so it must not stay up
+        ' until someone clicks. The button shows the seconds left.
+        Private Const AutoCloseSeconds As Integer = 10
+        Private _secondsLeft As Integer = AutoCloseSeconds
+        Private _autoCloseTimer As Timer
+
         ' ── Card dimensions ──────────────────────────────────────────────────
         Private Const CardW As Integer = 520
         Private Const CardRadius As Integer = 18
@@ -111,7 +117,7 @@ Namespace Forms
             Dim btnW = 160
             Dim btnH = 42
             _btnDismiss = New Button() With {
-                .Text      = "Got it",
+                .Text      = $"Got it ({AutoCloseSeconds})",
                 .Size      = New Size(btnW, btnH),
                 .Font      = New Font("Segoe UI", 11, FontStyle.Bold),
                 .ForeColor = Color.White,
@@ -199,6 +205,27 @@ Namespace Forms
         Protected Overrides Sub OnLoad(e As EventArgs)
             MyBase.OnLoad(e)
             CenterCard()
+
+            ' Countdown starts when the overlay is actually on screen.
+            _autoCloseTimer = New Timer() With {.Interval = 1000}
+            AddHandler _autoCloseTimer.Tick, AddressOf OnAutoCloseTick
+            _autoCloseTimer.Start()
+        End Sub
+
+        Private Sub OnAutoCloseTick(sender As Object, e As EventArgs)
+            _secondsLeft -= 1
+            If _secondsLeft <= 0 Then
+                Me.Close()
+            Else
+                _btnDismiss.Text = $"Got it ({_secondsLeft})"
+            End If
+        End Sub
+
+        Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
+            _autoCloseTimer?.Stop()
+            _autoCloseTimer?.Dispose()
+            _autoCloseTimer = Nothing
+            MyBase.OnFormClosed(e)
         End Sub
 
         Protected Overrides Sub OnResize(e As EventArgs)
