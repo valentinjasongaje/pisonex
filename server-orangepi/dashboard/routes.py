@@ -2584,14 +2584,21 @@ def save_idle_timeout(
 def system_restart(
     current_user: Optional[dict] = Depends(_validate_session),
 ):
-    """Restart the pisonet systemd service."""
+    """Restart the Pisonex systemd service."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     try:
-        subprocess.Popen(["systemctl", "restart", "pisonet"])
-        return {"status": "restarting"}
+        # The unit is "pisonex" (deploy/pisonex.service, production). Boards set
+        # up with the old installer used "pisonet" — restart whichever exists;
+        # this used to hard-code "pisonet", so the button did nothing on prod.
+        unit = "pisonex"
+        if subprocess.run(["systemctl", "cat", "pisonex.service"],
+                          capture_output=True).returncode != 0:
+            unit = "pisonet"
+        subprocess.Popen(["systemctl", "restart", unit])
+        return {"status": "restarting", "service": unit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

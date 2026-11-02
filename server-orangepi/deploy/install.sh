@@ -1,146 +1,108 @@
 #!/bin/bash
-# PisoNet Orange Pi installation script
-# Run as: bash server-orangepi/deploy/install.sh  (from anywhere inside the project)
+# ─────────────────────────────────────────────────────────────────────────────
+#  Pisonex Orange Pi installer — sets up the SAME layout as the production Pi:
+#
+#    /opt/pisonex/                  git clone of the pisonex repo
+#    /opt/pisonex/venv/             shared Python virtualenv
+#    /opt/pisonex/server-orangepi/  server code, .env, pisonet.db, backups/
+#    pisonex.service                systemd unit (runs main.py as root)
+#
+#  Usage (on the Pi, as root or with sudo):
+#    sudo git clone <repo-url> /opt/pisonex
+#    sudo bash /opt/pisonex/server-orangepi/deploy/install.sh
+#
+#  Safe to re-run: it updates packages, the venv and the service, and never
+#  touches an existing .env or pisonet.db.
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
 
-set -e
+INSTALL_ROOT="/opt/pisonex"
+SERVER_DIR="$INSTALL_ROOT/server-orangepi"
+VENV="$INSTALL_ROOT/venv"
+SERVICE="pisonex"
+UNIT_DST="/etc/systemd/system/$SERVICE.service"
 
-echo "=== Pisonex Installer (Orange Pi) ==="
+say() { printf '\n\033[1m[%s] %s\033[0m\n' "$1" "$2"; }
+die() { printf '\n\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
-# ── Resolve project root automatically ───────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_ROOT="$(dirname "$SERVER_DIR")"
+[ "$(id -u)" -eq 0 ] || die "Run as root:  sudo bash $0"
 
-echo "Project root : $PROJECT_ROOT"
-echo "Server dir   : $SERVER_DIR"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+[ "$HERE" = "$SERVER_DIR" ] || die "The repo must be cloned to $INSTALL_ROOT (this script is in $HERE).
+       sudo git clone <repo-url> $INSTALL_ROOT"
+[ -f "$SERVER_DIR/main.py" ] || die "$SERVER_DIR/main.py not found."
 
-# Verify server dir exists
-if [ ! -f "$SERVER_DIR/main.py" ]; then
-    echo ""
-    echo "ERROR: Cannot find main.py in $SERVER_DIR"
-    echo "Make sure you run this script from inside the project folder."
-    echo "Example:  cd ~/pisonex && bash server-orangepi/deploy/install.sh"
-    exit 1
-fi
+say 1/6 "System packages"
+apt-get update -qq
+# (No network-manager: installing it can take over an /etc/network/interfaces
+#  setup and drop the connection. The dashboard's Network card handles both.)
+# python3-dev + build-essential: some wheels (e.g. httptools) may need compiling on ARM.
+apt-get install -y -qq python3 python3-venv python3-pip python3-dev build-essential \
+                        git sqlite3 curl avahi-daemon >/dev/null
+python3 -c 'import sys; assert sys.version_info >= (3, 10), sys.version' \
+    || die "Python 3.10+ is required (found $(python3 --version))."
 
-# ── 1. System deps ────────────────────────────────────────────────────────────
-echo ""
-echo "[1/10] Installing system packages..."
-sudo apt update && sudo apt install -y python3-pip python3-venv i2c-tools git sqlite3 avahi-daemon avahi-utils
+say 2/6 "Python environment ($VENV)"
+[ -d "$VENV" ] || python3 -m venv "$VENV"
+"$VENV/bin/pip" install --upgrade pip --quiet
+"$VENV/bin/pip" install -r "$SERVER_DIR/requirements.txt" --quiet
 
-# ── 2. Enable I2C ────────────────────────────────────────────────────────────
-echo ""
-echo "[2/10] Enabling I2C..."
-if command -v orangepi-config &>/dev/null; then
-    echo "Use 'sudo orangepi-config' → System → Hardware → enable i2c-0 (or i2c-1)."
-    echo "Then reboot and re-run this script to continue."
-elif [ -f /boot/armbianEnv.txt ]; then
-    if grep -q "i2c" /boot/armbianEnv.txt; then
-        echo "I2C overlay already present in /boot/armbianEnv.txt"
-    else
-        echo "overlays=i2c0" | sudo tee -a /boot/armbianEnv.txt
-        echo "I2C overlay added — a reboot is required."
-        echo "After reboot, re-run this script to continue installation."
-        read -p "Reboot now? [y/N] " REBOOT
-        [[ "$REBOOT" =~ ^[Yy]$ ]] && sudo reboot
-        exit 0
-    fi
+say 3/6 "Configuration (.env)"
+if [ -f "$SERVER_DIR/.env" ]; then
+    echo "Existing .env kept."
 else
-    echo "WARNING: Could not auto-enable I2C."
-    echo "Enable it manually via your board's config tool, then re-run this script."
+    cp "$SERVER_DIR/.env.example" "$SERVER_DIR/.env"
+    chmod 600 "$SERVER_DIR/.env"
+    echo "Created .env from .env.example — SECRET_KEY and LICENSE_HMAC_SECRET are"
+    echo "generated automatically on first start."
 fi
 
-# ── 3. Detect LCD I2C address ─────────────────────────────────────────────────
-echo ""
-echo "[3/10] Scanning I2C bus (look for 0x27 or 0x3F)..."
-i2cdetect -y 0 2>/dev/null || i2cdetect -y 1 2>/dev/null || echo "No I2C bus found yet (hardware not connected or I2C not enabled)"
+say 4/6 "Service ($UNIT_DST)"
+# An older installer created a 'pisonet' unit with a broken path — retire it.
+if [ -f /etc/systemd/system/pisonet.service ]; then
+    systemctl disable --now pisonet 2>/dev/null || true
+    rm -f /etc/systemd/system/pisonet.service
+    echo "Removed the old 'pisonet' service."
+fi
+cp "$SERVER_DIR/deploy/pisonex.service" "$UNIT_DST"
+systemctl daemon-reload
+systemctl enable "$SERVICE" >/dev/null
+systemctl restart "$SERVICE"
 
-# ── 4. Python venv + deps ────────────────────────────────────────────────────
-echo ""
-echo "[4/10] Setting up Python virtual environment..."
-cd "$SERVER_DIR"
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip --quiet
-pip install -r requirements.txt
-echo "Python deps installed"
+say 5/6 "Network name (pisonex.local)"
+# PC clients default to http://pisonex.local — make this board answer to it.
+hostnamectl set-hostname pisonex
+if grep -q '^127\.0\.1\.1' /etc/hosts; then
+    sed -i 's/^127\.0\.1\.1.*/127.0.1.1\tpisonex/' /etc/hosts
+else
+    printf '127.0.1.1\tpisonex\n' >> /etc/hosts
+fi
+systemctl enable --now avahi-daemon >/dev/null
 
-# ── 5. Initialize database ───────────────────────────────────────────────────
-echo ""
-echo "[5/10] Initializing database..."
-python3 -c "
-from database import engine, Base
-from models import *
-Base.metadata.create_all(engine)
-print('Database initialized')
-"
+say 6/6 "Checking the server"
+for _ in $(seq 1 30); do
+    if curl -fsS -m 2 http://127.0.0.1/health >/dev/null 2>&1; then break; fi
+    sleep 2
+done
+if curl -fsS -m 2 http://127.0.0.1/health; then
+    echo
+else
+    journalctl -u "$SERVICE" -n 40 --no-pager
+    die "The server did not answer on port 80 — see the log above."
+fi
 
-# ── 6. Install systemd service ────────────────────────────────────────────────
-echo ""
-echo "[6/10] Installing systemd service..."
+IP="$(hostname -I | awk '{print $1}')"
+cat <<EOF
 
-SERVICE_SRC="$SERVER_DIR/deploy/pisonet.service"
-SERVICE_TMP="/tmp/pisonet.service"
+============================================================
+  Pisonex is running  (version $(cat "$INSTALL_ROOT/VERSION" 2>/dev/null || echo "?"))
 
-CURRENT_USER="$USER"
-echo "Running as user: $CURRENT_USER"
+  Dashboard:  http://$IP/dashboard
+              http://pisonex.local/dashboard
+  Login:      admin / admin123   -> change it under Account
 
-sed "s|/home/pi/pisonet/server|$SERVER_DIR|g; s|User=pi|User=$CURRENT_USER|g; s|Group=pi|Group=$CURRENT_USER|g" \
-    "$SERVICE_SRC" > "$SERVICE_TMP"
-
-sudo cp "$SERVICE_TMP" /etc/systemd/system/pisonet.service
-sudo systemctl daemon-reload
-sudo systemctl enable pisonet
-sudo systemctl start pisonet
-echo "Service installed and started"
-
-# ── 7. GPIO + I2C permissions ────────────────────────────────────────────────
-echo ""
-echo "[7/10] Setting GPIO/I2C permissions..."
-sudo adduser "$USER" gpio 2>/dev/null || true
-sudo adduser "$USER" i2c  2>/dev/null || true
-
-# ── 8. Set hostname to pisonex (enables pisonex.local on the LAN) ────────────
-echo ""
-echo "[8/10] Setting hostname to 'pisonex'..."
-sudo hostnamectl set-hostname pisonex
-sudo sed -i "s/127\.0\.1\.1.*/127.0.1.1\tpisonex/" /etc/hosts
-echo "Hostname set — this board will be reachable as pisonex.local"
-
-# ── 9. Enable mDNS via avahi ─────────────────────────────────────────────────
-echo ""
-echo "[9/10] Enabling avahi-daemon (mDNS for pisonex.local)..."
-sudo systemctl enable avahi-daemon
-sudo systemctl start avahi-daemon
-echo "avahi-daemon running — pisonex.local is now resolvable on the LAN"
-
-# ── 10. Daily backup cron ────────────────────────────────────────────────────
-echo ""
-echo "[10/10] Setting up daily backup..."
-BACKUP_SCRIPT="$SERVER_DIR/deploy/backup.sh"
-chmod +x "$BACKUP_SCRIPT"
-(crontab -l 2>/dev/null | grep -v "pisonet"; echo "0 3 * * * $BACKUP_SCRIPT") | crontab -
-echo "Backup scheduled at 3:00 AM daily"
-
-# ── Done ──────────────────────────────────────────────────────────────────────
-echo ""
-echo "============================================"
-echo "  PisoNet installation complete! (Orange Pi)"
-echo "============================================"
-echo ""
-echo "  Admin dashboard:"
-echo "  http://pisonex.local/dashboard"
-echo "  http://$(hostname -I | awk '{print $1}')/dashboard"
-echo ""
-echo "  Login: admin / admin123"
-echo "  IMPORTANT: Change the password in $SERVER_DIR/.env"
-echo ""
-echo "  Set your GPIO pin numbers in $SERVER_DIR/.env"
-echo "  Run 'gpio readall' to list available pins on your board."
-echo ""
-echo "  Useful commands:"
-echo "  View logs  : journalctl -u pisonet -f"
-echo "  Restart    : sudo systemctl restart pisonet"
-echo "  Stop       : sudo systemctl stop pisonet"
-echo ""
-sudo systemctl status pisonet --no-pager
+  Logs:       journalctl -u $SERVICE -f
+  Restart:    sudo systemctl restart $SERVICE
+  Update:     cd $INSTALL_ROOT && sudo git pull && sudo bash $SERVER_DIR/deploy/install.sh
+============================================================
+EOF

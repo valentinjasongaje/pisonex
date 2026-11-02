@@ -1,0 +1,27 @@
+[Unit]
+Description=Pisonex Server
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Root: GPIO (OPi.GPIO via sysfs), and the dashboard's System Control
+# (restart / reboot / shutdown) and Network (nmcli / interfaces) cards.
+User=root
+WorkingDirectory=/opt/pisonex/server-orangepi
+# main.py (not the uvicorn CLI): it disables uvicorn's WebSocket pings, which
+# otherwise froze the live FFmpeg monitor stream after ~40 s.
+# deploy/make-release.sh rewrites "main.py" to "main.pyc" for SD-card images.
+ExecStart=/opt/pisonex/venv/bin/python main.py
+Restart=always
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pisonex
+
+[Install]
+WantedBy=multi-user.target

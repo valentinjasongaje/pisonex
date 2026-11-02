@@ -23,6 +23,7 @@ on an Orange Pi One. From parts in a box to a working dashboard in about
 6. [Part 5 — Install Windows clients](#part-5--install-windows-clients-on-each-pc)
 7. [Testing the system](#testing-the-system)
 8. [Troubleshooting](#troubleshooting)
+9. [Appendix — Installing from scratch](#appendix--installing-from-scratch-no-pisonex-image)
 
 ---
 
@@ -41,11 +42,6 @@ on an Orange Pi One. From parts in a box to a working dashboard in about
 | Relay module, 5V single-channel | Lets the Pi power-cycle the coin acceptor (optional but recommended). | ₱60 – 150 |
 | Jumper wires, female-to-female | At least 5; a 40-wire pack is cheap and useful. | ₱50 – 150 |
 | Project enclosure / box (optional) | A small plastic project box keeps everything tidy and safe. | ₱150 – 500 |
-
-**Optional add-ons** (covered briefly in [Part 3](#optional-keypad--lcd-standalone-unit)):
-
-- 3×4 matrix keypad + 16×2 LCD with I2C backpack → for a "standalone"
-  PC-selection unit so customers can pick which PC they're paying for.
 
 ### Software
 
@@ -190,8 +186,8 @@ After logging in you'll be on the empty dashboard ("No PCs registered").
 Don't worry about that yet — we'll wire the hardware and register PCs
 next.
 
-> 🔒 **Change the password immediately.** Go to Settings → Security
-> → Admin Password → set a strong password. Anyone on your network can
+> 🔒 **Change the password immediately.** Click **Account** in the
+> sidebar → enter `admin123` as the current password → set a strong one. Anyone on your network can
 > reach the dashboard, so don't leave it at `admin123`.
 
 ---
@@ -343,21 +339,12 @@ Before plugging anything back in, run this mental checklist:
 3. Wait ~30 seconds for the Pi to boot
 4. Browse to the dashboard (`http://<your-pi-ip>/dashboard`) and log in
 
-### Optional: keypad + LCD (standalone unit)
+### Keypad + LCD
 
-If you're building the optional "standalone keypad unit" — a small box
-with a 3×4 keypad and a 16×2 LCD that customers walk up to and key in
-which PC they're paying for — additional pins are used:
-
-- **Keypad rows** (output → input scan): PA17, PA27, PA22, PA5
-- **Keypad cols** (input with pull-up): PA9, PA11, PA10
-- **LCD**: I²C bus (uses Pin 3 SDA and Pin 5 SCL — conflicts with the
-  coin/relay pins above, so the standalone unit uses a different setup)
-
-If you're going with the standalone unit, see **Settings → Coin Slot
-Hardware** on the dashboard — every GPIO pin is configurable from there.
-You can also run `gpio readall` on the device console to see your
-board's exact pin mapping.
+No longer used: customers now press **Insert Coin** on the PC itself and the
+server opens the coin slot for that PC. You only need the coin acceptor and
+(optionally) the relay. Every GPIO pin is still configurable in
+**Settings → Coin Slot Hardware**; `gpio readall` on the board lists the pins.
 
 ---
 
@@ -398,19 +385,26 @@ have the wrong edge polarity — try toggling FALLING/RISING.
 
 ### 4.4 Settings → Security
 
-- **Admin Password** — change from `admin123` to something strong
 - **Client API Key** — optional. If you enable this, all client PCs
   must be configured with the same key. Recommended for security; you
   can leave disabled for initial testing.
 
-### 4.5 PC Management → Rate Settings
+### 4.5 Coin Rates
 
-Tell the server how to convert pesos to time:
+Tell the server how to convert pesos to time (sidebar → **Coin Rates**):
 
-- **Default Rate:** Pesos per second (e.g. 5 pesos = 1800 seconds = 30 min)
+- Add one row per coin value, e.g. **₱5 = 30 minutes**. When a customer
+  inserts several coins, the largest matching rates are used first.
+- **Rate profiles** let some PCs charge more (e.g. a "Gaming" profile).
+  Create the profile on the Coin Rates page, then pick it per PC in
+  **PC Management**.
 
-This is the default; you can override per-PC later if some machines are
-"premium" and cost more.
+### 4.6 Backup
+
+Sidebar → **Backup**. The server makes a backup every day by itself (the
+newest 14 are kept on the Pi). Click **Download** now and then and keep the
+file on your laptop or Google Drive — if the SD card ever dies, that file
+brings back every member, balance and sale.
 
 ---
 
@@ -448,8 +442,8 @@ Repeat for each PC in your café (PC 2, PC 3, etc.). Each one needs a
 
 ### Test 1 — Coin acceptance
 
-1. On the dashboard, click PC 01 → click **"Unlock"**. The PC should
-   unlock immediately, with whatever default time you set (e.g. 30 min).
+1. On the PC's lock screen, click **Insert Coin** (or, from the
+   dashboard, click the **+** on PC 01's tile and add time).
 2. From the PC client side, the lock screen disappears, the timer
    overlay appears in the corner counting down.
 3. Click **+ Add Time** on the timer overlay. The coin slot opens
@@ -463,7 +457,7 @@ If all four steps work, **your hardware setup is complete.**
 
 ### Test 2 — Lock screen returns when time runs out
 
-1. On the dashboard, click PC 01 → **Set Time → 10 seconds**.
+1. On the dashboard, click the **+** on PC 01's tile and add **1 minute**.
 2. Watch the timer overlay count down to 00:00.
 3. The lock screen should reappear immediately when time hits zero.
 
@@ -556,12 +550,17 @@ process is:
 3. Eject the SD card
 4. Re-flash with Etcher (same process as Part 1)
 5. Reinsert and boot
-6. Reconfigure from scratch — branch name, password, PCs, etc.
+6. Log in, open **Backup → Restore from a file** and pick the backup you
+   downloaded in step 0 — members, balances, sales, rates and settings
+   all come back. Then re-activate the license on the **License** page.
 
-> **All your customer data will be wiped.** This includes registered
-> PCs, member accounts, transaction history. Make sure you've exported
-> anything important (e.g. download the daily earnings report from
-> Dashboard → Reports → Export) before flashing.
+> **Step 0 — before you power off:** open **Backup → Create backup now →
+> Download** and keep the file on your laptop. Re-flashing erases the SD
+> card; without that file the members, balances and sales are gone.
+
+If you installed from scratch (see the appendix below) you don't need to
+re-flash at all: `cd /opt/pisonex && sudo git pull && sudo bash
+server-orangepi/deploy/install.sh` updates in place and keeps all data.
 
 ---
 
@@ -604,3 +603,39 @@ If you get stuck on any step:
   any), and a photo of your wiring. We'll get you running.
 
 Good luck and welcome to Pisonex.
+
+---
+
+## Appendix — Installing from scratch (no Pisonex image)
+
+Use this for your own boards, or when you don't have a Pisonex SD image.
+It produces exactly the production layout (`/opt/pisonex`, service
+`pisonex`).
+
+1. Flash a Debian-based OS for the **Orange Pi One** (Armbian or Orange Pi
+   OS, Bookworm "minimal/server" image) with balenaEtcher, boot it with
+   Ethernet connected, and log in over SSH as `root` (find its IP in your
+   router's device list). Set a root password when asked.
+2. Get the code onto the board:
+   ```bash
+   apt-get update && apt-get install -y git
+   git clone <your pisonex repo URL> /opt/pisonex
+   ```
+3. Run the installer (takes ~10 minutes on an Orange Pi One):
+   ```bash
+   bash /opt/pisonex/server-orangepi/deploy/install.sh
+   ```
+   It installs Python packages into `/opt/pisonex/venv`, creates `.env`,
+   installs and starts the `pisonex` service, names the board `pisonex`
+   (so `http://pisonex.local` works for the PC clients) and finishes by
+   checking `http://127.0.0.1/health`.
+4. Continue with [Part 2.6](#26-open-the-dashboard) (open the dashboard)
+   and Part 3 (wiring).
+
+Useful commands on the board:
+
+```bash
+journalctl -u pisonex -f            # live log
+sudo systemctl restart pisonex      # restart
+cd /opt/pisonex && sudo git pull && sudo bash server-orangepi/deploy/install.sh   # update
+```
