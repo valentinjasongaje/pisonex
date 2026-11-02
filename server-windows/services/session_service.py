@@ -34,6 +34,23 @@ class SessionService:
         return self._db.query(PC).order_by(PC.pc_number).all()
 
     def register_pc(self, pc_number: int, mac_address: str, ip_address: str = None) -> PC:
+        # A MAC identifies the physical machine, and pcs.mac_address is UNIQUE.
+        # When a machine is renumbered in the client setup (e.g. PC 1 -> PC 2),
+        # its MAC is still on the old row; registering the new number then
+        # crashed with an IntegrityError (500) and the client showed "can't
+        # connect" forever. Release the MAC from the old row first.
+        if mac_address:
+            stale = (self._db.query(PC)
+                     .filter(PC.mac_address == mac_address, PC.pc_number != pc_number)
+                     .all())
+            for old in stale:
+                old.mac_address = None
+                self._log("WARNING", "pc",
+                          f"Machine {mac_address} moved from PC {old.pc_number:02d} "
+                          f"to PC {pc_number:02d} (renumbered in the client setup)")
+            if stale:
+                self._db.flush()   # release before the new row claims the MAC
+
         pc = self.get_pc(pc_number)
         if pc:
             pc.mac_address = mac_address

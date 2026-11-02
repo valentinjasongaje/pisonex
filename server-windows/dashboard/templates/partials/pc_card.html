@@ -48,7 +48,10 @@
     <div class="pc-status-sub">remaining</div>
     {% elif state == "locked" %}
     <div class="pc-status-label">Idle</div>
-    <div class="pc-status-sub">{% if traditional_mode_enabled %}Ask cashier for time{% else %}Waiting for coins{% endif %}</div>
+    {# Admin-facing tile: "Ask cashier for time" was customer wording. In
+       Traditional Café Mode the "Idle" label says it all; .pc-status keeps
+       its min-height so tiles stay aligned. #}
+    {% if not traditional_mode_enabled %}<div class="pc-status-sub">Waiting for coins</div>{% endif %}
     {% else %}
     <div class="pc-status-label">Offline</div>
     <div class="pc-status-sub">
