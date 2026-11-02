@@ -101,11 +101,24 @@ license_service: LicenseService = None
 
 _DEFAULT_SECRET = "change-this-to-a-random-256-bit-secret-key"
 _DEFAULT_HMAC = "PISONEX-INTERNAL-2026-CHANGE-BEFORE-RELEASE"
+_PLACEHOLDER_SECRETS = {_DEFAULT_SECRET.lower(), _DEFAULT_HMAC.lower(),
+                        "changeme", "change-me", "change_me", "secret", "default"}
+_MIN_SECRET_LEN = 32
+
+
+def _is_weak_secret(value) -> bool:
+    """Blank, a known placeholder, or too short to be a real random key.
+    deploy/make-release.sh blanks both secrets so every SD image gets its own."""
+    v = (value or "").strip()
+    return len(v) < _MIN_SECRET_LEN or v.lower() in _PLACEHOLDER_SECRETS
+
+
 def _enforce_secure_defaults():
-    """Auto-generate SECRET_KEY and LICENSE_HMAC_SECRET if they are still the
-    insecure defaults.  Writes the new values into .env so they persist
-    across restarts.  This runs once on first startup and is safe to
-    re-run (it only acts when the defaults are detected)."""
+    """Auto-generate SECRET_KEY and LICENSE_HMAC_SECRET if they are blank,
+    placeholders or too short.  Writes the new values into .env so they
+    persist across restarts.  Safe to re-run: a strong value is never touched.
+    Rotating a weak SECRET_KEY only signs out open dashboard sessions; the
+    license HMAC secret is per-install and never checked by pisonex.com."""
     import secrets
     env_path = Path(__file__).parent / ".env"
 
@@ -127,17 +140,17 @@ def _enforce_secure_defaults():
             lines.append(f"{key}={value}\n")
         changed = True
 
-    if settings.SECRET_KEY == _DEFAULT_SECRET:
+    if _is_weak_secret(settings.SECRET_KEY):
         new_key = secrets.token_hex(32)  # 256-bit random key
         _replace_or_append("SECRET_KEY", new_key)
         settings.SECRET_KEY = new_key
-        logger.warning("SECRET_KEY was the default — generated a secure random key and saved to .env")
+        logger.warning("SECRET_KEY was blank/weak — generated a secure random key and saved to .env")
 
-    if settings.LICENSE_HMAC_SECRET == _DEFAULT_HMAC:
+    if _is_weak_secret(settings.LICENSE_HMAC_SECRET):
         new_hmac = secrets.token_hex(32)  # 256-bit random HMAC key
         _replace_or_append("LICENSE_HMAC_SECRET", new_hmac)
         settings.LICENSE_HMAC_SECRET = new_hmac
-        logger.warning("LICENSE_HMAC_SECRET was the default — generated a secure key and saved to .env")
+        logger.warning("LICENSE_HMAC_SECRET was blank/weak — generated a secure key and saved to .env")
 
     if changed:
         env_path.write_text("".join(lines), encoding="utf-8")

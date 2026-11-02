@@ -11,7 +11,9 @@
 #      this script — printed to stdout exactly once)
 #    • .env secrets reset to defaults so first boot regenerates them
 #    • DB, logs, bash history, machine-id, ssh host keys wiped
-#    • .git, .env.example, dev-only files removed
+#    • .git, .env.example, dev-only files removed — and every other folder of
+#      the repo clone in /opt/pisonex (client/, server/, server-windows/,
+#      tools/, docs/, deploy/): only server-orangepi/, venv/ and VERSION ship
 #    • Free space TRIM'd so the image compresses small
 #
 #  Default mode is --dry-run (prints what would happen, changes nothing).
@@ -64,8 +66,16 @@ exec_or_plan() {
 [ "$EUID" -eq 0 ] || die "Must run as root."
 [ -d "$PROJECT_DIR" ] || die "Project dir $PROJECT_DIR not found — wrong machine?"
 [ -x "$VENV_PY" ] || die "Venv python $VENV_PY not found."
+case "$(readlink -f "$0")" in
+    /opt/pisonex/*) die "Copy this script out of /opt/pisonex first (step 6 deletes it):  cp $0 /root/ && /root/make-release.sh" ;;
+esac
 
 hdr "make-release.sh — PisoNet image prep ($RELEASE_VERSION)"
+if [ -d /opt/pisonex/.git ] && command -v git >/dev/null; then
+    info "Code in /opt/pisonex: $(git -C /opt/pisonex log -1 --format='%h %s (%cd)' --date=short 2>/dev/null)"
+    [ -z "$(git -C /opt/pisonex status --porcelain 2>/dev/null)" ] || \
+        warn "/opt/pisonex has uncommitted changes — the image will contain them."
+fi
 if $DRY_RUN; then
     warn "DRY-RUN mode.  Nothing will be changed.  Re-run with --commit to actually do it."
 else
@@ -161,6 +171,19 @@ do
     add_target "$path"
 done
 
+# /opt/pisonex is the whole repo clone (install.sh needs it there). The server
+# only reads files inside server-orangepi/, so everything else is source that
+# must not ship: client/ (VB.NET), server/, server-windows/, tools/, docs/ ...
+shopt -s nullglob dotglob
+for p in /opt/pisonex/*; do
+    case "${p##*/}" in
+        server-orangepi|venv|VERSION|RELEASE) ;;   # what the device runs on
+        *) add_target "$p" ;;
+    esac
+done
+shopt -u nullglob dotglob
+add_target "$PROJECT_DIR/deploy"          # install.sh + unit file (dev-only)
+
 # Also remove any leftover docs/readmes/build scripts at the project root
 for pat in '*.md' '*.example' 'README*' 'requirements-dev.txt' 'pytest.ini' '.pytest_cache' 'docs' 'tests' 'test'; do
     while IFS= read -r f; do
@@ -174,14 +197,17 @@ ENV_FILE="$PROJECT_DIR/.env"
 if [ -f "$ENV_FILE" ]; then
     info "Current non-secret settings will be preserved.  Resetting secrets:"
     for var in SECRET_KEY LICENSE_HMAC_SECRET; do
-        plan "  $var → changeme  (auto-regen by _enforce_secure_defaults on first boot)"
+        plan "  $var → (blank)  (regenerated per device by _enforce_secure_defaults on first boot)"
     done
     plan "  ADMIN_PASSWORD → admin123  (kept at default — customer changes via dashboard)"
     plan "  CLIENT_API_KEY → (empty)   (customer enables/generates via dashboard Security card)"
     plan "  BRANCH_NAME    → My Internet Cafe   (customer renames via dashboard Branch card)"
     if ! $DRY_RUN; then
-        sed -i -E 's|^SECRET_KEY=.*|SECRET_KEY=changeme|'             "$ENV_FILE"
-        sed -i -E 's|^LICENSE_HMAC_SECRET=.*|LICENSE_HMAC_SECRET=changeme|' "$ENV_FILE"
+        # Blank, NOT a placeholder: the server regenerates blank/weak secrets on
+        # first boot. (It used to write "changeme", which was never regenerated —
+        # every customer would have shared the same dashboard signing key.)
+        sed -i -E 's|^SECRET_KEY=.*|SECRET_KEY=|'                     "$ENV_FILE"
+        sed -i -E 's|^LICENSE_HMAC_SECRET=.*|LICENSE_HMAC_SECRET=|'   "$ENV_FILE"
         sed -i -E 's|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=admin123|'     "$ENV_FILE"
         sed -i -E 's|^CLIENT_API_KEY=.*|CLIENT_API_KEY=|'             "$ENV_FILE"
         sed -i -E 's|^BRANCH_NAME=.*|BRANCH_NAME=My Internet Cafe|'   "$ENV_FILE"
@@ -198,10 +224,16 @@ for path in \
     "$PROJECT_DIR/pisonet.db-journal" \
     "$PROJECT_DIR/pisonet.db-wal" \
     "$PROJECT_DIR/pisonet.db-shm" \
-    "$PROJECT_DIR/pisonet.log"
+    "$PROJECT_DIR/pisonet.log" \
+    "$PROJECT_DIR/pisonet.log.1" \
+    "$PROJECT_DIR/pisonet.log.2" \
+    "$PROJECT_DIR/pisonet.log.3"
 do
     [ -e "$path" ] && exec_or_plan "rm -f $path"
 done
+# Wallpapers uploaded on the dev board (the folder is recreated on start-up)
+[ -d "$PROJECT_DIR/dashboard/static/wallpapers" ] && \
+    exec_or_plan "rm -rf $PROJECT_DIR/dashboard/static/wallpapers"
 [ -d "$PROJECT_DIR/backups" ] && exec_or_plan "rm -rf $PROJECT_DIR/backups"   # dev data
 exec_or_plan "journalctl --rotate >/dev/null 2>&1 || true"
 exec_or_plan "journalctl --vacuum-time=1s >/dev/null 2>&1 || true"
@@ -254,6 +286,17 @@ for f in /root/.bash_history /root/.zsh_history /home/*/.bash_history; do
     fi
 done
 exec_or_plan "truncate -s 0 /etc/machine-id"
+# Saved Wi-Fi networks (with passwords) from the dev board must not ship.
+for f in /etc/NetworkManager/system-connections/*; do
+    [ -f "$f" ] || continue
+    if grep -qi '^type=wifi' "$f" 2>/dev/null; then exec_or_plan "rm -f '$f'"; fi
+done
+for f in /etc/wpa_supplicant/wpa_supplicant*.conf; do
+    [ -f "$f" ] && exec_or_plan "rm -f '$f'"
+done
+# Clients default to http://pisonex.local — the image must answer to that name.
+exec_or_plan "hostnamectl set-hostname pisonex 2>/dev/null || echo pisonex > /etc/hostname"
+exec_or_plan "sed -i 's/^127\\.0\\.1\\.1.*/127.0.1.1\tpisonex/' /etc/hosts"
 exec_or_plan "rm -f /var/lib/dbus/machine-id"
 ok "Shell + identity cleared"
 
@@ -261,6 +304,7 @@ ok "Shell + identity cleared"
 hdr "13. Clean caches"
 exec_or_plan "apt-get clean -y >/dev/null"
 exec_or_plan "rm -rf /tmp/* /var/tmp/* 2>/dev/null || true"
+exec_or_plan "rm -rf /root/.cache /home/*/.cache 2>/dev/null || true"
 exec_or_plan "rm -rf /var/cache/apt/archives/partial/* 2>/dev/null || true"
 ok "Caches cleaned"
 

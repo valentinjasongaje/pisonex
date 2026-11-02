@@ -30,17 +30,19 @@ disabled.
 
 ## What we're producing
 
-A single file, e.g. `pisonex-v1.0.zip` (~855 MB compressed, ~31 GB raw).
+A single file, e.g. `pisonex-v1.0.7.img.gz` (~0.8–1.5 GB compressed, the full
+SD-card size raw).
 
 The customer flow with that file:
 
-1. Download the `.zip`
-2. Open [balenaEtcher](https://etcher.balena.io/), pick the zip and a blank
+1. Download the `.img.gz`
+2. Open [balenaEtcher](https://etcher.balena.io/), pick the `.img.gz` and a blank
    SD card (32 GB minimum), click Flash
 3. Pop the card into an Orange Pi, connect Ethernet, power on
 4. Wait ~90 seconds (first-boot regenerates secrets, machine-id, etc.)
-5. Browse to `http://<dhcp-assigned-ip>/dashboard`
-6. Log in as `admin` / `admin123`, change the password, set the branch name
+5. Browse to `http://pisonex.local/dashboard` (or `http://<dhcp-assigned-ip>/dashboard`)
+6. Log in as `admin` / `admin123`, change the password (sidebar → **Account**),
+   set the branch name, activate the license
 
 That's it. No SSH, no terminal, no customer access to source.
 
@@ -56,9 +58,10 @@ with physical access.
 | Threat | Defence | Effective? |
 |---|---|---|
 | Customer SSH'ing in to read code | SSH service stopped + disabled + masked | ✅ stops 100% |
-| Customer mounting SD card on Windows / Linux laptop | `.py` source deleted; only `.pyc` bytecode remains | ⚠️ raises bar significantly (Python 3.13 decompilers are unreliable) but determined attacker can recover most logic |
+| Customer mounting SD card on Windows / Linux laptop | `.py` source deleted; only `.pyc` bytecode remains | ⚠️ raises bar significantly (Python 3.11+ decompilers are unreliable) but determined attacker can recover most logic |
 | Customer reading commit history & dev notes | `.git`, `*.md`, `tests/`, `.env.example` removed | ✅ |
-| Customer extracting your secrets | All `.env` secrets reset to defaults; first boot auto-generates fresh ones per device | ✅ each device has unique secrets |
+| Customer reading the client / Windows server source | `/opt/pisonex` is a full repo clone — everything except `server-orangepi/`, `venv/` and `VERSION` is deleted (`client/`, `server/`, `server-windows/`, `tools/`, `docs/`, `deploy/`) | ✅ |
+| Customer extracting your secrets | `SECRET_KEY` / `LICENSE_HMAC_SECRET` blanked; first boot generates fresh ones per device (blank, placeholder or < 32 chars is always regenerated). Dev license, DB, backups, wallpapers, Wi-Fi passwords removed | ✅ each device has unique secrets |
 | Customer cloning the SD to make pirate copies | Nothing prevents this | ❌ accepted risk |
 | Customer reading `/etc/shadow` to extract root password hash | Strong 32-char random password, different per build | ⚠️ hash is recoverable but uncrackable in reasonable time |
 | Reverse-engineer with Nuitka-style decompile expertise | None | ❌ out of scope for v1 |
@@ -74,10 +77,14 @@ and safest model; we can revisit later if customer support pain grows.
 
 Run through this before kicking off any release.
 
-- [ ] All target code is committed and pushed to `origin/main`
+- [ ] All target code is committed and pushed to `origin/main`, and
+      `python tools/smoke_test.py server-orangepi` passes on your PC
 - [ ] You've tested the feature/fix manually on the dev Orange Pi
-- [ ] The dev Orange Pi at `/opt/pisonex/server-orangepi` is on the right
-      commit (`git rev-parse --short HEAD` matches what you want to ship)
+- [ ] The dev Orange Pi is on the right commit:
+      `cd /opt/pisonex && git pull && git log -1 --oneline` matches what you
+      want to ship, and `cat /opt/pisonex/VERSION` is the version you expect
+- [ ] You re-ran the installer after the pull, so packages and the systemd unit
+      are current: `sudo bash /opt/pisonex/server-orangepi/deploy/install.sh`
 - [ ] `pip check` reports no broken dependencies
 - [ ] `journalctl -u pisonex --since '1 day ago' | grep -iE 'error|traceback'`
       returns nothing
@@ -125,20 +132,30 @@ Run [`make-release.sh`](make-release.sh) in dry-run mode first, then for real.
 > `RELEASE_VERSION=…` prefix below (it still works as an override). The confirm
 > prompt expects that same string.
 
+The script must run from **outside** `/opt/pisonex` (step 6 deletes that
+folder's `deploy/`; the script refuses to run from there). Copy it to `/root`:
+
+```bash
+ssh root@<dev-pi-ip>
+cp /opt/pisonex/deploy/make-release.sh /root/ && chmod +x /root/make-release.sh
+```
+
 **Dry-run** (always do this first — it changes nothing):
 
 ```bash
-scp deploy/make-release.sh root@<dev-pi-ip>:/root/make-release.sh
-ssh root@<dev-pi-ip> 'chmod +x /root/make-release.sh && RELEASE_VERSION=v1.1 /root/make-release.sh'
+/root/make-release.sh
 ```
 
-The dry-run prints exactly what *would* happen. Read every section. If
-anything looks wrong, fix it before committing.
+The dry-run prints exactly what *would* happen, starting with the commit it
+will ship (and a warning if `/opt/pisonex` has uncommitted changes). Read
+every section. If anything looks wrong, fix it before committing.
 
-**Commit (one-way!):**
+**Commit (one-way!)** — in the same SSH session, so you can see and copy the
+root password it prints:
 
 ```bash
-echo "v1.1" | ssh root@<dev-pi-ip> 'RELEASE_VERSION=v1.1 /root/make-release.sh --commit'
+/root/make-release.sh --commit
+# Type the release version to confirm (expecting 'v1.0.7'): v1.0.7
 ```
 
 The script will:
@@ -149,15 +166,15 @@ The script will:
 | 2 | Compile .py → .pyc | `python -m compileall -b` (legacy layout, alongside source) |
 | 3 | Patch systemd unit | `ExecStart=... main.py` → `... main.pyc` |
 | 4 | **Verify service runs from bytecode** | Starts service, waits 5 s, aborts if it died |
-| 5 | Delete .py source files | All 30 .py files removed; only .pyc remains |
-| 6 | Remove dev-only files | `.git`, `.env.example`, `tests/`, `docs/`, `*.md`, etc. |
-| 7 | Reset .env secrets | `SECRET_KEY`/`LICENSE_HMAC_SECRET` → `changeme` (auto-regen on boot); `ADMIN_PASSWORD` → `admin123`; `BRANCH_NAME` → empty |
-| 8 | Wipe runtime state | `pisonet.db`, `pisonet.log`, journald |
+| 5 | Delete .py source files | Every `.py` in `server-orangepi/` removed; only `.pyc` remains |
+| 6 | Remove dev-only files | Every folder of the repo clone except `server-orangepi/`, `venv/`, `VERSION`; `.git`, `server-orangepi/deploy`, `data/` (dev license), `.env.example`, `*.md`, tests |
+| 7 | Reset .env | `SECRET_KEY`/`LICENSE_HMAC_SECRET` → **blank** (regenerated per device on first boot); `ADMIN_PASSWORD` → `admin123`; `CLIENT_API_KEY` → empty; `BRANCH_NAME` → `My Internet Cafe` |
+| 8 | Wipe runtime state | `pisonet.db` (+ WAL), `pisonet.log*`, `backups/`, uploaded wallpapers, journald |
 | 9 | Disable SSH | `stop` + `disable` + `mask` (un-startable) |
 | 10 | **Rotate root password** | 32-char random; printed ONCE to your terminal — capture it |
 | 11 | Strip SSH identity files | host keys, authorized_keys, known_hosts |
-| 12 | Clear shell history & machine-id | systemd regenerates machine-id on first boot |
-| 13 | Clean apt cache + tmp | reduces image size |
+| 12 | Clear history, machine-id, Wi-Fi; set hostname | systemd regenerates machine-id on first boot; saved Wi-Fi networks removed; hostname → `pisonex` so clients find `http://pisonex.local` |
+| 13 | Clean apt cache, tmp, pip caches | reduces image size |
 | 14 | Drop release marker | `/opt/pisonex/RELEASE` records version + build timestamp |
 | 15 | fstrim unused blocks | zeros out free space so the image compresses small |
 | 16 | Self-destruct + shutdown | script removes itself, then `shutdown -h now` |
@@ -182,7 +199,7 @@ plug it into your laptop.
 
 | Field | Value |
 |---|---|
-| Image File | `C:\path\to\pisonex-v1.1.img` (click 📁, name the file, Open) |
+| Image File | `C:\path\to\pisonex-v1.0.7.img` (click 📁, name the file, Open) |
 | Device | SD card drive letter (e.g. `[F:\]`) |
 | Read Only Allocated Partitions | UNCHECKED |
 
@@ -191,7 +208,7 @@ Click **Read**. Takes ~15–25 minutes; produces a ~31 GB file.
 **Linux/macOS:**
 
 ```bash
-sudo dd if=/dev/sdX of=pisonex-v1.1.img bs=4M status=progress
+sudo dd if=/dev/sdX of=pisonex-v1.0.7.img bs=4M status=progress
 ```
 
 The image will be the *full size of the SD card* (e.g. 31 GB for a 32 GB
@@ -205,15 +222,15 @@ Compression collapses it to ~800 MB – 1.5 GB.
 **Best option — gzip (Git Bash, Linux, macOS):**
 
 ```bash
-gzip -v pisonex-v1.1.img         # produces .img.gz, removes original
-gzip -kv pisonex-v1.1.img        # keeps original (need 32+ GB free)
+gzip -v pisonex-v1.0.7.img         # produces .img.gz, removes original
+gzip -kv pisonex-v1.0.7.img        # keeps original (need 32+ GB free)
 ```
 
 Etcher accepts `.gz` directly.
 
 **Windows alternative — WinRAR:**
 
-1. Right-click `pisonex-v1.1.img` → WinRAR → **Add to archive…**
+1. Right-click `pisonex-v1.0.7.img` → WinRAR → **Add to archive…**
 2. Set **Archive format: ZIP** (NOT RAR — Etcher doesn't accept RAR)
 3. Change the archive name extension to `.zip`
 4. Compression: Normal (Best only saves ~3% extra for double the time)
@@ -232,7 +249,12 @@ went wrong (likely fstrim was skipped). If much smaller, also suspicious —
 sanity-check by opening the archive and confirming the inner file is the
 full ~31 GB.
 
-This `.zip` (or `.gz`) is your shipping artifact.
+This `.img.gz` (or `.zip`) is your shipping artifact. Record its checksum
+next to the Windows installers so customers can verify the download:
+
+```bash
+sha256sum pisonex-v1.0.7.img.gz >> SHA256SUMS.txt
+```
 
 ### Phase 4 — Restore dev environment
 
@@ -252,17 +274,16 @@ Pop the SD back into the Pi, power on, you're back to dev.
 
 **Without a Phase 1 snapshot** (build dev from scratch — ~20 min):
 
-1. Flash a fresh Armbian image to a blank SD with Etcher
-2. Boot, find the IP, `ssh root@<ip>` (default Armbian password)
-3. `apt update && apt install -y python3.13 python3.13-venv git sqlite3`
+1. Flash a fresh Armbian / Orange Pi OS (Debian Bookworm, minimal/server) image
+   for the **Orange Pi One** to a blank SD with Etcher
+2. Boot with Ethernet, find the IP, `ssh root@<ip>` (set the root password
+   when asked)
+3. `apt-get update && apt-get install -y git`
 4. `git clone https://github.com/valentinjasongaje/pisonex.git /opt/pisonex`
-5. `python3.13 -m venv /opt/pisonex/venv`
-6. `/opt/pisonex/venv/bin/pip install -r /opt/pisonex/server-orangepi/requirements.txt`
-7. `cp /opt/pisonex/pisonex/deploy/pisonet.service /etc/systemd/system/`
-   *(adjust paths inside the unit file if your install layout differs from
-   `/opt/pisonex/server-orangepi/`)*
-8. `systemctl daemon-reload && systemctl enable pisonex && systemctl start pisonex`
-9. **Snapshot this immediately** as `dev-backup.img` so next time is a
+5. `bash /opt/pisonex/server-orangepi/deploy/install.sh` — installs packages
+   into `/opt/pisonex/venv`, creates `.env`, installs + starts the `pisonex`
+   service, sets the hostname to `pisonex` and runs a health check
+6. **Snapshot this immediately** as `dev-backup.img` so next time is a
    1-step Etcher flash, not a 20-min setup.
 
 ---
@@ -274,13 +295,13 @@ breaks on fresh flash" surprises.
 
 1. Take a **different** blank SD card (32 GB+) — never test on the master
    card, you'll lose it
-2. Open Etcher → Flash from file → pick `pisonex-v1.X.zip` → pick the
+2. Open Etcher → Flash from file → pick `pisonex-v1.X.img.gz` → pick the
    blank SD → Flash (takes ~10 min)
 3. Pop the SD into any Orange Pi, connect Ethernet, power on
 4. Wait **~90 seconds** for first-boot
-5. Find the IP via your router's DHCP client list (the device shows up as
-   `orangepione`)
-6. Browse to `http://<that-ip>/dashboard`
+5. Browse to `http://pisonex.local/dashboard`. If that name doesn't resolve,
+   find the IP in your router's DHCP client list (the device shows up as
+   `pisonex`) and use `http://<that-ip>/dashboard`
 
 **Pass criteria:**
 
@@ -288,11 +309,14 @@ breaks on fresh flash" surprises.
 |---|---|
 | Dashboard loads within ~1 s | ✓ |
 | Login `admin` / `admin123` succeeds | ✓ |
-| Dashboard home shows "No PCs registered" empty state | ✓ |
-| Settings → Branch card | field empty |
-| Settings → Security card | "Client API Key: disabled" |
-| Settings → Server Health | live CPU/RAM/temp values |
-| The systemd service is running and stable | ✓ (no restart loops) |
+| Overview shows no PCs (none of your dev PCs or members came along) | ✓ |
+| Overview → Server Health | live CPU/RAM/temp values |
+| Settings → Branch card | `My Internet Cafe` |
+| Settings → Security card | Client API Key disabled |
+| License page | fresh trial / "not activated" — **not** your dev license |
+| Backup page | empty list (no dev backups) |
+| A Windows PC with `PisonexClientSetup-v<ver>.exe` installed | registers and shows on Overview without typing a server URL |
+| Flash a **second** card from the same image, boot both | each gets its own `SECRET_KEY` (logging in on one does not log you in on the other) |
 
 If anything fails, see [Recovery procedures](#recovery-procedures).
 
@@ -300,25 +324,26 @@ If anything fails, see [Recovery procedures](#recovery-procedures).
 
 ## What the customer experiences
 
-After they download `pisonex-v1.X.zip` and follow your instructions:
+After they download `pisonex-v1.X.img.gz` and follow your instructions:
 
 1. **Flash with Etcher** — pick zip + SD card → Flash. ~10 min.
 2. **First boot** — pop card into Orange Pi, connect Ethernet, power on.
    Wait 90 seconds. During this time the device:
    - Regenerates `/etc/machine-id` (systemd does this automatically)
-   - Runs `_enforce_secure_defaults()` which generates per-device
-     `SECRET_KEY` and `LICENSE_HMAC_SECRET` and writes them back to `.env`
+   - Runs `_enforce_secure_defaults()` which sees the blank
+     `SECRET_KEY` / `LICENSE_HMAC_SECRET`, generates per-device ones and
+     writes them back to `.env`
    - `Base.metadata.create_all()` creates the SQLite schema
    - Seeds the `ServerConfig` singleton with defaults
-3. **Find IP** — they check their router's admin page; the device appears
-   as `orangepione` with a DHCP-assigned 192.168.x.x address
-4. **Dashboard** — browse to `http://<that-ip>/dashboard`
-5. **Login** — `admin` / `admin123`
-6. **Configure** — Settings → Branch card → set their branch name;
-   Settings → Security → change admin password
-7. **Install Windows clients** — flash USB sticks with the
-   `PisoNetClient.exe` they received separately, point each PC client at
-   the server IP
+3. **Dashboard** — browse to `http://pisonex.local/dashboard` (or the
+   IP from their router's admin page; the device appears as `pisonex`)
+4. **Login** — `admin` / `admin123`
+5. **Configure** — sidebar → Account → change the admin password;
+   Settings → Branch card → set their branch name; License → activate
+6. **Install Windows clients** — run `PisonexClientSetup-v<ver>.exe` on each
+   PC. Clients default to `http://pisonex.local`, so nothing to type unless
+   their network blocks mDNS (then enter the server IP in the client's admin
+   panel, Ctrl+Shift+F12)
 
 The customer needs:
 - One Orange Pi One with ≥32 GB SD card
@@ -347,19 +372,22 @@ dev Orange Pi (with dev SD card from your snapshot)
    ▼
 Phase 1 — snapshot dev SD → dev-backup-YYYY-MM-DD.img
 Phase 2 — make-release.sh --commit (RELEASE_VERSION=v1.1)
-Phase 3 — read SD + compress → pisonex-v1.1.zip
+Phase 3 — read SD + compress → pisonex-v1.0.7.img.gz
 Phase 4 — restore dev-backup → resume work
    │
    ▼
-Distribute pisonex-v1.1.zip → customers re-flash → manual reconfigure
+Distribute pisonex-v1.0.7.img.gz → customers back up, re-flash, restore
 ```
 
 **Customer impact of each release:**
 
-- Customer downloads new `.zip` (855 MB-ish each)
-- Customer re-flashes their SD with Etcher
-- **All customer config is lost** — branch name, admin password, registered
-  PCs, members, transaction history. They reconfigure from scratch.
+- **Before re-flashing:** Dashboard → Backup → Create backup now →
+  **Download**, and keep the file on a laptop
+- Customer downloads the new `.img.gz` and re-flashes their SD with Etcher
+- After boot: log in with `admin` / `admin123` → Backup → **Restore from a
+  file** → members, balances, sales, PCs, rates and settings come back
+  (the admin password too). Then re-activate the license.
+- Without that backup file everything is lost and they reconfigure from scratch
 - Per-device time: ~15–20 min
 
 **Most code changes don't require the Orange Pi at all.** Run the server
@@ -375,8 +403,8 @@ python main.py
 # browse http://localhost:8000/dashboard
 ```
 
-Only move to the dev Orange Pi when testing coin signal, LCD, GPIO pins,
-or anything `hardware/controller.py` related.
+Only move to the dev Orange Pi when testing the coin signal, relay, GPIO
+pins, or anything `hardware/controller.py` related.
 
 ### Future: smoother updates
 
@@ -428,9 +456,9 @@ Per the "fully sealed" decision, your only options are:
 
 1. **Customer mails the SD card back** to you → you fix it on dev, image
    it, mail back. Slow but works.
-2. **You mail them a new flashed SD card** — they swap, they reconfigure.
-   They lose any local data (sessions in flight, transaction history not
-   yet synced to pisonex.com).
+2. **You mail them a new flashed SD card** — they swap, then restore their
+   latest downloaded backup (Backup → Restore from a file). Anything after
+   that backup is lost.
 3. **Talk them through HDMI-console recovery** — works in principle but
    you'd be asking a café owner to use Linux at a terminal. Not realistic.
 
@@ -459,7 +487,7 @@ You have a few avenues, in increasing order of pain:
 Nuitka would be stronger protection but adds ~30 minutes of build time
 and produces a binary that's harder to debug if something goes wrong in
 the field. For v1 with a small customer count, `.pyc` is enough — Python
-3.13 decompilers are unreliable, and we're defending against casual
+3.11+ decompilers are unreliable, and we're defending against casual
 customers, not security researchers. Revisit if the product matures and
 the threat model changes.
 
@@ -506,13 +534,13 @@ this image as-is. If you need to support smaller cards, look at
 partition to actual data (~4 GB), and the resulting image will flash to
 any 8 GB+ card.
 
-### Why is the compressed image so small (~855 MB)?
+### Why is the compressed image so small (~1 GB)?
 
 `fstrim` in step 15 of the sanitize script tells the filesystem to mark
 all unused blocks as discarded, which translates to "write zeros to free
-space." Zeros compress to nearly nothing. The 855 MB you see is roughly
+space." Zeros compress to nearly nothing. What's left is roughly
 3 GB of actual data (Armbian + Python venv + your app) compressed at
-3.5:1 ratio.
+about 3.5:1.
 
 ### Can I commit `make-release.sh` to source control?
 
@@ -525,8 +553,15 @@ are *gone*, not encrypted.
 ### Where do the per-device secrets actually come from?
 
 `_enforce_secure_defaults()` in `main.py` runs on every server startup.
-It checks if `SECRET_KEY`, `LICENSE_HMAC_SECRET`, or `ADMIN_PASSWORD` are
-still at insecure default values; if so, it generates fresh random ones
-and writes them back to `.env`. The sanitize script's job is just to
-**reset those values to the defaults** so the next boot triggers
-regeneration. We never bake real secrets into the image.
+If `SECRET_KEY` or `LICENSE_HMAC_SECRET` is blank, a known placeholder
+(`changeme`, the shipped default, …) or shorter than 32 characters, it
+generates a fresh random 64-hex-char value and writes it back to `.env`;
+a strong value is never touched. The sanitize script **blanks** both so the
+first boot of every flashed card generates its own. `ADMIN_PASSWORD` is not
+generated — it stays `admin123` until the customer changes it. We never
+bake real secrets into the image.
+
+> Older versions of the script wrote `changeme` and the server only replaced its
+> exact built-in default, so an image made then would have shipped the same
+> `SECRET_KEY` to every customer (anyone could forge a dashboard login).
+> Never ship an image made with an older `make-release.sh` / `main.py`.
