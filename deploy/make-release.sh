@@ -267,6 +267,15 @@ else
     echo
     ok "Root password rotated"
 fi
+# The user created at Armbian's first login (UID 1000+) has a password YOU chose
+# and usually sudo — left as-is it would open the console of every customer
+# board. Lock every such account so only root's new random password works.
+while IFS=: read -r u _ uid _ _ home _; do
+    case "$uid" in ''|*[!0-9]*) continue ;; esac
+    { [ "$uid" -ge 1000 ] && [ "$uid" -lt 60000 ]; } || continue
+    info "Locking login for user '$u' (UID $uid)"
+    exec_or_plan "passwd -l '$u' >/dev/null 2>&1; rm -f '$home/.ssh/authorized_keys' '$home/.bash_history'"
+done < /etc/passwd
 
 # ── 11. Remove SSH host keys + authorized_keys ───────────────────────
 hdr "11. Strip SSH identity files (host keys, authorized_keys, known_hosts)"
