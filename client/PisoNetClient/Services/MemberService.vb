@@ -32,6 +32,31 @@ Namespace Services
         Public Property [error] As String
     End Class
 
+    ' Request bodies must be real, obfuscation-excluded classes too — NOT
+    ' anonymous types (New With {...}). ConfuserEx renames anonymous types and
+    ' wipes their constructor parameter names, and System.Text.Json then refuses
+    ' to serialize them ("The deserialization constructor for type ... contains
+    ' parameters with null names"), which broke every member login/logout/
+    ' change-password in obfuscated release builds.
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
+    Public Class MemberLoginRequest
+        Public Property pc_number As Integer
+        Public Property username As String
+        Public Property password As String
+    End Class
+
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
+    Public Class MemberPcRequest
+        Public Property pc_number As Integer
+    End Class
+
+    <System.Reflection.Obfuscation(Exclude:=True, ApplyToMembers:=True)>
+    Public Class MemberChangePasswordRequest
+        Public Property pc_number As Integer
+        Public Property new_password As String
+        Public Property old_password As String
+    End Class
+
     Public Class MemberService
         Implements IDisposable
 
@@ -52,7 +77,7 @@ Namespace Services
 
         Public Async Function LoginAsync(pcNumber As Integer, username As String, password As String) As Task(Of MemberLoginResponse)
             Try
-                Dim body = New With {
+                Dim body = New MemberLoginRequest() With {
                     .pc_number = pcNumber,
                     .username = username,
                     .password = password
@@ -74,7 +99,7 @@ Namespace Services
 
         Public Async Function LogoutAsync(pcNumber As Integer) As Task(Of MemberLogoutResponse)
             Try
-                Dim body = New With {.pc_number = pcNumber}
+                Dim body = New MemberPcRequest() With {.pc_number = pcNumber}
                 Dim json = JsonSerializer.Serialize(body)
                 Dim content = New StringContent(json, Encoding.UTF8, "application/json")
                 Dim response = Await _client.PostAsync($"{_baseUrl}/api/member/logout", content)
@@ -102,7 +127,7 @@ Namespace Services
         Public Async Function ChangePasswordAsync(pcNumber As Integer, newPassword As String,
                                                     Optional oldPassword As String = "") As Task(Of MemberChangePasswordResponse)
             Try
-                Dim body = New With {
+                Dim body = New MemberChangePasswordRequest() With {
                     .pc_number = pcNumber,
                     .new_password = newPassword,
                     .old_password = oldPassword

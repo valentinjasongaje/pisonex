@@ -127,6 +127,18 @@ def check(version: str, verbose: bool = True) -> list[str]:
     for path, pattern in _FORBIDDEN:
         if path.exists() and re.search(pattern, _read(path)):
             problems.append(f"{_rel(path)}: hard-coded version found — it should come from VERSION")
+    # Obfuscation trap: ConfuserEx wipes anonymous types' constructor parameter
+    # names and System.Text.Json then refuses to serialize them — this broke
+    # member login in release builds. Request bodies must be named classes
+    # marked <Obfuscation(Exclude:=True, ApplyToMembers:=True)>.
+    for vb in (ROOT / "client").rglob("*.vb"):
+        if "obj" in vb.parts or "bin" in vb.parts:
+            continue
+        # code only — VB comment lines (starting with ') may mention the pattern
+        text = "\n".join(l for l in _read(vb).splitlines() if not l.lstrip().startswith("'"))
+        if "JsonSerializer.Serialize" in text and re.search(r"New With\s*\{", text):
+            problems.append(f"{_rel(vb)}: serializes an anonymous type (New With {{...}}) — "
+                            "breaks after obfuscation; use a named, obfuscation-excluded class")
     return problems
 
 

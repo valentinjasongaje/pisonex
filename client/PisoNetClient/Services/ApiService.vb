@@ -55,6 +55,10 @@ Namespace Services
         Private ReadOnly _pcNumber As Integer
         Private _disposed As Boolean = False
 
+        ' Heartbeat failure diagnostics + self-heal (see HeartbeatAsync).
+        Private _lastFailure As String = ""
+        Private _lastReRegister As DateTime = DateTime.MinValue
+
         ''' <summary>HTTP base URL converted to WebSocket scheme (ws:// or wss://).</summary>
         Public ReadOnly Property BaseWsUrl As String
             Get
@@ -84,8 +88,12 @@ Namespace Services
                 Dim mac = GetMacAddress()
                 Dim url = $"{_baseUrl}/api/pc/register?pc_number={_pcNumber}&mac_address={mac}"
                 Dim response = Await _client.PostAsync(url, Nothing)
+                If Not response.IsSuccessStatusCode Then
+                    DiagnosticLog.Write($"Register: server answered HTTP {CInt(response.StatusCode)} for PC {_pcNumber}")
+                End If
                 Return response.IsSuccessStatusCode
-            Catch
+            Catch ex As Exception
+                DiagnosticLog.Write($"Register: {ex.GetType().Name}: {ex.Message}")
                 Return False
             End Try
         End Function
@@ -151,17 +159,43 @@ Namespace Services
             Try
                 Dim url = $"{_baseUrl}/api/pc/heartbeat/{_pcNumber}"
                 Dim response = Await _client.PostAsync(url, Nothing)
-                If Not response.IsSuccessStatusCode Then Return Nothing
+                If Not response.IsSuccessStatusCode Then
+                    NoteFailure($"server answered HTTP {CInt(response.StatusCode)} {response.StatusCode}")
+                    ' 404 = the server doesn't know this PC: registration failed at
+                    ' startup (e.g. the machine was renumbered), or the server was
+                    ' reinstalled / restored from a backup. Register again instead
+                    ' of failing forever until someone restarts the client.
+                    If response.StatusCode = Net.HttpStatusCode.NotFound AndAlso
+                       (DateTime.UtcNow - _lastReRegister).TotalSeconds >= 10 Then
+                        _lastReRegister = DateTime.UtcNow
+                        Dim ok = Await RegisterAsync()
+                        DiagnosticLog.Write($"Heartbeat: PC {_pcNumber} unknown to server — re-register ok={ok}")
+                    End If
+                    Return Nothing
+                End If
 
                 Dim json = Await response.Content.ReadAsStringAsync()
                 Dim options = New JsonSerializerOptions() With {
                     .PropertyNameCaseInsensitive = True
                 }
-                Return JsonSerializer.Deserialize(Of HeartbeatResponse)(json, options)
-            Catch
+                Dim result = JsonSerializer.Deserialize(Of HeartbeatResponse)(json, options)
+                _lastFailure = ""
+                Return result
+            Catch ex As Exception
+                NoteFailure($"{ex.GetType().Name}: {ex.Message}")
                 Return Nothing   ' Network unreachable — caller handles this
             End Try
         End Function
+
+        ''' <summary>
+        ''' Logs WHY a heartbeat failed, once per distinct reason (not every
+        ''' second). "Unreachable" alone hid a server-side 500/404 for hours.
+        ''' </summary>
+        Private Sub NoteFailure(reason As String)
+            If reason = _lastFailure Then Return
+            _lastFailure = reason
+            DiagnosticLog.Write($"Heartbeat: failed — {reason}")
+        End Sub
 
         ''' <summary>
         ''' Sends a JSON performance metrics snapshot to the server.
