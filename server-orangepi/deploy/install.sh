@@ -87,7 +87,10 @@ if grep -q '^127\.0\.1\.1' /etc/hosts; then
 else
     printf '127.0.1.1\tpisonex\n' >> /etc/hosts
 fi
-systemctl enable --now avahi-daemon >/dev/null
+# Restart (not just enable): avahi reads the host name only at start-up, so an
+# already-running daemon would keep announcing the old name (orangepione.local).
+systemctl enable avahi-daemon >/dev/null 2>&1
+systemctl restart avahi-daemon
 
 say 6/6 "Checking the server"
 for _ in $(seq 1 30); do
