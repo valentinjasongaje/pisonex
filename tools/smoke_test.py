@@ -118,7 +118,8 @@ def _prepare(source: Path, workdir: Path, port: int):
         f"SERVER_PORT={port}\n"
         "SERVER_HOST=127.0.0.1\n"
         f"ADMIN_PASSWORD={ADMIN_PASSWORD}\n"
-        "BRANCH_NAME=Smoke Test\n",
+        "BRANCH_NAME=Smoke Test\n"
+        "BACKUP_DIR=./backups\n",      # never touch the real %ProgramData% backups
         encoding="utf-8",
     )
 
@@ -217,6 +218,18 @@ def _run_checks(base: str, r: Results):
 
     hb = api.post(f"/api/pc/heartbeat/{pc}")
     r.check(hb.status_code == 200, "POST /api/pc/heartbeat", hb.text[:200])
+
+    # Same machine renumbered in the client setup (PC 5 -> PC 6, same MAC):
+    # used to crash registration with a UNIQUE(mac_address) error (500), so the
+    # client showed "can't connect" forever.
+    mac = {"mac_address": "3C:9C:0F:1E:AC:4E"}
+    first = api.post("/api/pc/register", params={"pc_number": 5, **mac})
+    again = api.post("/api/pc/register", params={"pc_number": 6, **mac})
+    hb6 = api.post("/api/pc/heartbeat/6")
+    r.check(first.status_code == 200 and again.status_code == 200 and hb6.status_code == 200,
+            "machine renumbered (same MAC, new PC number) registers and heartbeats",
+            f"register5={first.status_code} register6={again.status_code} heartbeat6={hb6.status_code}")
+
     hbj = hb.json() if hb.status_code == 200 else {}
     missing = [f for f in _client_heartbeat_fields() if f not in hbj]
     r.check(not missing, "heartbeat has every field the client reads",
@@ -285,7 +298,73 @@ def _run_checks(base: str, r: Results):
     hbj = api.post(f"/api/pc/heartbeat/{pc}").json()
     r.check(hbj.get("is_locked") is True, "heartbeat locked after lock")
 
+    # (PC is locked → Idle tile.) Overview tiles are admin-facing: no customer wording like "Ask cashier for time"
+    resp = dash.post("/dashboard/api/settings/traditional-mode", json={"enabled": True})
+    if resp.status_code != 404:
+        grid = dash.get("/dashboard/partials/pc-grid").text
+        r.check("Idle" in grid and "Ask cashier" not in grid,
+                "overview tile (traditional mode) shows Idle without customer wording")
+        dash.post("/dashboard/api/settings/traditional-mode", json={"enabled": False})
+
     _membership_checks(api, dash, pc, r)
+    _backup_checks(api, dash, r)
+
+
+def _backup_checks(api: httpx.Client, dash: httpx.Client, r: Results):
+    import io
+    import zipfile
+
+    page = dash.get("/dashboard/backup")
+    if page.status_code == 404:
+        r.skip("backup page (not in this variant)")
+        return
+    r.check(page.status_code == 200, "GET /dashboard/backup", f"HTTP {page.status_code}")
+
+    # Snapshot: the member created by the membership checks exists, then back up.
+    resp = dash.post("/dashboard/api/backup/create")
+    r.check(resp.status_code == 200, "create backup", resp.text[:200])
+    name = resp.json().get("name", "") if resp.status_code == 200 else ""
+
+    dl = dash.get(f"/dashboard/api/backup/download/{name}")
+    files = []
+    if dl.status_code == 200:
+        with zipfile.ZipFile(io.BytesIO(dl.content)) as zf:
+            files = zf.namelist()
+            members_csv = zf.read("members.csv").decode("utf-8") if "members.csv" in files else ""
+    r.check({"pisonet.db", "members.csv", "active_sessions.csv", "backup.json"} <= set(files),
+            "backup zip has the database + readable CSVs", str(files))
+    r.check(".env" not in files, "backup zip excludes .env secrets")
+    r.check("smokeuser" in (members_csv if files else ""), "members.csv lists the member")
+
+    # Change data after the backup, then restore — the change must disappear.
+    dash.post("/dashboard/api/membership/create-member", json={"username": "afterbackup"})
+    resp = dash.post(f"/dashboard/api/backup/{name}/restore")
+    r.check(resp.status_code == 200 and bool(resp.json().get("safety_backup")),
+            "restore a saved backup (safety copy taken first)", resp.text[:200])
+    mpage = dash.get("/dashboard/membership").text
+    r.check("smokeuser" in mpage and "afterbackup" not in mpage,
+            "restore brought back the backed-up data exactly")
+    hb = api.post("/api/pc/heartbeat/1")
+    r.check(hb.status_code == 200, "clients keep working right after a restore", f"HTTP {hb.status_code}")
+
+    resp = dash.post("/dashboard/api/backup/upload-restore",
+                     files={"file": ("backup.zip", dl.content, "application/zip")})
+    r.check(resp.status_code == 200, "restore from an uploaded file", resp.text[:200])
+    resp = dash.post("/dashboard/api/backup/upload-restore",
+                     files={"file": ("junk.zip", b"not a backup", "application/zip")})
+    r.check(resp.status_code == 422, "junk upload rejected, data untouched", f"HTTP {resp.status_code}")
+
+    # Security: traversal names and non-admins.
+    resp = dash.get("/dashboard/api/backup/download/..%2F..%2F.env")
+    r.check(resp.status_code in (404, 422), "download can't escape the backup folder", f"HTTP {resp.status_code}")
+    dash.post("/dashboard/api/staff/create",
+              json={"username": "smokecashier", "password": "cashierpw1", "role": "cashier"})
+    cashier = httpx.Client(base_url=str(dash.base_url), timeout=15)
+    cashier.post("/dashboard/login", data={"username": "smokecashier", "password": "cashierpw1"})
+    resp = cashier.post("/dashboard/api/backup/create")
+    r.check(resp.status_code == 403, "cashier cannot create/restore backups", f"HTTP {resp.status_code}")
+    resp = cashier.get(f"/dashboard/api/backup/download/{name}")
+    r.check(resp.status_code == 403, "cashier cannot download backups", f"HTTP {resp.status_code}")
 
 
 def _membership_checks(api: httpx.Client, dash: httpx.Client, pc: int, r: Results):

@@ -237,9 +237,13 @@ async def lifespan(app: FastAPI):
     # Background task: hourly status ping to pisonex.com (live branch totals)
     status_task = asyncio.create_task(_hourly_status_ping_loop())
 
+    # Background task: automatic daily backup of the database
+    backup_task = asyncio.create_task(_daily_backup_loop())
+
     yield
 
     # Shutdown
+    backup_task.cancel()
     expire_task.cancel()
     license_task.cancel()
     membership_task.cancel()
@@ -691,6 +695,25 @@ async def _hourly_status_ping_loop():
         except Exception as e:
             logger.error("Hourly status ping error: %s", e)
 
+        await asyncio.sleep(60 * 60)
+
+
+async def _daily_backup_loop():
+    """Automatic daily backup (members, time balances, sessions, sales...).
+    Checks hourly and backs up when the newest automatic backup is over 24 h
+    old, so a server that is switched off at night still gets one soon after
+    it starts. The SQLite copy + zip is blocking I/O, so it runs in a thread."""
+    from services import backup_service
+    await asyncio.sleep(10 * 60)   # let startup and the first heartbeats settle
+    while True:
+        try:
+            age = backup_service.latest_auto_age_hours()
+            if age is None or age >= 24:
+                await asyncio.to_thread(backup_service.create_backup, "auto")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Automatic backup failed: %s", e)
         await asyncio.sleep(60 * 60)
 
 

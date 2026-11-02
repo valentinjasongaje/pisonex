@@ -2857,3 +2857,92 @@ def get_schedule_status(
         "schedule_blocked": command_store.is_schedule_blocked(),
         "active_block_label": active_label,
     }
+
+# ── Backup & restore (admin only) ─────────────────────────────────────────────
+# Deliberately NOT gated by _require_active_license: an owner must always be
+# able to get their data out, even with an expired license.
+
+from services import backup_service
+
+
+def _require_admin_json(current_user: Optional[dict]) -> None:
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+@router.get("/backup", response_class=HTMLResponse)
+def backup_page(
+    request: Request,
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    if not current_user:
+        return RedirectResponse("/dashboard/login", status_code=302)
+    if current_user["role"] != "admin":
+        return RedirectResponse("/dashboard", status_code=302)
+    return templates.TemplateResponse("backup.html", {
+        "request": request,
+        "backups": backup_service.list_backups(),
+        "backup_dir": str(backup_service.backup_dir()),
+        "keep": settings.BACKUP_KEEP,
+    })
+
+
+@router.post("/api/backup/create")
+def backup_create(current_user: Optional[dict] = Depends(_validate_session)):
+    _require_admin_json(current_user)
+    info = backup_service.create_backup("manual")
+    return {"status": "created", "name": info["name"], "members": info["members"]}
+
+
+@router.get("/api/backup/download/{name}")
+def backup_download(name: str, current_user: Optional[dict] = Depends(_validate_session)):
+    _require_admin_json(current_user)
+    if not backup_service.valid_name(name):
+        raise HTTPException(status_code=404, detail="Backup not found")
+    from fastapi.responses import FileResponse
+    return FileResponse(backup_service.backup_dir() / name, filename=name,
+                        media_type="application/zip")
+
+
+@router.delete("/api/backup/{name}")
+def backup_delete(name: str, current_user: Optional[dict] = Depends(_validate_session)):
+    _require_admin_json(current_user)
+    if not backup_service.delete_backup(name):
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return {"status": "deleted", "name": name}
+
+
+@router.post("/api/backup/{name}/restore")
+def backup_restore_saved(name: str, current_user: Optional[dict] = Depends(_validate_session)):
+    _require_admin_json(current_user)
+    if not backup_service.valid_name(name):
+        raise HTTPException(status_code=404, detail="Backup not found")
+    try:
+        result = backup_service.restore(backup_service.backup_dir() / name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"status": "restored", **result}
+
+
+@router.post("/api/backup/upload-restore")
+async def backup_restore_upload(
+    file: UploadFile = File(...),
+    current_user: Optional[dict] = Depends(_validate_session),
+):
+    _require_admin_json(current_user)
+    import tempfile
+    data = await file.read(backup_service.MAX_UPLOAD_BYTES + 1)
+    if len(data) > backup_service.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large")
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "upload.bin"
+        path.write_bytes(data)
+        try:
+            result = backup_service.restore(path)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    return {"status": "restored", **result}

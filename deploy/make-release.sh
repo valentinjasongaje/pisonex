@@ -202,6 +202,7 @@ for path in \
 do
     [ -e "$path" ] && exec_or_plan "rm -f $path"
 done
+[ -d "$PROJECT_DIR/backups" ] && exec_or_plan "rm -rf $PROJECT_DIR/backups"   # dev data
 exec_or_plan "journalctl --rotate >/dev/null 2>&1 || true"
 exec_or_plan "journalctl --vacuum-time=1s >/dev/null 2>&1 || true"
 ok "Runtime state wiped"

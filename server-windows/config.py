@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # Errors (4xx/5xx) are always logged.
     LOG_HTTP_ACCESS: bool = False
 
+    # Backups (dashboard → Backup). Empty BACKUP_DIR = default location:
+    # Windows %ProgramData%\Pisonex\Backups\server, Linux <server>/backups.
+    BACKUP_DIR: str = ""
+    BACKUP_KEEP: int = 14          # automatic daily backups to keep
+
     # PC client API key — shared secret sent in X-API-Key header by all clients.
     # Leave empty ("") to disable auth (default, backward-compatible).
     # Set a strong random value in .env to enable: CLIENT_API_KEY=your-secret-here
