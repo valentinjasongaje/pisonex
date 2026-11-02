@@ -30,14 +30,15 @@ disabled.
 
 ## What we're producing
 
-A single file, e.g. `pisonex-v1.0.7.img.gz` (~0.8–1.5 GB compressed, the full
-SD-card size raw).
+A single file, `pisonex-opi-one-v<version>.img.gz` (~620 MB download). It is
+**shrunk**: Etcher writes only ~2.4 GB instead of the whole card (≈6× faster to
+flash, fits 4–8 GB cards), and the card grows to its full size on first boot.
 
 The customer flow with that file:
 
 1. Download the `.img.gz`
 2. Open [balenaEtcher](https://etcher.balena.io/), pick the `.img.gz` and a blank
-   SD card (32 GB minimum), click Flash
+   SD card (8 GB or larger), click Flash
 3. Pop the card into an Orange Pi, connect Ethernet, power on
 4. Wait ~90 seconds (first-boot regenerates secrets, machine-id, etc.)
 5. Browse to `http://pisonex.local/dashboard` (or `http://<dhcp-assigned-ip>/dashboard`)
@@ -173,7 +174,7 @@ The script will:
 | 9 | Disable SSH | `stop` + `disable` + `mask` (un-startable) |
 | 10 | **Rotate root password** | 32-char random; printed ONCE to your terminal — capture it |
 | 11 | Strip SSH identity files | host keys, authorized_keys, known_hosts |
-| 12 | Clear history, machine-id, Wi-Fi; set hostname | systemd regenerates machine-id on first boot; saved Wi-Fi networks removed; hostname → `pisonex` so clients find `http://pisonex.local` |
+| 12 | Clear history, machine-id, Wi-Fi; set hostname; re-enable resize | systemd regenerates machine-id on first boot; saved Wi-Fi networks removed; hostname → `pisonex` so clients find `http://pisonex.local`; Armbian's `armbian-resize-filesystem` re-enabled so a shrunk image grows to the card on first boot |
 | 13 | Clean apt cache, tmp, pip caches | reduces image size |
 | 14 | Drop release marker | `/opt/pisonex/RELEASE` records version + build timestamp |
 | 15 | fstrim unused blocks | zeros out free space so the image compresses small |
@@ -199,62 +200,47 @@ plug it into your laptop.
 
 | Field | Value |
 |---|---|
-| Image File | `C:\path\to\pisonex-v1.0.7.img` (click 📁, name the file, Open) |
-| Device | SD card drive letter (e.g. `[F:\]`) |
+| Image File | e.g. `…\build\output\v<version>\card.img` (click 📁, name the file, Open; the folder must exist) |
+| Device | the SD card's drive letter — the Linux card often shows as an "Unknown" volume; check it's the SD card's size, not a USB stick |
 | Read Only Allocated Partitions | UNCHECKED |
 
-Click **Read**. Takes ~15–25 minutes; produces a ~31 GB file.
+Click **Read**. It produces a file the full size of the card (e.g. 15.9 GB for a
+16 GB card). That's expected — the next step shrinks it.
 
-**Linux/macOS:**
-
-```bash
-sudo dd if=/dev/sdX of=pisonex-v1.0.7.img bs=4M status=progress
-```
-
-The image will be the *full size of the SD card* (e.g. 31 GB for a 32 GB
-card), even though most of it is zeros. That's normal — we compress next.
-
-#### 3b. Compress
-
-The raw image is ~31 GB but ~95 % zeros (because of step 15's fstrim).
-Compression collapses it to ~800 MB – 1.5 GB.
-
-**Best option — gzip (Git Bash, Linux, macOS):**
+#### 3b. Shrink + compress (always)
 
 ```bash
-gzip -v pisonex-v1.0.7.img         # produces .img.gz, removes original
-gzip -kv pisonex-v1.0.7.img        # keeps original (need 32+ GB free)
+python tools/release.py image "..\build\output\v<version>\card.img"
 ```
 
-Etcher accepts `.gz` directly.
+(From the workspace folder: `.\release image <path>`.) This runs
+[`tools/shrink-image.sh`](../tools/shrink-image.sh) in WSL and writes
+`build/output/v<version>/pisonex-opi-one-v<version>.img.gz`, then adds it to
+`SHA256SUMS.txt`. It:
 
-**Windows alternative — WinRAR:**
+1. refuses an image whose `/opt/pisonex/RELEASE` marker isn't `v<VERSION>`, or that
+   still has server `.py` source (i.e. `make-release.sh --commit` wasn't run);
+2. makes sure Armbian's first-boot resize is enabled (make-release.sh does it too);
+3. shrinks the root filesystem to its data + 128 MiB (16 MiB aligned, ~2.4 GB);
+4. rebuilds the image (first 4 MiB = MBR + U-Boot kept byte-for-byte, partition
+   table updated) and verifies it before gzip.
 
-1. Right-click `pisonex-v1.0.7.img` → WinRAR → **Add to archive…**
-2. Set **Archive format: ZIP** (NOT RAR — Etcher doesn't accept RAR)
-3. Change the archive name extension to `.zip`
-4. Compression: Normal (Best only saves ~3% extra for double the time)
-5. Click OK; wait ~15 minutes
+The input `.img` is never modified. Takes ~2 minutes. Delete the big `.img` once
+the shrunk image has been test-flashed (keep a `-full.img.gz` of it in `backup/`
+if you want a fallback).
 
-**Windows alternative — 7-Zip:**
-
-1. Right-click → 7-Zip → Add to archive
-2. Archive format: **gzip**
-3. Click OK
+**Needs WSL** (one-time): `wsl --install -d Debian` in an admin PowerShell. On a PC
+without virtualization use WSL 1: enable the "Windows Subsystem for Linux" feature
+(`dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all`,
+reboot), `wsl --set-default-version 1`, then `wsl --install -d Debian`. Debian
+already includes e2fsprogs/fdisk. Different distro name: set `PISONEX_WSL_DISTRO`.
 
 #### 3c. Verify
 
-The output file should be 800 MB – 1.5 GB. If it's much larger, something
-went wrong (likely fstrim was skipped). If much smaller, also suspicious —
-sanity-check by opening the archive and confirming the inner file is the
-full ~31 GB.
-
-This `.img.gz` (or `.zip`) is your shipping artifact. Record its checksum
-next to the Windows installers so customers can verify the download:
-
-```bash
-sha256sum pisonex-v1.0.7.img.gz >> SHA256SUMS.txt
-```
+Flash the `.img.gz` to a **spare** card (it should show ~2.4 GB in Etcher), boot it,
+and check **Overview → Server Health → Disk** shows about the card's full size
+(reboot once if it still shows ~2.3 GB — Armbian sometimes finishes the resize on
+the second boot). See [Smoke testing the image](#smoke-testing-the-image).
 
 ### Phase 4 — Restore dev environment
 
@@ -372,11 +358,11 @@ dev Orange Pi (with dev SD card from your snapshot)
    ▼
 Phase 1 — snapshot dev SD → dev-backup-YYYY-MM-DD.img
 Phase 2 — make-release.sh --commit (RELEASE_VERSION=v1.1)
-Phase 3 — read SD + compress → pisonex-v1.0.7.img.gz
+Phase 3 — read SD → release.py image → pisonex-opi-one-v<ver>.img.gz
 Phase 4 — restore dev-backup → resume work
    │
    ▼
-Distribute pisonex-v1.0.7.img.gz → customers back up, re-flash, restore
+Distribute pisonex-opi-one-v<ver>.img.gz → customers back up, re-flash, restore
 ```
 
 **Customer impact of each release:**
@@ -526,13 +512,11 @@ customer counts; revisit at ~10 deployed devices.
 
 ### How big does a customer's SD card need to be?
 
-**32 GB minimum.** The raw image is the full size of the SD card it was
-made from (31 GB for a 32 GB card). Etcher refuses to flash an image
-larger than the target card, so a customer with a 16 GB card cannot use
-this image as-is. If you need to support smaller cards, look at
-[PiShrink](https://github.com/Drewsif/PiShrink) — it shrinks the
-partition to actual data (~4 GB), and the resulting image will flash to
-any 8 GB+ card.
+**8 GB recommended, 4 GB works.** Phase 3b shrinks the image to its data
+(~2.4 GB), and Armbian's resize service grows it to the whole card on first
+boot. An image that was *not* shrunk is the full size of the card it was read
+from, and Etcher refuses cards smaller than that — so always run
+`release.py image`.
 
 ### Why is the compressed image so small (~1 GB)?
 

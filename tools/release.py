@@ -26,9 +26,16 @@ needs the `.\` prefix).
     python tools/release.py build --client      only the client installer
     python tools/release.py build --skip-tests  skip the smoke test gate (not recommended)
     python tools/release.py notes               print release notes since the last tag
+    python tools/release.py image <card.img>    shrink + gzip an Orange Pi SD image (WSL)
 
 A finished build lands in  build/output/v<version>/  with SHA256SUMS.txt and
 RELEASE_NOTES.md next to the installers.
+
+`image` takes the .img that Win32 Disk Imager read from a card prepared with
+deploy/make-release.sh, shrinks it to its data (~2.4 GB instead of the card size,
+so Etcher flashes it ~6x faster) with Armbian's grow-on-first-boot enabled, and
+writes build/output/v<version>/pisonex-opi-one-v<version>.img.gz. It runs
+tools/shrink-image.sh in WSL (distro "Debian", or set PISONEX_WSL_DISTRO).
 """
 
 from __future__ import annotations
@@ -193,7 +200,9 @@ def next_version(current: str, part: str) -> str:
 # ── git helpers ───────────────────────────────────────────────────────────────
 
 def _git(*args: str, cwd: Path = ROOT) -> str:
-    r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    # git emits UTF-8; the Windows default (cp1252) turned "café" into "cafÃ©".
+    r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
@@ -275,16 +284,7 @@ def build(version: str, server: bool, client: bool, skip_tests: bool, allow_dirt
         shutil.move(str(built), dest)
         produced.append(dest)
 
-    sums = release_dir / "SHA256SUMS.txt"
-    existing = {}
-    if sums.exists():
-        for line in sums.read_text(encoding="utf-8").splitlines():
-            if "  " in line:
-                h, n = line.split("  ", 1)
-                existing[n] = h
-    for p in produced:
-        existing[p.name] = hashlib.sha256(p.read_bytes()).hexdigest()
-    sums.write_text("".join(f"{h}  {n}\n" for n, h in sorted(existing.items())), encoding="utf-8")
+    _record_checksums(release_dir, produced)
     (release_dir / "RELEASE_NOTES.md").write_text(release_notes(version), encoding="utf-8")
 
     print("\n" + "=" * 60)
@@ -304,6 +304,64 @@ def build(version: str, server: bool, client: bool, skip_tests: bool, allow_dirt
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _record_checksums(release_dir: Path, files: list[Path]):
+    """Add/refresh `files` in release_dir/SHA256SUMS.txt, keeping other entries."""
+    sums = release_dir / "SHA256SUMS.txt"
+    existing = {}
+    if sums.exists():
+        for line in sums.read_text(encoding="utf-8").splitlines():
+            if "  " in line:
+                h, n = line.split("  ", 1)
+                existing[n] = h
+    for p in files:
+        existing[p.name] = _sha256(p)
+    # LF, so `sha256sum -c SHA256SUMS.txt` also works on Linux / Git Bash.
+    sums.write_text("".join(f"{h}  {n}\n" for n, h in sorted(existing.items())),
+                    encoding="utf-8", newline="\n")
+
+
+def _wsl_path(p: Path) -> str:
+    """C:\\a b\\c.img -> /mnt/c/a b/c.img (WSL's default drive mounts)."""
+    p = p.resolve()
+    if not p.drive or p.drive[1:] != ":":
+        raise SystemExit(f"not a local drive path: {p}")
+    return f"/mnt/{p.drive[0].lower()}/" + "/".join(p.parts[1:])
+
+
+def shrink_image(version: str, card_img: Path, out: Path | None = None) -> int:
+    if not card_img.is_file():
+        print(f"Image not found: {card_img}")
+        return 1
+    if not shutil.which("wsl.exe"):
+        print("WSL is not installed. In an admin PowerShell: wsl --install -d Debian\n"
+              "(no virtualization? first: wsl --set-default-version 1)")
+        return 1
+    distro = os.environ.get("PISONEX_WSL_DISTRO", "Debian")
+    out = (out or BUILD / "output" / f"v{version}" / f"pisonex-opi-one-v{version}.img.gz").resolve()
+    release_dir = out.parent
+    release_dir.mkdir(parents=True, exist_ok=True)
+    script = ROOT / "tools" / "shrink-image.sh"
+    print(f"Shrinking {card_img.name} -> {out}  (WSL: {distro})")
+    rc = subprocess.run(["wsl.exe", "-d", distro, "-u", "root", "--", "bash",
+                         _wsl_path(script), _wsl_path(card_img), _wsl_path(out), version]).returncode
+    if rc != 0 or not out.exists():
+        print(f"\nSHRINK FAILED (exit {rc}) — the input image was not modified.")
+        return 1
+    _record_checksums(release_dir, [out])
+    print(f"\nDone: {out}\n  SHA256SUMS.txt updated.\n"
+          "  Next: flash it to a spare card, boot it, and check that Overview -> Server Health -> Disk\n"
+          "  shows about the card's full size (reboot once if it still shows ~2.3 GB).")
+    return 0
+
+
 def main() -> int:
     # Windows consoles default to cp1252, which can't print the dashes/peso signs used here.
     if hasattr(sys.stdout, "reconfigure"):
@@ -320,6 +378,9 @@ def main() -> int:
     bl.add_argument("--skip-tests", action="store_true")
     bl.add_argument("--allow-dirty", action="store_true", help="build even with uncommitted changes")
     sub.add_parser("notes", help="print release notes since the last v* tag")
+    im = sub.add_parser("image", help="shrink + gzip an Orange Pi SD image read with Win32 Disk Imager")
+    im.add_argument("img", type=Path, help="the .img read from a card prepared with make-release.sh")
+    im.add_argument("--out", type=Path, help="output .img.gz (default: build/output/v<version>/pisonex-opi-one-v<version>.img.gz)")
     args = ap.parse_args()
 
     version = read_version()
@@ -366,6 +427,9 @@ def main() -> int:
     if args.cmd == "notes":
         print(release_notes(version))
         return 0
+
+    if args.cmd == "image":
+        return shrink_image(version, args.img, args.out)
     return 0
 
 

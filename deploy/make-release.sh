@@ -307,6 +307,17 @@ done
 exec_or_plan "hostnamectl set-hostname pisonex 2>/dev/null || echo pisonex > /etc/hostname"
 exec_or_plan "sed -i 's/^127\\.0\\.1\\.1.*/127.0.1.1\tpisonex/' /etc/hosts"
 exec_or_plan "rm -f /var/lib/dbus/machine-id"
+# Armbian's resize service switched itself off after the dev board's first boot.
+# Turn it back on: tools/shrink-image.sh shrinks the image to ~2.4 GB, and this
+# grows it to the customer's full card on first boot. (On a full-size card it
+# just finds nothing to grow and switches itself off again.)
+if [ -f /usr/lib/systemd/system/armbian-resize-filesystem.service ] || \
+   [ -f /lib/systemd/system/armbian-resize-filesystem.service ]; then
+    exec_or_plan "systemctl enable armbian-resize-filesystem >/dev/null 2>&1"
+    [ -e /root/.no_rootfs_resize ] && exec_or_plan "rm -f /root/.no_rootfs_resize"
+else
+    warn "armbian-resize-filesystem not found — a shrunk image would not grow on first boot"
+fi
 ok "Shell + identity cleared"
 
 # ── 13. Clean apt cache + tmp dirs ───────────────────────────────────
